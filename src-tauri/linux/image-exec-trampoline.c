@@ -4,22 +4,23 @@
  * the directory, descriptors, signal mask, process group and ids the caller
  * asked for. It makes the payload, image and host decision of image-exec.h
  * for the caller's program there and execs it with the caller's argv and
- * environment (its own environment is the caller's envp).
+ * environment (its own environment is the caller's envp). It opens no
+ * descriptor of its own beyond the transient ones image_classify needs, and
+ * starts the program without them when none is available.
  *
- *   image-exec-trampoline SOCKET MODE PATH ROOT EXEC LIBRARY_PATH FILE ARGV...
+ *   image-exec-trampoline NONCE MODE PATH ROOT EXEC LIBRARY_PATH FILE ARGV...
  *
- * SOCKET is the abstract socket name the spawning process listens on; MODE is
- * spawn (FILE as posix_spawn names it) or spawnp (FILE searched in PATH as
+ * NONCE is eight hexadecimal digits from the spawning process; MODE is spawn
+ * (FILE as posix_spawn names it) or spawnp (FILE searched in PATH as
  * posix_spawnp does, without the shell fallback); PATH and LIBRARY_PATH are
  * the spawning process's values prefixed with P, or U when unset. A failed
- * exec sends its errno on the socket and exits 127; the spawning process
- * then reaps this process and returns the errno from posix_spawn. A
- * successful exec closes the socket. The program is linked statically, so no
- * LD_ variable and no host C library takes part in starting it.
+ * exec sets this process's name to NONCE, "e" and the errno in decimal, then
+ * exits 127; the spawning process reads the name from /proc/<pid>/stat. The
+ * program is linked statically, so no LD_ variable and no host C library
+ * takes part in starting it.
  */
 #define _GNU_SOURCE
-#include <sys/socket.h>
-#include <sys/un.h>
+#include <sys/prctl.h>
 
 #include "image-exec.h"
 
@@ -37,43 +38,22 @@ static const char *optional(const char *arg)
 	return arg[0] == 'P' ? arg + 1 : NULL;
 }
 
-static int connect_report(const char *name)
-{
-	struct sockaddr_un address;
-	size_t len = strlen(name);
-	if (len == 0 || len + 1 > sizeof address.sun_path)
-		return -1;
-	memset(&address, 0, sizeof address);
-	address.sun_family = AF_UNIX;
-	memcpy(address.sun_path + 1, name, len);
-	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-	if (fd < 0)
-		return -1;
-	socklen_t length = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + len);
-	while (connect(fd, (struct sockaddr *)&address, length) != 0) {
-		if (errno != EINTR) {
-			close(fd);
-			return -1;
-		}
-	}
-	return fd;
-}
-
 int main(int argc, char **argv)
 {
-	if (argc < 8)
+	if (argc < 8 || strlen(argv[1]) != 8)
 		return 127;
-	int report = connect_report(argv[1]);
-	if (report < 0)
-		_exit(127);
 	int use_path = strcmp(argv[2], "spawnp") == 0;
 	struct image im = { argv[4][0] == '/' ? argv[4] : NULL, argv[5], optional(argv[6]) };
 	const char *file = argv[7];
 	char **args = argv + 8;
 	int err = use_path ? image_search(&im, file, args, environ, optional(argv[3]), 0, launch_execve, NULL)
 	                   : image_start(&im, file, args, environ, launch_execve, NULL);
-	if (err > 0)
-		while (send(report, &err, sizeof err, MSG_NOSIGNAL) < 0 && errno == EINTR)
-			;
+	if (err > 0) {
+		char name[16];
+		memcpy(name, argv[1], 8);
+		name[8] = 'e';
+		image_decimal(name + 9, (unsigned long)err);
+		prctl(PR_SET_NAME, name, 0, 0, 0);
+	}
 	_exit(127);
 }

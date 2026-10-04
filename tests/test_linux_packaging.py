@@ -163,17 +163,19 @@ def test_the_exec_library_moves_payload_programs_onto_the_image_loader():
     for symbol in ("int execve(", "int execv(", "int execvp(", "int execvpe(", "int execl(", "int execlp(", "int execle(",
                    "int posix_spawn(", "int posix_spawnp("):
         assert symbol in library, symbol
-    for rule in ("R1.", "R2.", "R3.", "R4."):
+    for rule in ("R1.", "R2.", "R3.", "R4.", "R5.", "R6."):
         assert rule in library, rule
     for needle in ("SPECTRAPDF_IMAGE_ROOT", "SPECTRAPDF_IMAGE_EXEC", "SPECTRAPDF_IMAGE_LIBRARY_PATH", '#include "image-exec.h"',
-                   "spawn_in_child", "SO_PEERCRED"):
+                   "spawn_in_child", "WNOWAIT", "image_path_walk(file, path, reaches_image"):
         assert needle in library, needle
     for needle in ('"--preload"', '"--library-path"', '"--argv0"', "PT_INTERP", '"/lib/spectrapdf/"', "ENOEXEC", "image_script",
-                   '"/lib/image-exec/image-exec-trampoline"', "image_argument_limit"):
+                   '"/lib/image-exec/image-exec-trampoline"', "image_argument_limit", "image_buffer_get", "MAP_ANONYMOUS",
+                   "image_path_walk(file, path, image_search_visit"):
         assert needle in core, needle
-    for limit in ("MAX_ARGS", "MAX_ENV", "LIST_SIZE", "SEARCH_SIZE", "malloc("):
-        assert limit not in library and limit not in core and limit not in trampoline, limit
+    for banned in ("MAX_ARGS", "MAX_ENV", "LIST_SIZE", "SEARCH_SIZE", "malloc(", "socket(", "sigaction(", "sigprocmask("):
+        assert banned not in library and banned not in core and banned not in trampoline, banned
     assert '#include "image-exec.h"' in trampoline
+    assert "PR_SET_NAME" in trampoline
     build = _text(SCRIPTS / "build-appimage.sh")
     assert 'gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec.so" "$IMAGE_EXEC_SOURCE"' in build
     assert ('gcc -static -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec-trampoline" '

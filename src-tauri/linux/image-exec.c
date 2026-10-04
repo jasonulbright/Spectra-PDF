@@ -15,11 +15,11 @@
  * The wrapper is transparent for every other start:
  *
  * R1. No limit is lower than the C library's. argv and envp are counted and
- *     the arrays a rewrite needs are variable-length arrays of exactly that
- *     size. A rewrite whose pointer arrays reach the kernel's argument limit
- *     is not built: a payload start fails with E2BIG, the kernel's answer for
- *     the rewritten start, and a host start goes to the kernel unfiltered,
- *     which refuses it with the errno it gives the filtered one.
+ *     the arrays a rewrite needs have exactly that size. A rewrite whose
+ *     pointer arrays reach the kernel's argument limit is not built: a
+ *     payload start fails with E2BIG, the kernel's answer for the rewritten
+ *     start, and a host start goes to the kernel unfiltered, which refuses it
+ *     with the errno it gives the filtered one.
  * R2. A host program receives the caller's own argv pointer, and the
  *     caller's own envp pointer when no entry is removed. A filtered copy
  *     exists only when an LD_ variable or a variable naming the image is
@@ -31,29 +31,48 @@
  *     program name is relative, and every posix_spawnp PATH search that can
  *     reach a file inside the image, spawn the static program
  *     lib/image-exec/image-exec-trampoline of the image with the caller's
- *     file actions and attributes. It
- *     makes the payload, image and host decision after the actions, then
- *     execs. It connects to an abstract socket this library listens on and
- *     sends the errno of a failed exec, so posix_spawn fails with that errno
- *     and the child is reaped, as glibc does; a successful exec closes the
- *     socket. An absolute name, a relative name without file actions, and a
- *     search that reaches only host files keep the direct path.
- * R4. execvp, execvpe and execlp follow glibc's __execvpe_common: a name
- *     without a slash is tried in every PATH entry, ENOEXEC runs the file
- *     through /bin/sh, EACCES, ENOENT, ESTALE, ENOTDIR, ENODEV and ETIMEDOUT
- *     continue the search, EACCES is reported when one was seen. posix_spawnp
- *     searches the same way without the shell fallback (the default symbol
+ *     file actions and attributes. It makes the payload, image and host
+ *     decision after the actions, then execs. An absolute name, a relative
+ *     name without file actions, and a search that reaches only host files
+ *     keep the direct path, where the C library's posix_spawn reports errors.
+ * R4. execvp, execvpe and execlp follow glibc's __execvpe_common, and
+ *     posix_spawnp its search without the shell fallback (the default symbol
  *     version of glibc 2.15 and later, which the image carries), with the
- *     caller's PATH, in the child. A name without a slash is relative to the
- *     current directory for execve, execv, execl, execle and posix_spawn.
+ *     caller's PATH, in the child. image_path_walk in image-exec.h builds the
+ *     candidates for both, and for the check that routes a search to the
+ *     trampoline. A name without a slash is relative to the current directory
+ *     for execve, execv, execl, execle and posix_spawn.
+ * R5. The wrapper adds no descriptor to a spawned child, and the trampoline
+ *     needs none to run the requested program. The caller's file actions see
+ *     the descriptors and RLIMIT_NOFILE a native spawn gives them; so does the
+ *     started program. The trampoline reports a failed exec through its own
+ *     process: it sets its name (comm) to a marker that carries a random
+ *     nonce from this library and the errno, then exits 127. This library
+ *     watches the child without a signal handler and without touching the
+ *     signal mask: waitid(WEXITED | WNOHANG | WNOWAIT) and a stat of
+ *     /proc/<pid>/exe, which changes when the trampoline's exec succeeds. A
+ *     child that exits with status 127 and the marker failed its exec:
+ *     posix_spawn reaps it and returns the errno, as glibc does. Any other
+ *     exit is the program's own, left for the caller to reap. A program
+ *     cannot name itself with the nonce, so the two never coincide. Without
+ *     /proc, or when the zombie's name cannot be read, a failed exec shows as
+ *     exit status 127, which POSIX allows for an exec that fails after the
+ *     child exists.
+ * R6. No stack array is sized by caller data beyond a fixed bound:
+ *     IMAGE_STACK_BYTES (1 KiB, 128 pointers) for pointer arrays and short
+ *     strings, PATH_MAX for path strings. Larger arrays are anonymous
+ *     mappings, released on every path that returns (image_buffer_get in
+ *     image-exec.h, which also states what a vfork child leaves mapped after
+ *     a successful exec). Fixed buffers are PATH_MAX (a resolved name) and
+ *     PATH_MAX + NAME_MAX + 2 (a PATH candidate, glibc's own bound).
  *
  * The exec wrappers may run in a vfork child: the next functions are bound
- * once at load, and image-exec.h allocates on the stack only. system(3) and
- * popen(3) start /bin/sh through the C library's internal spawn, which no
- * preload intercepts; a program the shell then starts is not moved.
- * fexecve(3) and execveat(2) are not wrapped: they name a program by file
- * descriptor, and neither LibreOffice's process launcher nor the engine's
- * subprocess module calls them.
+ * once at load, and image-exec.h neither calls malloc nor needs a signal.
+ * system(3) and popen(3) start /bin/sh through the C library's internal
+ * spawn, which no preload intercepts; a program the shell then starts is not
+ * moved. fexecve(3) and execveat(2) are not wrapped: they name a program by
+ * file descriptor, and neither LibreOffice's process launcher nor the
+ * engine's subprocess module calls them.
  *
  * Environment, set by the launchers:
  *   SPECTRAPDF_IMAGE_ROOT          the image's mount point
@@ -62,14 +81,12 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <poll.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
-#include <sys/socket.h>
-#include <sys/syscall.h>
-#include <sys/un.h>
+#include <sys/random.h>
 #include <sys/wait.h>
+#include <time.h>
 
 #include "image-exec.h"
 
@@ -152,7 +169,7 @@ int execvp(const char *file, char *const argv[])
 	return search_exec(file, argv, environ);
 }
 
-/* glibc's execl family: the variadic list counted, then copied to the stack. */
+/* glibc's execl family: the variadic list counted, then copied. */
 #define COUNT_ARGS(first, argc)                                         \
 	do {                                                            \
 		va_list ap;                                             \
@@ -183,36 +200,69 @@ int execvp(const char *file, char *const argv[])
 		va_end(ap);                                             \
 	} while (0)
 
+/* `argc` + 1 pointers, or NULL with errno set to what the start would report. */
+static char **list_buffer(struct image_buffer *b, void *local, size_t argc)
+{
+	if (image_pointers_refused(argc + 1, image_argument_limit())) {
+		errno = E2BIG;
+		return NULL;
+	}
+	char **args = image_buffer_get(b, local, IMAGE_STACK_BYTES, (argc + 1) * sizeof(char *));
+	if (!args)
+		errno = ENOMEM;
+	return args;
+}
+
+static int list_done(struct image_buffer *b, int result)
+{
+	int saved = errno;
+	image_buffer_put(b);
+	errno = saved;
+	return result;
+}
+
 int execl(const char *path, const char *arg, ...)
 {
 	size_t argc;
 	COUNT_ARGS(arg, argc);
-	char *args[argc + 1];
+	_Alignas(16) char local[IMAGE_STACK_BYTES];
+	struct image_buffer b;
+	char **args = list_buffer(&b, local, argc);
+	if (!args)
+		return -1;
 	char **unused = NULL;
 	COPY_ARGS(arg, args, argc, 0, unused);
 	(void)unused;
-	return start_exec(path, args, environ);
+	return list_done(&b, start_exec(path, args, environ));
 }
 
 int execlp(const char *file, const char *arg, ...)
 {
 	size_t argc;
 	COUNT_ARGS(arg, argc);
-	char *args[argc + 1];
+	_Alignas(16) char local[IMAGE_STACK_BYTES];
+	struct image_buffer b;
+	char **args = list_buffer(&b, local, argc);
+	if (!args)
+		return -1;
 	char **unused = NULL;
 	COPY_ARGS(arg, args, argc, 0, unused);
 	(void)unused;
-	return search_exec(file, args, environ);
+	return list_done(&b, search_exec(file, args, environ));
 }
 
 int execle(const char *path, const char *arg, ...)
 {
 	size_t argc;
 	COUNT_ARGS(arg, argc);
-	char *args[argc + 1];
+	_Alignas(16) char local[IMAGE_STACK_BYTES];
+	struct image_buffer b;
+	char **args = list_buffer(&b, local, argc);
+	if (!args)
+		return -1;
 	char **envp = environ;
 	COPY_ARGS(arg, args, argc, 1, envp);
-	return start_exec(path, args, envp);
+	return list_done(&b, start_exec(path, args, envp));
 }
 
 struct spawn_call {
@@ -233,77 +283,117 @@ static int has_actions(const posix_spawn_file_actions_t *actions)
 	return actions && actions->__used > 0;
 }
 
-/* Whether a PATH entry glibc's search tries for `file` names a file inside the image. */
-static int search_reaches_image(const struct image *im, const char *file, const char *path)
-{
-	if (!path)
-		path = IMAGE_DEFAULT_PATH;
-	size_t file_len = strnlen(file, NAME_MAX + 1) + 1;
-	size_t path_len = strnlen(path, PATH_MAX - 1) + 1;
-	if (file_len - 1 > NAME_MAX)
-		return 0;
-	char buffer[path_len + file_len + 1];
+struct reach_state {
+	const struct image *im;
 	char real[PATH_MAX];
-	const char *subp;
-	for (const char *p = path;; p = subp) {
-		subp = strchrnul(p, ':');
-		if ((size_t)(subp - p) >= path_len) {
-			if (*subp == '\0')
-				return 0;
-			continue;
-		}
-		char *pend = mempcpy(buffer, p, (size_t)(subp - p));
-		*pend = '/';
-		memcpy(pend + (p < subp), file, file_len);
-		if (image_classify(im, buffer, real) != IMAGE_HOST)
-			return 1;
-		if (*subp++ == '\0')
-			return 0;
-	}
+};
+
+static int reaches_image(const char *candidate, void *context)
+{
+	struct reach_state *s = context;
+	return image_classify(s->im, candidate, s->real) != IMAGE_HOST;
 }
 
-static int child_exited(pid_t child)
+/* Whether a candidate glibc's PATH search tries for `file` names a file inside the image. */
+static int search_reaches_image(const struct image *im, const char *file, const char *path)
 {
-	siginfo_t info;
-	memset(&info, 0, sizeof info);
-	return waitid(P_PID, (id_t)child, &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == child;
+	if (strnlen(file, NAME_MAX + 1) > NAME_MAX)
+		return 0;
+	struct reach_state s;
+	s.im = im;
+	return image_path_walk(file, path, reaches_image, &s);
+}
+
+/* Eight hexadecimal digits the started program cannot predict. */
+static void make_nonce(char nonce[9])
+{
+	static unsigned long counter;
+	unsigned char bytes[4];
+	if (getrandom(bytes, sizeof bytes, GRND_NONBLOCK) != (ssize_t)sizeof bytes) {
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		unsigned long mix = (unsigned long)now.tv_nsec * 2654435761UL ^ (unsigned long)getpid() << 16 ^
+		                    __atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED);
+		memcpy(bytes, &mix, sizeof bytes);
+	}
+	static const char hex[] = "0123456789abcdef";
+	for (int i = 0; i < 4; i++) {
+		nonce[2 * i] = hex[bytes[i] >> 4];
+		nonce[2 * i + 1] = hex[bytes[i] & 15];
+	}
+	nonce[8] = '\0';
 }
 
 /*
- * Waits until the trampoline `child` connects to `listener` or exits.
- * Returns the connection, or -1 when the child exited without connecting.
+ * The errno the exited trampoline `child` carries in its name, or 0 when the
+ * exit is not the trampoline's failed exec.
  */
-static int await_trampoline(int listener, pid_t child)
+static int failed_exec_errno(pid_t child, const siginfo_t *info, const char *nonce)
 {
-	int pidfd = -1;
-#ifdef SYS_pidfd_open
-	pidfd = (int)syscall(SYS_pidfd_open, child, 0);
-#endif
-	int connection = -1;
+	if (info->si_code != CLD_EXITED || info->si_status != 127)
+		return 0;
+	char stat_path[48];
+	image_copy(image_decimal(image_copy(stat_path, "/proc/"), (unsigned long)child), "/stat");
+	int fd = open(stat_path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return 0;
+	char text[128];
+	ssize_t got = read(fd, text, sizeof text - 1);
+	close(fd);
+	if (got <= 0)
+		return 0;
+	text[got] = '\0';
+	const char *name = strchr(text, '(');
+	if (!name || strncmp(name + 1, nonce, 8) != 0 || name[9] != 'e')
+		return 0;
+	int err = 0;
+	for (const char *d = name + 10; *d >= '0' && *d <= '9'; d++)
+		err = err * 10 + (*d - '0');
+	return err;
+}
+
+/*
+ * Waits until the trampoline `child` has executed the requested program or
+ * exited. Returns the errno of a failed exec, or 0.
+ */
+static int await_exec(pid_t child, const struct stat *trampoline, const char *nonce)
+{
+	char exe[48];
+	image_copy(image_decimal(image_copy(exe, "/proc/"), (unsigned long)child), "/exe");
+	struct timespec delay = { 0, 20000 };
 	for (;;) {
-		struct pollfd fds[2] = { { listener, POLLIN, 0 }, { pidfd, POLLIN, 0 } };
-		int ready = poll(fds, pidfd >= 0 ? 2 : 1, pidfd >= 0 ? -1 : 10);
-		if (ready < 0 && errno != EINTR)
-			break;
-		if (ready > 0 && (fds[0].revents & POLLIN)) {
-			int c = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
-			if (c >= 0) {
-				struct ucred cred;
-				socklen_t len = sizeof cred;
-				if (getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0 && cred.pid == child) {
-					connection = c;
-					break;
-				}
-				close(c);
-			}
-			continue;
+		siginfo_t info;
+		memset(&info, 0, sizeof info);
+		if (waitid(P_PID, (id_t)child, &info, WEXITED | WNOHANG | WNOWAIT) != 0) {
+			if (errno == EINTR)
+				continue;
+			return 0;
 		}
-		if (pidfd >= 0 ? ready > 0 && (fds[1].revents & POLLIN) : child_exited(child))
-			break;
+		if (info.si_pid == child)
+			return failed_exec_errno(child, &info, nonce);
+		struct stat st;
+		if (stat(exe, &st) == 0) {
+			if (st.st_dev != trampoline->st_dev || st.st_ino != trampoline->st_ino)
+				return 0;
+		} else if (errno == EACCES || errno == EPERM) {
+			return 0;
+		}
+		nanosleep(&delay, NULL);
+		if (delay.tv_nsec < 1000000)
+			delay.tv_nsec *= 2;
 	}
-	if (pidfd >= 0)
-		close(pidfd);
-	return connection;
+}
+
+/* A copy of `value` behind a P, or U for a value that is not set. */
+static char *optional_arg(struct image_buffer *b, char *local, const char *value)
+{
+	size_t len = value ? strlen(value) : 0;
+	char *out = image_buffer_get(b, local, PATH_MAX, len + 2);
+	if (out) {
+		out[0] = value ? 'P' : 'U';
+		memcpy(out + 1, value ? value : "", len + 1);
+	}
+	return out;
 }
 
 /*
@@ -317,79 +407,49 @@ static int spawn_in_child(const struct image *im, int use_path, pid_t *pid, cons
 	size_t argc = image_count(argv);
 	if (image_pointers_refused(8 + argc + image_count(envp), image_argument_limit()))
 		return E2BIG;
-	char trampoline[strlen(im->root) + sizeof IMAGE_TRAMPOLINE];
-	image_copy(image_copy(trampoline, im->root), IMAGE_TRAMPOLINE);
-
-	int listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-	if (listener < 0)
-		return errno;
-	struct sockaddr_un address;
-	memset(&address, 0, sizeof address);
-	address.sun_family = AF_UNIX;
-	socklen_t length = sizeof(sa_family_t);
-	if (bind(listener, (struct sockaddr *)&address, length) != 0 || listen(listener, 4) != 0 ||
-	    (length = sizeof address, getsockname(listener, (struct sockaddr *)&address, &length) != 0) ||
-	    length <= offsetof(struct sockaddr_un, sun_path) + 1) {
-		int err = errno;
-		close(listener);
-		return err ? err : EADDRNOTAVAIL;
-	}
-	size_t name_len = length - offsetof(struct sockaddr_un, sun_path) - 1;
-	char name[name_len + 1];
-	memcpy(name, address.sun_path + 1, name_len);
-	name[name_len] = '\0';
-
-	const char *path = getenv("PATH");
-	size_t path_len = path ? strlen(path) : 0;
-	char path_arg[path_len + 2];
-	path_arg[0] = path ? 'P' : 'U';
-	memcpy(path_arg + 1, path ? path : "", path_len + 1);
-	size_t library_len = im->library_path ? strlen(im->library_path) : 0;
-	char library_arg[library_len + 2];
-	library_arg[0] = im->library_path ? 'P' : 'U';
-	memcpy(library_arg + 1, im->library_path ? im->library_path : "", library_len + 1);
-
-	char *args[8 + argc + 1];
-	size_t n = 0;
-	args[n++] = trampoline;
-	args[n++] = name;
-	args[n++] = use_path ? "spawnp" : "spawn";
-	args[n++] = path_arg;
-	args[n++] = (char *)im->root;
-	args[n++] = (char *)im->self;
-	args[n++] = library_arg;
-	args[n++] = (char *)file;
-	for (size_t i = 0; i < argc; i++)
-		args[n++] = argv[i];
-	args[n] = NULL;
-
+	char trampoline_local[IMAGE_STACK_BYTES], path_local[PATH_MAX], library_local[PATH_MAX];
+	_Alignas(16) char args_local[IMAGE_STACK_BYTES];
+	struct image_buffer tb, pb, lb, ab;
+	char *trampoline = image_buffer_get(&tb, trampoline_local, sizeof trampoline_local,
+	                                    strlen(im->root) + sizeof IMAGE_TRAMPOLINE);
+	char *path_arg = optional_arg(&pb, path_local, getenv("PATH"));
+	char *library_arg = optional_arg(&lb, library_local, im->library_path);
+	char **args = image_buffer_get(&ab, args_local, sizeof args_local, (8 + argc + 1) * sizeof(char *));
+	int err = ENOMEM;
 	pid_t child = -1;
-	int err = next_spawn(&child, trampoline, actions, attr, args, envp);
-	if (err != 0) {
-		close(listener);
+	struct stat trampoline_stat;
+	int observable = 0;
+	char nonce[9];
+	if (trampoline && path_arg && library_arg && args) {
+		image_copy(image_copy(trampoline, im->root), IMAGE_TRAMPOLINE);
+		struct stat self_exe;
+		observable = stat(trampoline, &trampoline_stat) == 0 && stat("/proc/self/exe", &self_exe) == 0;
+		make_nonce(nonce);
+		size_t n = 0;
+		args[n++] = trampoline;
+		args[n++] = nonce;
+		args[n++] = use_path ? "spawnp" : "spawn";
+		args[n++] = path_arg;
+		args[n++] = (char *)im->root;
+		args[n++] = (char *)im->self;
+		args[n++] = library_arg;
+		args[n++] = (char *)file;
+		for (size_t i = 0; i < argc; i++)
+			args[n++] = argv[i];
+		args[n] = NULL;
+		err = next_spawn(&child, trampoline, actions, attr, args, envp);
+	}
+	image_buffer_put(&ab);
+	image_buffer_put(&lb);
+	image_buffer_put(&pb);
+	image_buffer_put(&tb);
+	if (err != 0)
 		return err;
-	}
-	int connection = await_trampoline(listener, child);
-	close(listener);
-	int child_err = 0;
-	if (connection >= 0) {
-		size_t got = 0;
-		while (got < sizeof child_err) {
-			ssize_t r = read(connection, (char *)&child_err + got, sizeof child_err - got);
-			if (r < 0 && errno == EINTR)
-				continue;
-			if (r <= 0)
-				break;
-			got += (size_t)r;
-		}
-		close(connection);
-		if (got != sizeof child_err)
-			child_err = 0;
-	}
-	if (child_err > 0) {
+	int exec_err = observable ? await_exec(child, &trampoline_stat, nonce) : 0;
+	if (exec_err > 0) {
 		while (waitpid(child, NULL, 0) < 0 && errno == EINTR)
 			;
-		return child_err;
+		return exec_err;
 	}
 	if (pid)
 		*pid = child;

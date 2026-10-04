@@ -52,10 +52,12 @@ cat > "$WORK/caller.c" <<'EOF'
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -89,6 +91,26 @@ static char **many(const char *first, long count, const char *each)
 	for (long i = 1; i <= count; i++)
 		v[i] = (char *)each;
 	return v;
+}
+
+static const char *thread_mode, *thread_file;
+static long thread_count;
+
+/* Runs on a thread with a 64 KiB stack. */
+static void *small_stack(void *unused)
+{
+	(void)unused;
+	if (!strcmp(thread_mode, "thread-env")) {
+		char **env = many("X=x", thread_count - 1, "X=x");
+		env = realloc(env, ((size_t)thread_count + 2) * sizeof *env);
+		env[thread_count] = "LD_FOO=1";
+		env[thread_count + 1] = NULL;
+		char *one[] = { "custom-argv0", NULL };
+		execve(thread_file, one, env);
+	} else {
+		execv(thread_file, many("custom-argv0", thread_count, "x"));
+	}
+	return (void *)(long)report("execve", errno);
 }
 
 int main(int argc, char **argv)
@@ -170,6 +192,50 @@ int main(int argc, char **argv)
 		posix_spawn_file_actions_addchdir_np(&fa, extra);
 		return waited(posix_spawn(&pid, file, &fa, NULL, args, environ), &pid, "posix_spawn");
 	}
+	if (!strcmp(mode, "execvp-oversized") || !strcmp(mode, "spawnp-oversized")) {
+		size_t rest = strlen(extra);
+		char *path = malloc(4096 + 1 + rest + 1);
+		memset(path, 'a', 4096);
+		path[4096] = ':';
+		memcpy(path + 4097, extra, rest + 1);
+		setenv("PATH", path, 1);
+		if (!strcmp(mode, "spawnp-oversized"))
+			return waited(posix_spawnp(&pid, file, NULL, NULL, args, environ), &pid, "posix_spawnp");
+		execvp(file, args);
+		return report("execvp", errno);
+	}
+	if (!strcmp(mode, "execvp-unset") || !strcmp(mode, "spawnp-unset")) {
+		unsetenv("PATH");
+		if (!strcmp(mode, "spawnp-unset"))
+			return waited(posix_spawnp(&pid, file, NULL, NULL, args, environ), &pid, "posix_spawnp");
+		execvp(file, args);
+		return report("execvp", errno);
+	}
+	if (!strcmp(mode, "spawn-dup2-3") || !strcmp(mode, "spawn-nofile4")) {
+		close_range(3, ~0U, 0);
+		if (!strcmp(mode, "spawn-dup2-3")) {
+			posix_spawn_file_actions_adddup2(&fa, 3, 1);
+		} else {
+			struct rlimit four = { 4, 4 };
+			setrlimit(RLIMIT_NOFILE, &four);
+			posix_spawn_file_actions_addopen(&fa, 3, "/dev/null", O_RDONLY, 0);
+		}
+		return waited(posix_spawn(&pid, file, &fa, NULL, args, environ), &pid, "posix_spawn");
+	}
+	if (!strcmp(mode, "thread-env") || !strcmp(mode, "thread-argv")) {
+		thread_mode = mode;
+		thread_file = file;
+		thread_count = atol(extra);
+		pthread_attr_t attr;
+		pthread_attr_init(&attr);
+		pthread_attr_setstacksize(&attr, 64 * 1024);
+		pthread_t thread;
+		if (pthread_create(&thread, &attr, small_stack, NULL) != 0)
+			return report("pthread_create", errno);
+		void *result;
+		pthread_join(thread, &result);
+		return (int)(long)result;
+	}
 	return 2;
 }
 EOF
@@ -208,9 +274,10 @@ PAYLOAD_DIR="$ROOT/lib/spectrapdf/tool/bin"
 HOST_DIR="$WORK/host"
 mkdir -p "$PAYLOAD_DIR" "$HOST_DIR" "$WORK/bin" "$WORK/noexec" "$ROOT/lib/image-exec"
 cp "$TRAMPOLINE" "$ROOT/lib/image-exec/image-exec-trampoline"
-"$CC" -O2 -o "$WORK/caller" "$WORK/caller.c"
+"$CC" -O2 -pthread -o "$WORK/caller" "$WORK/caller.c"
 "$CC" -O2 -DTAG='"PAYLOAD"' -o "$PAYLOAD_DIR/helper" "$WORK/tagged.c"
 "$CC" -O2 -DTAG='"HOST"' -o "$HOST_DIR/helper" "$WORK/tagged.c"
+"$CC" -O2 -static -DTAG='"HOST"' -o "$HOST_DIR/static-helper" "$WORK/tagged.c"
 "$CC" -O2 -o "$WORK/bin/argcount" "$WORK/argcount.c"
 "$CC" -O2 -o "$WORK/bin/envcount" "$WORK/envcount.c"
 printf '#!/bin/sh\necho LOADER_USED >&2\nexec %s "$@"\n' "$SYSTEM_LOADER" > "$ROOT/lib/ld-linux-x86-64.so.2"
@@ -218,7 +285,10 @@ chmod 0755 "$ROOT/lib/ld-linux-x86-64.so.2"
 printf 'echo SCRIPT_OK\n' > "$WORK/bin/plain-script"
 printf 'echo SCRIPT_ARGC=$#\n' > "$HOST_DIR/argc-script"
 printf '#!/bin/sh\nexit 7\n' > "$HOST_DIR/exit7"
-chmod 0755 "$WORK/bin/plain-script" "$HOST_DIR/argc-script" "$HOST_DIR/exit7"
+printf '#!/bin/sh\nexit 127\n' > "$HOST_DIR/exit127"
+mkdir -p "$WORK/cwd"
+printf '#!/bin/sh\nexit 7\n' > "$WORK/cwd/true"
+chmod 0755 "$WORK/bin/plain-script" "$HOST_DIR/argc-script" "$HOST_DIR/exit7" "$HOST_DIR/exit127" "$WORK/cwd/true"
 printf 'echo NOT_EXECUTABLE\n' > "$WORK/noexec/plain-script"
 ln -s "$WORK/missing-target" "$WORK/dangling"
 
@@ -254,7 +324,7 @@ same() {
   elif [ "$loader" = no ] && grep -q LOADER_USED "$WORK/wrapped.err"; then
     fail "$name: the preloaded run used the image loader"
   else
-    echo "ok   $name"
+    echo "ok   $name [$native_line]"
   fi
   CASE_PATH="$DEFAULT_PATH"
 }
@@ -361,6 +431,31 @@ same "closefrom + chdir still fails posix_spawn with the exec's errno" no "$HOST
   "$CALLER" spawn-closefrom-chdir plain-script "$WORK/bin"
 same "a chdir to a missing directory fails posix_spawn" no "$PAYLOAD_DIR" 'posix_spawn failed: ENOENT rc=3' \
   "$CALLER" spawn-chdir helper "$WORK/missing"
+
+# The PATH walk, entry by entry as glibc's __execvpe_common builds it.
+same "an oversized PATH entry followed by /bin (execvp)" no "$WORK/cwd" '^ rc=(0|7)$' "$CALLER" execvp-oversized true /bin
+same "an oversized PATH entry followed by /bin (posix_spawnp)" no "$WORK/cwd" '^ rc=(0|7)$' "$CALLER" spawnp-oversized true /bin
+same "an oversized PATH entry before a payload directory (posix_spawnp)" yes "$PAYLOAD_DIR" "$PAYLOAD_LINE" "$CALLER" spawnp-oversized helper "$PAYLOAD_DIR"
+CASE_PATH=":/usr/bin"
+same "a leading empty PATH entry is the current directory" no "$HOST_DIR" "$HOST_LINE" "$CALLER" execvp helper
+CASE_PATH="/nonexistent::/usr/bin"
+same "a doubled colon in PATH is the current directory" no "$HOST_DIR" "$HOST_LINE" "$CALLER" execvp helper
+CASE_PATH="/nonexistent:"
+same "a trailing empty PATH entry is the current directory (posix_spawnp)" no "$HOST_DIR" "$HOST_LINE" "$CALLER" spawnp helper
+CASE_PATH=""
+same "an empty PATH is the current directory" no "$HOST_DIR" "$HOST_LINE" "$CALLER" execvp helper
+same "an unset PATH is /bin:/usr/bin (execvp)" no "$HOST_DIR" '^ rc=0$' "$CALLER" execvp-unset true
+same "an unset PATH is /bin:/usr/bin (posix_spawnp)" no "$HOST_DIR" '^ rc=0$' "$CALLER" spawnp-unset true
+same "a name longer than NAME_MAX" no "$WORK" 'execvp failed: ENAMETOOLONG rc=3' "$CALLER" execvp "$(printf '%0300d' 0)"
+
+# The trampoline adds no descriptor and no descriptor requirement.
+same "dup2 from a closed descriptor 3 fails as natively" no "$HOST_DIR" 'posix_spawn failed: EBADF rc=3' "$CALLER" spawn-dup2-3 ./helper
+same "an open action filling RLIMIT_NOFILE=4 still runs the program" no "$HOST_DIR" "$HOST_LINE" "$CALLER" spawn-nofile4 ./static-helper
+same "a program after chdir that exits 127 is not a failed exec" no "$PAYLOAD_DIR" '^ rc=127' "$CALLER" spawn-chdir ./exit127 "$HOST_DIR"
+
+# No caller-sized array on a small thread stack.
+same "a filtered 10,000-entry environment on a 64 KiB thread stack" no "$WORK" '^argc=1 rc=0' "$CALLER" thread-env "$WORK/bin/argcount" 10000
+same "a payload start with 10,000 arguments on a 64 KiB thread stack" yes "$WORK" '^PAYLOAD argv0=custom-argv0 argc=10001 rc=0' "$CALLER" thread-argv "$P" 10000
 
 # The image's variables leave a host program's environment.
 refuse "a host program is not moved onto the image loader (env)" 'LOADER_USED' "$CALLER" execv /usr/bin/env

@@ -429,6 +429,111 @@ def test_the_gate_never_runs_a_tree_that_fails_its_pins(tmp_path, named, tamper)
     assert named in "".join(refusal.split()), refusal
 
 
+_HELD_TREE_HARNESS = r"""
+param([string]$Script, [string]$Notices, [string]$Mode, [string]$Junction, [string]$Swap)
+$ErrorActionPreference = 'Stop'
+$source = Get-Content -LiteralPath $Script -Raw
+$prefix = $source.Substring(0, $source.IndexOf('if ($GateOnly) {'))
+. ([scriptblock]::Create($prefix)) -DestDir $Junction -Notices $Notices
+$real = ${function:Start-HeldProgram}
+if ($Mode -eq 'swap') {
+    Set-Item function:Start-HeldProgram {
+        cmd /c rmdir $Junction | Out-Null
+        cmd /c mklink /J $Junction $Swap | Out-Null
+        Write-Host "LAUNCH:$($args[0])"
+        & $real @args
+    }.GetNewClosure()
+} else {
+    Set-Item function:Start-HeldProgram {
+        Set-Content -LiteralPath (Join-Path $args[1] 'gswin64c.exe.local') -Value ''
+        & $real @args
+    }.GetNewClosure()
+}
+try {
+    $run = Invoke-BundledGs $Junction @('--version')
+    Write-Host "RAN:$($run.Code):$($run.Output -join '|')"
+} catch {
+    Write-Host "REFUSED:$($_.Exception.Message)"
+}
+"""
+
+
+def _held_tree_fixture(tmp_path):
+    import shutil
+
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    vendored = os.path.join(root, "resources", "ghostscript")
+    if not os.path.isfile(os.path.join(vendored, "gswin64c.exe")):
+        pytest.skip("no vendored resources/ghostscript in this checkout")
+    tree_a = tmp_path / "A"
+    shutil.copytree(vendored, tree_a)
+    tree_b = tmp_path / "B"
+    tree_b.mkdir()
+    shutil.copy(os.path.join(os.environ["SystemRoot"], "System32", "hostname.exe"), tree_b / "gswin64c.exe")
+    junction = tmp_path / "J"
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(tree_a)], check=True,
+                   capture_output=True)
+    return root, tree_a, tree_b, junction
+
+
+def _run_held_tree_harness(tmp_path, root, mode, junction, swap):
+    harness = tmp_path / "held-tree-harness.ps1"
+    harness.write_text(_HELD_TREE_HARNESS, encoding="utf-8")
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness),
+         "-Script", os.path.join(root, "scripts", "bundle-ghostscript.ps1"),
+         "-Notices", os.path.join(root, "THIRD-PARTY-LICENSES.md"),
+         "-Mode", mode, "-Junction", str(junction), "-Swap", str(swap)],
+        capture_output=True, text=True, timeout=120,
+    )
+
+
+def _remove_junction(junction):
+    if os.path.lexists(junction):
+        os.rmdir(junction)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the bundle script is Windows PowerShell")
+def test_a_junction_swapped_after_verification_still_runs_the_verified_bytes(tmp_path):
+    root, tree_a, tree_b, junction = _held_tree_fixture(tmp_path)
+    try:
+        run = _run_held_tree_harness(tmp_path, root, "swap", junction, tree_b)
+        out = run.stdout + run.stderr
+        launch = [line[len("LAUNCH:"):] for line in out.splitlines() if line.startswith("LAUNCH:")]
+        assert launch, out
+        assert os.path.samefile(launch[0], tree_a / "gswin64c.exe"), out
+        assert "RAN:0:10.08.0" in out, out
+    finally:
+        _remove_junction(junction)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the bundle script is Windows PowerShell")
+def test_a_file_added_beside_the_program_during_the_run_is_reported(tmp_path):
+    root, tree_a, tree_b, junction = _held_tree_fixture(tmp_path)
+    try:
+        run = _run_held_tree_harness(tmp_path, root, "add", junction, tree_b)
+        out = run.stdout + run.stderr
+        assert "REFUSED:" in out, out
+        assert "gswin64c.exe.local" in "".join(out.split()), out
+        assert "changed while the program ran" in out, out
+    finally:
+        _remove_junction(junction)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the bundle script is Windows PowerShell")
+def test_a_dest_dir_that_is_a_junction_to_a_valid_tree_passes_the_gate(tmp_path):
+    root, tree_a, tree_b, junction = _held_tree_fixture(tmp_path)
+    try:
+        gated = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+             os.path.join(root, "scripts", "bundle-ghostscript.ps1"), "-GateOnly", "-DestDir", str(junction)],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert gated.returncode == 0, gated.stdout + gated.stderr
+    finally:
+        _remove_junction(junction)
+
+
 def test_the_bundled_version_meets_the_minimum():
     script = os.path.join(
         os.path.dirname(__file__), "..", "scripts", "bundle-ghostscript.ps1"
