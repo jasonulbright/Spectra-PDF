@@ -1368,23 +1368,39 @@ class TestT9BareProgramFonts:
         assert cap.decode(b"\x41") == "A"
         assert cap.char_width("A") == 600
 
-    def test_type1_fontfile_recovers(self):
-        # A real Type1 program to read, taken from the Ghostscript the
-        # AUTHORITY resolved — the same `Resource/Font` tree every install
-        # carries. Sourcing it from a vendored directory would make this
-        # test disappear the moment the distribution stops shipping one,
-        # and what is under test here is the Type1 reader, not packaging.
-        import os
-        pfa = ""
-        if gs_axis.GS_PATH:
-            pfa = os.path.join(
-                os.path.dirname(os.path.dirname(gs_axis.GS_PATH)),
-                "Resource", "Font", "NimbusRoman-Regular",
-            )
-        if not pfa or not os.path.isfile(pfa):
-            pytest.skip(f"{gs_axis.PRESENT_AXIS_SKIP} (its Type1 fonts are the fixture)")
-        with open(pfa, "rb") as f:
-            raw = f.read()
+    def test_type1_fontfile_recovers(self, tmp_path):
+        # Generate a PDF 1.1 with Ghostscript's built-in Nimbus Roman face and
+        # extract its embedded Type1 program. The shipped Windows runtime keeps
+        # these resources in its ROM filesystem, not beside the executable.
+        import subprocess
+
+        if not gs_axis.GS_PATH:
+            pytest.skip(gs_axis.PRESENT_AXIS_SKIP)
+        generated = tmp_path / "type1-font-source.pdf"
+        result = subprocess.run(
+            [
+                gs_axis.GS_PATH,
+                "-q",
+                "-dNOPAUSE",
+                "-dBATCH",
+                "-sDEVICE=pdfwrite",
+                "-dEmbedAllFonts=true",
+                "-dSubsetFonts=false",
+                "-dCompatibilityLevel=1.1",
+                f"-sOutputFile={generated}",
+                "-c",
+                "/NimbusRoman-Regular findfont 24 scalefont setfont "
+                "72 72 moveto (Type1 fixture) show showpage",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        with pikepdf.open(generated) as source:
+            fonts = source.pages[0].obj["/Resources"]["/Font"]
+            source_font = next(font for font in fonts.values() if "/FontDescriptor" in font)
+            raw = source_font["/FontDescriptor"]["/FontFile"].read_bytes()
         pdf = pikepdf.new()
         font = self._font_with_program(pdf, "/FontFile", raw, "/Type1")
         cap = font_capability(font)
