@@ -16,6 +16,11 @@
 # licence file, examples\, the vendor's VC++ redistributable installer, the
 # uninstaller and $PLUGINSDIR.
 #
+# The gate's boundary: it proves that the three files that ran are the pinned
+# upstream bytes, read and executed from one real directory held open for the
+# whole check. A process that can write into that real directory while the
+# handles are held can only add files, which the post-run enumeration reports.
+#
 # Run before packaging:
 #   powershell -ExecutionPolicy Bypass -File scripts\bundle-ghostscript.ps1
 # Check an existing tree only (no download):
@@ -66,51 +71,123 @@ function Get-RowProblems {
     return @()
 }
 
-# The integrity check every execution depends on. It runs no program: it
-# enumerates the tree (refusing a missing, extra or nested entry) and hashes
-# each pinned file through a handle that denies writers and deleters. It
-# returns the problems and, when there are none, those open handles, so a
-# caller that keeps them open executes exactly the bytes it verified.
-function Open-VerifiedTree {
-    param([string]$Root)
-    $problems = @()
-    $handles = @()
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
-        return [pscustomobject]@{ Problems = @("  no tree at $Root"); Handles = @() }
+# Handles the gate holds while it checks and runs the tree. A directory opened
+# without delete sharing cannot be renamed, deleted or replaced while held,
+# and Windows refuses to rename any directory above a held file, so the final
+# path read from a held handle names the held object for as long as it is held.
+Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+public static class SpectraHeldTree {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security,
+        uint disposition, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+
+    public static SafeFileHandle OpenDirectory(string path) {
+        // FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE, shared for
+        // read and write but never delete, opened through any reparse point.
+        SafeFileHandle handle = CreateFileW(path, 0x0001 | 0x0080 | 0x00100000, 0x1 | 0x2, IntPtr.Zero,
+            3, 0x02000000, IntPtr.Zero);
+        if (handle.IsInvalid) {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), path);
+        }
+        return handle;
     }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force)) {
+
+    public static string FinalPath(SafeFileHandle handle) {
+        StringBuilder path = new StringBuilder(32768);
+        uint length = GetFinalPathNameByHandleW(handle, path, (uint)path.Capacity, 0);
+        if (length == 0 || length >= path.Capacity) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        string text = path.ToString();
+        if (text.StartsWith(@"\\?\UNC\")) { return @"\\" + text.Substring(8); }
+        if (text.StartsWith(@"\\?\")) { return text.Substring(4); }
+        return text;
+    }
+}
+"@
+
+# Entries in the real directory other than the pinned files: a folder, an
+# unpinned file, or a pinned name that is itself a reparse point.
+function Get-EntryProblems {
+    param([string]$Directory)
+    $problems = @()
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Directory -Force)) {
         if ($entry.PSIsContainer -or -not $ShippedSha256.Contains($entry.Name)) {
             $problems += "  $($entry.FullName): not a file this script ships"
+        } elseif ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            $problems += "  $($entry.FullName): a link, not the shipped file"
         }
     }
-    foreach ($name in $ShippedSha256.Keys) {
-        if (-not (Test-Path -LiteralPath (Join-Path $Root $name) -PathType Leaf)) {
-            $problems += "  $name missing from $Root"
-        }
-    }
-    if ($problems) {
-        return [pscustomobject]@{ Problems = $problems; Handles = @() }
-    }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
+    return $problems
+}
+
+# The integrity check every execution depends on. It runs no program. It
+# resolves the tree once to its real directory through a held handle,
+# enumerates that directory (refusing a missing, extra or nested entry) and
+# hashes each pinned file through a handle that denies writers and deleters,
+# opened inside that directory. It returns the problems and, when there are
+# none, the real directory and those open handles.
+function Open-VerifiedTree {
+    param([string]$Root)
+    $none = [pscustomobject]@{ Problems = @(); Handles = @(); Directory = ""; Exe = $null }
     try {
+        $directoryHandle = [SpectraHeldTree]::OpenDirectory($Root)
+    } catch {
+        $none.Problems = @("  no tree at ${Root}: $($_.Exception.Message)")
+        return $none
+    }
+    $handles = @($directoryHandle)
+    $problems = @()
+    $exeStream = $null
+    try {
+        $real = [SpectraHeldTree]::FinalPath($directoryHandle)
+        $problems += @(Get-EntryProblems $real)
         foreach ($name in $ShippedSha256.Keys) {
-            $path = (Get-Item -LiteralPath (Join-Path $Root $name)).FullName
-            $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open,
-                [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-            $handles += $stream
-            $actual = ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
-            if ($actual -ne $ShippedSha256[$name]) {
-                $problems += "  ${name}: SHA-256 $actual is not the pinned upstream $($ShippedSha256[$name])"
+            if (-not (Test-Path -LiteralPath (Join-Path $real $name) -PathType Leaf)) {
+                $problems += "  $name missing from $real"
             }
         }
-    } finally {
-        $sha.Dispose()
+        if (-not $problems) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                foreach ($name in $ShippedSha256.Keys) {
+                    $expected = Join-Path $real $name
+                    $stream = [System.IO.File]::Open($expected, [System.IO.FileMode]::Open,
+                        [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+                    $handles += $stream
+                    $opened = [SpectraHeldTree]::FinalPath($stream.SafeFileHandle)
+                    if ($opened -ne $expected) {
+                        $problems += "  ${name}: opened as $opened, outside the verified directory $real"
+                        continue
+                    }
+                    $actual = ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
+                    if ($actual -ne $ShippedSha256[$name]) {
+                        $problems += "  ${name}: SHA-256 $actual is not the pinned upstream $($ShippedSha256[$name])"
+                    }
+                    if ($name -eq "gswin64c.exe") { $exeStream = $stream }
+                }
+            } finally {
+                $sha.Dispose()
+            }
+        }
+    } catch {
+        $problems += "  ${Root}: $($_.Exception.Message)"
     }
     if ($problems) {
         foreach ($handle in $handles) { $handle.Dispose() }
-        $handles = @()
+        $none.Problems = $problems
+        return $none
     }
-    return [pscustomobject]@{ Problems = $problems; Handles = $handles }
+    return [pscustomobject]@{ Problems = @(); Handles = $handles; Directory = $real; Exe = $exeStream }
 }
 
 function Get-TreeProblems {
@@ -126,9 +203,13 @@ function Get-NoticeProblems {
     # The version run is the only execution here, and it happens only for a
     # tree whose every file just matched its pin.
     if (-not $problems) {
-        $reported = Get-GsVersion $Root
-        if ($reported -ne $GsVersion) {
-            $problems += "  $(Join-Path $Root 'gswin64c.exe') reports '$reported', expected '$GsVersion'"
+        try {
+            $reported = Get-GsVersion $Root
+            if ($reported -ne $GsVersion) {
+                $problems += "  $(Join-Path $Root 'gswin64c.exe') reports '$reported', expected '$GsVersion'"
+            }
+        } catch {
+            $problems += "  $($_.Exception.Message)"
         }
     }
     return @($problems + @(Get-RowProblems))
@@ -152,29 +233,88 @@ function Assert-Notices {
 # in "How Ghostscript finds files",
 # https://ghostscript.readthedocs.io/en/gs10.08.0/Use.html). Without it, a
 # separately installed Ghostscript of the same version puts its own lib and
-# fonts directories ahead of the ROM. A native command's stderr under "Stop"
-# is a terminating error, so the call relaxes it locally.
+# fonts directories ahead of the ROM.
 $BundledGsLib = "%rom%Resource/Init/;%rom%lib/"
 
+# One argument as the C runtime's command-line parser reads it back.
+function ConvertTo-CommandLineArgument {
+    param([string]$Argument)
+    if ($Argument -ne "" -and $Argument -notmatch '[\s"]') { return $Argument }
+    $text = '"'
+    $slashes = 0
+    foreach ($ch in $Argument.ToCharArray()) {
+        if ($ch -eq '\') {
+            $slashes++
+        } elseif ($ch -eq '"') {
+            $text += ('\' * (2 * $slashes + 1)) + '"'
+            $slashes = 0
+        } else {
+            $text += ('\' * $slashes) + $ch
+            $slashes = 0
+        }
+    }
+    return $text + ('\' * (2 * $slashes)) + '"'
+}
+
+# Starts the program at the real path read from its held handle, in its own
+# directory. gswin64c.exe imports no Ghostscript DLL; it loads gsdll64.dll
+# from its own directory first ("General Windows configuration",
+# https://ghostscript.readthedocs.io/en/gs10.08.0/Install.html), and GS_DLL,
+# the only other place it names, is removed from the child's environment.
+# For the DLLs gsdll64.dll imports, the directory the application loaded from
+# comes before the system directories, the working directory and PATH
+# ("Search order for unpackaged apps",
+# https://learn.microsoft.com/windows/win32/dlls/dynamic-link-library-search-order);
+# that directory holds only the pinned files, and the working directory is
+# that same directory. A `.local` redirection file would be an unpinned entry,
+# which the enumeration refuses. The child's environment carries no GH_TOKEN
+# or GITHUB_TOKEN on any path, whether or not the script has scrubbed its own.
+function Start-HeldProgram {
+    param([string]$Exe, [string]$Directory, [string[]]$Arguments)
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = $Exe
+    $start.WorkingDirectory = $Directory
+    $start.Arguments = (@($Arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' ')
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.EnvironmentVariables["GS_LIB"] = $BundledGsLib
+    $start.EnvironmentVariables.Remove("GS_DLL")
+    $start.EnvironmentVariables.Remove("GH_TOKEN")
+    $start.EnvironmentVariables.Remove("GITHUB_TOKEN")
+    $process = [System.Diagnostics.Process]::Start($start)
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    return [pscustomobject]@{
+        Code   = $process.ExitCode
+        Output = @($stdout -split "`r?`n" | Where-Object { $_ -ne "" })
+        Errors = @($stderr.Result -split "`r?`n" | Where-Object { $_ -ne "" })
+    }
+}
+
 # The only way this script runs the bundled program. It takes the tree, not
-# an executable path, verifies the whole tree immediately before the run and
-# holds the verified files open (no writer, no deleter) until the program
-# exits, so the executable and the DLL it loads are the pinned bytes.
+# an executable path, verifies the whole tree immediately before the run,
+# starts the executable by the real path of the handle it verified, holds
+# every verified handle until the program exits, and then enumerates the real
+# directory again: a file that appeared beside the pinned ones during the run
+# is reported, never ignored.
 function Invoke-BundledGs {
     param([string]$Root, [string[]]$Arguments)
     $verified = Open-VerifiedTree $Root
     if ($verified.Problems) {
         throw ("refusing to run Ghostscript from an unverified tree:`n" + ($verified.Problems -join "`n"))
     }
-    $ErrorActionPreference = "Continue"
-    $saved = $env:GS_LIB
-    $env:GS_LIB = $BundledGsLib
     try {
-        $exe = (Get-Item -LiteralPath (Join-Path $Root "gswin64c.exe")).FullName
-        $out = @(& $exe @Arguments 2>&1)
-        return [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+        $exe = [SpectraHeldTree]::FinalPath($verified.Exe.SafeFileHandle)
+        $run = Start-HeldProgram $exe $verified.Directory $Arguments
+        $added = @(Get-EntryProblems $verified.Directory)
+        if ($added) {
+            throw ("the verified Ghostscript directory changed while the program ran:`n" + ($added -join "`n"))
+        }
+        return $run
     } finally {
-        $env:GS_LIB = $saved
         foreach ($handle in $verified.Handles) { $handle.Dispose() }
     }
 }
@@ -182,7 +322,7 @@ function Invoke-BundledGs {
 function Get-GsVersion {
     param([string]$Root)
     $run = Invoke-BundledGs $Root @("--version")
-    $lines = @($run.Output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+    $lines = @($run.Output)
     if ($run.Code -ne 0 -or $lines.Count -eq 0) { return "" }
     return ("" + $lines[0]).Trim()
 }
@@ -197,7 +337,7 @@ function Invoke-GsSmoke {
         $run = Invoke-BundledGs $Root @("-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m",
             "-g16x16", "-r72", "-sOutputFile=$png", "-c",
             "0 0 moveto 16 16 lineto 0.5 setlinewidth stroke showpage")
-        if ($run.Code -ne 0) { return "exit $($run.Code)`: $($run.Output -join ' ')" }
+        if ($run.Code -ne 0) { return "exit $($run.Code)`: $(@($run.Output + $run.Errors) -join ' ')" }
         if (-not (Test-Path $png) -or (Get-Item $png).Length -eq 0) {
             return "the probe render produced no output"
         }
@@ -261,14 +401,12 @@ try {
     . (Join-Path $PSScriptRoot "download-retry.ps1")
     Write-Host "Downloading $Url..."
     try {
-        Invoke-DownloadWithRetry -Description "Ghostscript $GsVersion" -OutFile $Installer -Download {
-            Invoke-WebRequest -Uri $Url -OutFile $Installer -MaximumRedirection 5 `
-                -TimeoutSec $DownloadRetryTimeoutSeconds
-        }
+        Invoke-DownloadWithRetry -Uri $Url -Description "Ghostscript $GsVersion" -OutFile $Installer
     } catch {
         Write-Error "Download failed: $($_.Exception.Message)"
         exit 1
     }
+    Remove-GitHubTokenFromEnvironment
 
     $actual = (Get-FileHash $Installer -Algorithm SHA256).Hash
     if ($actual -ne $ExpectedSha256) {

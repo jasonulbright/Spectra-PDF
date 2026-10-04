@@ -26,6 +26,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
+Remove-GitHubTokenFromEnvironment
 
 # Pinned release-asset checksum -- update deliberately alongside $Version, and
 # re-run fetch-jbig2enc-licenses.ps1 when you do (the notices are pinned to the
@@ -175,13 +177,9 @@ Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Work | Out-Null
 
 Write-Host "Vendoring jbig2enc $Version (upstream prebuilt, Apache-2.0)..."
-. (Join-Path $PSScriptRoot "download-retry.ps1")
 Write-Host "Downloading $Url..."
 try {
-    Invoke-DownloadWithRetry -Description "jbig2enc $Version" -OutFile $Zip -Download {
-        Invoke-WebRequest -Uri $Url -OutFile $Zip -MaximumRedirection 5 `
-            -TimeoutSec $DownloadRetryTimeoutSeconds
-    }
+    Invoke-DownloadWithRetry -Uri $Url -Description "jbig2enc $Version" -OutFile $Zip
 } catch {
     Write-Error "Download failed: $($_.Exception.Message)"
     exit 1

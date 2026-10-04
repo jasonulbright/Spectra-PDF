@@ -54,10 +54,11 @@ case "$LINUX_RELEASE" in
 esac
 
 # --- CI audit job: npm audit and cargo audit, same flags and directories.
-#     cargo audit reads its ignore list from src-tauri/.cargo/audit.toml, so it
-#     runs from src-tauri. ---
+#     scripts/cargo-audit.sh fetches the advisory database with the GitHub
+#     credential and runs cargo audit from src-tauri, where it reads its
+#     ignore list (src-tauri/.cargo/audit.toml). ---
 gate npm-audit npm audit --production --audit-level=high
-gate cargo-audit sh -c 'cd src-tauri && cargo audit'
+gate cargo-audit sh scripts/cargo-audit.sh
 
 # --- Release job: version consistency (tag == package.json == tauri.conf == Cargo.toml) ---
 # Not tag-aware here (no tag yet at push time); instead assert the four surfaces

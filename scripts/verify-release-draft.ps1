@@ -19,8 +19,10 @@
 #
 # Downloads go through curl.exe, never a PowerShell redirection: a redirected
 # native command's stdout is decoded and re-encoded as text, which corrupts
-# binary assets. The Authorization header is dropped on the cross-host redirect
-# to the asset store (curl's default), which that store requires.
+# binary assets. The Authorization header reaches curl as a config on stdin
+# (Get-GitHubCurlConfig), never as an argument, and is dropped on the
+# cross-host redirect to the asset store (curl's default), which that store
+# requires.
 #
 # The manifest's last check is the updater plugin's own deserializer: the
 # downloaded latest.json is parsed by `cargo test --test verifier_<hex>_updater_manifest`
@@ -238,10 +240,9 @@ foreach ($asset in $assets) {
     $target = Join-Path $Downloads $assetName
     if (-not $Offline) {
         $url = "https://api.github.com/repos/$Repo/releases/assets/$($asset.id)"
-        & curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
-            -H "Authorization: Bearer $env:GH_TOKEN" `
-            -H "Accept: application/octet-stream" `
-            -o $target $url
+        Get-GitHubCurlConfig -Uri $url |
+            & curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
+                -K - -H "Accept: application/octet-stream" -o $target $url
         if ($LASTEXITCODE -ne 0) { throw "failed to download draft asset $assetName (id $($asset.id))" }
     }
     if (-not (Test-Path -LiteralPath $target)) { throw "${assetName}: no downloaded bytes at $target" }

@@ -74,6 +74,10 @@ $ErrorActionPreference = "Stop"
 
 $Manifest = "$PSScriptRoot\libreoffice-notices.tsv"
 . (Join-Path $PSScriptRoot "download-retry.ps1")
+# This script also runs beside an older download-retry.ps1 that lacks
+# Remove-GitHubTokenFromEnvironment; it fetches nothing from GitHub, so the
+# variables are removed directly.
+Remove-Item -Path Env:GH_TOKEN, Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
 
 function Read-NoticeManifest([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { throw "notice manifest not found: $path" }

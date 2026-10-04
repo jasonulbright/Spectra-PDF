@@ -59,10 +59,10 @@ $manifestAsset = Get-OneAsset "latest.json"
 $appImageAsset = Get-OneAsset $linux.AppImage.Name
 
 if (-not $Offline) {
-    & curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
-        -H "Authorization: Bearer $env:GH_TOKEN" `
-        -H "Accept: application/octet-stream" `
-        -o $manifestPath "https://api.github.com/repos/$Repo/releases/assets/$($manifestAsset.id)"
+    $manifestUrl = "https://api.github.com/repos/$Repo/releases/assets/$($manifestAsset.id)"
+    Get-GitHubCurlConfig -Uri $manifestUrl |
+        & curl.exe --fail --silent --show-error --location @(Get-CurlRetryArguments) `
+            -K - -H "Accept: application/octet-stream" -o $manifestPath $manifestUrl
     if ($LASTEXITCODE -ne 0) { throw "failed to download latest.json (id $($manifestAsset.id))" }
 }
 

@@ -44,9 +44,11 @@ import re
 import shutil
 import subprocess
 import sys
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import github_auth  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CRATE = ROOT / "src-tauri"
@@ -118,9 +120,9 @@ def run(*args: str, cwd: Path = ROOT) -> Answer:
 
 def fetch_json(url: str) -> Fetched:
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:
+        with github_auth.urlopen(url, timeout=60) as response:
             return Fetched(json.load(response))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, github_auth.MissingCredential) as exc:
         return Fetched(error=f"{url}: {exc}")
 
 

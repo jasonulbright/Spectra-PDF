@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import http.client
 import socket
+import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import github_auth  # noqa: E402
 
 ATTEMPTS = 4
 BASE_DELAY_SECONDS = 3.0
@@ -59,7 +64,7 @@ def fetch_with_retry(
         raise ValueError("a fetch needs at least one attempt")
     for attempt in range(1, attempts + 1):
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with github_auth.urlopen(request, timeout=timeout) as response:
                 if inspect is not None:
                     inspect(response)
                 return response.read()

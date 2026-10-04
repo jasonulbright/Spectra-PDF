@@ -192,6 +192,7 @@ jobs:
       - name: Build, sign and smoke the Linux packages
         run: sh scripts/linux-release-build.sh --release
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           TAURI_SIGNING_RPM_KEY: ${{ secrets.TAURI_SIGNING_RPM_KEY }}
@@ -257,6 +258,7 @@ jobs:
       - name: Build, check, smoke and sign the AppImage
         run: sh scripts/build-appimage.sh --deb linux-packages/spectrapdf_*_amd64.deb --out linux-appimage --release
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
@@ -351,7 +353,9 @@ jobs:
       - name: The AppImage catalog's checks pass without WebKitGTK and GTK 3
         run: |
           chmod 0755 linux-appimage/spectrapdf_*_amd64.AppImage
-          sudo sh scripts/appimage-catalog-gate.sh linux-appimage/spectrapdf_*_amd64.AppImage --work "$RUNNER_TEMP/appimage-catalog-gate"
+          sudo --preserve-env=GH_TOKEN sh scripts/appimage-catalog-gate.sh linux-appimage/spectrapdf_*_amd64.AppImage --work "$RUNNER_TEMP/appimage-catalog-gate"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release:
     name: Rebuild & publish from tag (Windows)
@@ -484,10 +488,14 @@ jobs:
       - name: Vendor edit fonts (Liberation family, 12 faces, sha256-pinned)
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Vendor signature script faces (3 faces, OFL 1.1, sha256-pinned)
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache the pinned LibreOffice msi
         id: libreoffice-msi-cache-build
@@ -503,19 +511,27 @@ jobs:
 
       - name: Vendor native Tesseract
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Vendor jbig2enc (MRC mask codec, Apache-2.0)
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # A tag cut before the bundle script existed ships no Ghostscript, and a
       # redo rebuilds what the tag shipped.
       - name: Vendor Ghostscript (unmodified upstream, SHA-256 pinned)
         if: hashFiles('scripts/bundle-ghostscript.ps1') != ''
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Vendor spelling dictionaries
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Vendor the Finnish morphological analyser
         # Must run AFTER the dictionaries step, which rebuilds

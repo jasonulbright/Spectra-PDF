@@ -37,6 +37,7 @@
 # empty value embeds none.
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 
 APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
 APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"

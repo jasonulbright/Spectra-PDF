@@ -14,6 +14,142 @@ $DownloadRetryAttempts = 4
 $DownloadRetryBaseDelaySeconds = 3
 $DownloadRetryTimeoutSeconds = 900
 
+# The hosts that receive the GitHub credential, over HTTPS only. Invoke-
+# WebRequest drops an Authorization header on every redirect (PowerShell 7
+# without -PreserveAuthorizationOnRedirect; Windows PowerShell 5.1 through
+# HttpWebRequest), so a release asset's redirect to its signed URL on another
+# host never carries it.
+$GitHubHosts = @(
+    'api.github.com',
+    'github.com',
+    'raw.githubusercontent.com',
+    'objects.githubusercontent.com',
+    'codeload.github.com',
+    'release-assets.githubusercontent.com'
+)
+$GitHubTokenTimeoutMilliseconds = 15000
+
+function Test-GitHubUri {
+    param([Parameter(Mandatory)][string]$Uri)
+    $parsed = $null
+    if (-not [Uri]::TryCreate($Uri, [UriKind]::Absolute, [ref]$parsed)) { return $false }
+    return ($parsed.Scheme -eq 'https' -and $GitHubHosts -contains $parsed.Host.ToLowerInvariant())
+}
+
+function Get-GitHubTokenFromGh {
+    $gh = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $gh) { return '' }
+    try {
+        $start = New-Object System.Diagnostics.ProcessStartInfo
+        $start.FileName = $gh.Source
+        $start.Arguments = 'auth token'
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardInput = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $process = [System.Diagnostics.Process]::Start($start)
+        $process.StandardInput.Close()
+        $read = $process.StandardOutput.ReadToEndAsync()
+        $null = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($GitHubTokenTimeoutMilliseconds)) {
+            try { $process.Kill() } catch { }
+            return ''
+        }
+        if ($process.ExitCode -ne 0) { return '' }
+        $words = @($read.Result.Split([char[]]" `t`r`n", [StringSplitOptions]::RemoveEmptyEntries))
+        if ($words.Count -ne 1) { return '' }
+        return $words[0]
+    } catch {
+        return ''
+    }
+}
+
+function Get-GitHubTokenFromEnvironment {
+    foreach ($name in @('GH_TOKEN', 'GITHUB_TOKEN')) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value -and $value.Trim()) { return $value.Trim() }
+    }
+    return ''
+}
+
+function Get-GitHubToken {
+    <#
+    .SYNOPSIS
+    The GitHub credential: GH_TOKEN, then GITHUB_TOKEN, then `gh auth token`;
+    '' when none resolves. Resolved once per session. A value holding any
+    character outside [A-Za-z0-9_] counts as none: a header the request layer
+    refuses is quoted in its error text.
+    #>
+    $cached = Get-Variable -Name GitHubTokenResolved -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $cached) { return $cached }
+    $found = [string](Get-Variable -Name GitHubTokenKept -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    if (-not $found) { $found = Get-GitHubTokenFromEnvironment }
+    if (-not $found) { $found = Get-GitHubTokenFromGh }
+    if ($found -cnotmatch '^[A-Za-z0-9_]+$') { $found = '' }
+    Set-Variable -Name GitHubTokenResolved -Scope Script -Value ([string]$found)
+    return [string]$found
+}
+
+function Get-RequiredGitHubToken {
+    <#
+    .SYNOPSIS
+    The GitHub credential for a request to a GitHub host; throws, before any
+    request, when none resolves.
+    #>
+    param([Parameter(Mandatory)][string]$Uri)
+    $token = Get-GitHubToken
+    if (-not $token) {
+        throw ("no GitHub credential for $(([Uri]$Uri).Host): set GH_TOKEN or GITHUB_TOKEN " +
+               "to a GitHub token, or sign in with ``gh auth login``")
+    }
+    return $token
+}
+
+function Get-GitHubCurlConfig {
+    <#
+    .SYNOPSIS
+    A curl config line carrying the GitHub credential, for `curl.exe -K -` on
+    stdin: an argument would show the token in the process list. Throws for a
+    host outside the GitHub list or when no token resolves.
+    #>
+    param([Parameter(Mandatory)][string]$Uri)
+    if (-not (Test-GitHubUri $Uri)) { throw "not a GitHub URL: $Uri" }
+    $token = Get-RequiredGitHubToken -Uri $Uri
+    return "header = `"Authorization: Bearer $token`""
+}
+
+function Get-GitHubAuthHeader {
+    <#
+    .SYNOPSIS
+    The -Headers table for one request: Authorization for a GitHub host,
+    otherwise empty. Throws for a GitHub host when no token resolves.
+    #>
+    param([Parameter(Mandatory)][string]$Uri)
+    $headers = @{}
+    if (Test-GitHubUri $Uri) {
+        $headers['Authorization'] = "Bearer $(Get-RequiredGitHubToken -Uri $Uri)"
+    }
+    return $headers
+}
+
+function Remove-GitHubTokenFromEnvironment {
+    <#
+    .SYNOPSIS
+    Keeps the GH_TOKEN or GITHUB_TOKEN value for this session's own requests
+    and removes both variables from the process environment, so a program
+    started afterwards never inherits them. Starts no program itself: with
+    neither variable set, a later request still resolves through `gh`.
+    #>
+    $kept = [string](Get-Variable -Name GitHubTokenKept -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    if (-not $kept) {
+        Set-Variable -Name GitHubTokenKept -Scope Script -Value ([string](Get-GitHubTokenFromEnvironment))
+    }
+    # [Environment]::SetEnvironmentVariable($name, $null) receives '' from
+    # PowerShell, which PowerShell 7 keeps as an empty variable.
+    Remove-Item -Path Env:GH_TOKEN, Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+}
+
 function Get-DownloadRetryBounds {
     return [ordered]@{
         Attempts = $DownloadRetryAttempts
@@ -68,18 +204,39 @@ function Invoke-DownloadWithRetry {
     <#
     .SYNOPSIS
     Run one download, retrying only transient upstream failures.
+    .PARAMETER Uri
+    The URL to save to -OutFile. The request carries the GitHub credential
+    when the host is a GitHub host (Get-GitHubAuthHeader).
     .PARAMETER Download
-    The single fetch to perform. It must carry its own per-attempt timeout.
+    A custom fetch, instead of -Uri. It must carry its own per-attempt timeout
+    and receives no credential.
     .PARAMETER OutFile
     Removed before each attempt, so a partial body never reaches a hash check.
     #>
     param(
-        [Parameter(Mandatory)][scriptblock]$Download,
+        [string]$Uri,
+        [scriptblock]$Download,
         [Parameter(Mandatory)][string]$Description,
         [string]$OutFile,
+        [int]$TimeoutSec = $DownloadRetryTimeoutSeconds,
+        [string]$UserAgent,
         [int]$Attempts = $DownloadRetryAttempts,
         [int]$BaseDelaySeconds = $DownloadRetryBaseDelaySeconds
     )
+    if ([bool]$Uri -eq [bool]$Download) { throw "download retry needs exactly one of -Uri and -Download" }
+    if ($Uri) {
+        if (-not $OutFile) { throw "download retry with -Uri needs -OutFile" }
+        $request = @{
+            Uri = $Uri
+            OutFile = $OutFile
+            UseBasicParsing = $true
+            MaximumRedirection = 5
+            TimeoutSec = $TimeoutSec
+            Headers = (Get-GitHubAuthHeader -Uri $Uri)
+        }
+        if ($UserAgent) { $request['UserAgent'] = $UserAgent }
+        $Download = { Invoke-WebRequest @request }
+    }
     if ($Attempts -lt 1) { throw "download retry needs at least one attempt" }
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         if ($OutFile) { Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue }

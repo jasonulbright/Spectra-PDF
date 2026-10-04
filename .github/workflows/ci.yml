@@ -96,7 +96,10 @@ jobs:
         run: cargo install cargo-audit
 
       - name: cargo audit
-        run: cd src-tauri && cargo audit
+        shell: bash
+        run: sh scripts/cargo-audit.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The third dependency graph. npm audit and cargo audit between them
       # cover the renderer and the Rust backend, but the PYTHON engine ships

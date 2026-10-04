@@ -46,6 +46,7 @@ step sh scripts/bundle-tesseract.sh
 step sh scripts/bundle-jbig2enc.sh
 step sh scripts/bundle-dictionaries.sh
 step sh scripts/bundle-voikko.sh
+github_token_unexport
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/spectra-target}"
 (cd src-tauri && step cargo check --all-targets) || exit 1

@@ -26,6 +26,109 @@ sha256_of() {
   sha256sum "$1" | cut -d' ' -f1
 }
 
+# The hosts that receive the GitHub credential, over HTTPS only. curl drops a
+# custom Authorization header when a redirect changes the host (no
+# --location-trusted), so a release asset's redirect to its signed URL on
+# another host never carries it.
+GITHUB_HOSTS="api.github.com github.com raw.githubusercontent.com objects.githubusercontent.com codeload.github.com release-assets.githubusercontent.com"
+
+GITHUB_CREDENTIAL_MISSING="set GH_TOKEN or GITHUB_TOKEN to a GitHub token, or sign in with \`gh auth login\`"
+
+# github_host URL -> succeeds when URL is https:// on a host in GITHUB_HOSTS.
+# Scheme and host compare case-insensitively.
+github_host() {
+  _gh_host="$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+  case "$_gh_host" in https://*) ;; *) return 1 ;; esac
+  _gh_host="${_gh_host#https://}"
+  _gh_host="${_gh_host%%[/?#]*}"
+  _gh_host="${_gh_host##*@}"
+  _gh_host="${_gh_host%%:*}"
+  case " $GITHUB_HOSTS " in *" $_gh_host "*) return 0 ;; esac
+  return 1
+}
+
+# _gh_trim VALUE: sets _gh_trimmed to VALUE without leading and trailing
+# whitespace.
+_gh_trim() {
+  _gh_trimmed="${1#"${1%%[![:space:]]*}"}"
+  _gh_trimmed="${_gh_trimmed%"${_gh_trimmed##*[![:space:]]}"}"
+}
+
+# github_token_resolve: sets _gh_token to GH_TOKEN, GITHUB_TOKEN, or the
+# output of `gh auth token`, in that order, or to "" when none resolves. The
+# first variable that holds more than whitespace decides; a value holding any
+# character outside [A-Za-z0-9_] then counts as none. The caller turns tracing
+# off first.
+github_token_resolve() {
+  _gh_token="${_gh_kept:-}"
+  if [ -z "$_gh_token" ]; then
+    _gh_trim "${GH_TOKEN:-}"
+    _gh_token="$_gh_trimmed"
+  fi
+  if [ -z "$_gh_token" ]; then
+    _gh_trim "${GITHUB_TOKEN:-}"
+    _gh_token="$_gh_trimmed"
+  fi
+  _gh_trimmed=""
+  if [ -z "$_gh_token" ] && command -v gh >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      _gh_token="$(timeout 15 gh auth token 2>/dev/null)" || _gh_token=""
+    else
+      _gh_token="$(gh auth token 2>/dev/null)" || _gh_token=""
+    fi
+  fi
+  case "$_gh_token" in *[!A-Za-z0-9_]*) _gh_token="" ;; esac
+}
+
+# github_token_unexport: keeps the GH_TOKEN or GITHUB_TOKEN value for this
+# shell's own fetches and removes both variables from the environment of every
+# command run after it, so a package manager, a build or vendored code never
+# inherits the credential. A script calls it before it runs any of those; a
+# child script that fetches from GitHub must run before it.
+github_token_unexport() {
+  case "$-" in *x*) set +x; _gh_trace=1 ;; *) _gh_trace=0 ;; esac
+  if [ -z "${_gh_kept:-}" ]; then
+    _gh_trim "${GH_TOKEN:-}"
+    _gh_kept="$_gh_trimmed"
+    if [ -z "$_gh_kept" ]; then
+      _gh_trim "${GITHUB_TOKEN:-}"
+      _gh_kept="$_gh_trimmed"
+    fi
+    _gh_trimmed=""
+  fi
+  unset GH_TOKEN GITHUB_TOKEN
+  [ "$_gh_trace" = 0 ] || set -x
+}
+
+# curl_fetch URL OUT: one download attempt. For a GitHub host the token comes
+# from GH_TOKEN, GITHUB_TOKEN, then `gh auth token`, and reaches curl as a
+# config file on stdin: no argument carries it, so the process list and a
+# traced command line never show it. Tracing is off while the token is read
+# and tested, because `set -x` prints assignments and test arguments expanded.
+# A token holding any character outside [A-Za-z0-9_] is not sent: the config
+# line quotes it with no escaping. A GitHub host with no credential stops the
+# script before any request.
+curl_fetch() {
+  _gh_auth=0
+  if github_host "$1"; then
+    case "$-" in *x*) set +x; _gh_trace=1 ;; *) _gh_trace=0 ;; esac
+    github_token_resolve
+    [ -z "$_gh_token" ] || _gh_auth=1
+    [ "$_gh_trace" = 0 ] || set -x
+    [ "$_gh_auth" = 1 ] || die "no GitHub credential for $_gh_host: $GITHUB_CREDENTIAL_MISSING"
+  fi
+  if [ "$_gh_auth" = 0 ]; then
+    curl -fL --retry 0 --connect-timeout 30 --max-time 1800 -o "$2" "$1"
+    return
+  fi
+  _gh_status=0
+  curl -fL --retry 0 --connect-timeout 30 --max-time 1800 -K - -o "$2" "$1" <<CURLCONFIG || _gh_status=$?
+header = "Authorization: Bearer $_gh_token"
+CURLCONFIG
+  _gh_token=""
+  return "$_gh_status"
+}
+
 # fetch_verified URL SHA256 NAME -> prints the cached path.
 # A cached file whose hash differs is deleted and refetched once; a fresh
 # download whose hash differs refuses.
@@ -40,7 +143,7 @@ fetch_verified() {
   rm -f "$path" "$path.part"
   attempt=1
   while :; do
-    if curl -fL --retry 0 --connect-timeout 30 --max-time 1800 -o "$path.part" "$url" >&2; then
+    if curl_fetch "$url" "$path.part" >&2; then
       break
     fi
     [ "$attempt" -ge "$FETCH_ATTEMPTS" ] && die "download failed after $attempt attempts: $url"
