@@ -1915,10 +1915,11 @@ def tag_package(tmp_path: Path):
     holds its worktree for as long as it uses the target, so the deletion
     never reaches a target a concurrent session is building, and the folder
     holds one target per revision in use.
-    The build script requires every
-    `resources/` entry of tauri.conf.json to exist; empty stubs satisfy it
-    the way the CI jobs' stubs do. Yields (verifier args, downloaded dir,
-    package dir, env).
+    The build script requires every `resources/` entry of tauri.conf.json to
+    exist; empty stubs satisfy it the way the CI jobs' stubs do. The packaged
+    config also requires its frontendDist directory during macro expansion,
+    so a minimal index.html stands in for the frontend bundle. Yields
+    (verifier args, downloaded dir, package dir, env).
     """
     worktree = tmp_path / "tag"
     _git("worktree", "add", "--detach", str(worktree), "HEAD")
@@ -1928,6 +1929,9 @@ def tag_package(tmp_path: Path):
         for entry in conf["bundle"]["resources"]:
             if entry.startswith("../resources/"):
                 (worktree / entry.removeprefix("../")).mkdir(parents=True)
+        frontend = worktree / "dist" / "renderer"
+        frontend.mkdir(parents=True)
+        (frontend / "index.html").write_text("<!doctype html><html></html>", encoding="utf-8")
         (package / "tests" / "updater_manifest.rs").write_text(ACCEPTING_UPDATER_TEST)
         args, downloaded = _draft_fixture(tmp_path)
         args[args.index("-CargoPackage") + 1] = str(package)
