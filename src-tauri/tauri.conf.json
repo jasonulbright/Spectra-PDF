@@ -5,7 +5,6 @@
   "identifier": "com.spectrapdf.app",
   "build": {
     "frontendDist": "../dist/renderer",
-    "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm run build:renderer",
     "beforeBundleCommand": "npm run build:shell-menu",
     "beforeDevCommand": "npm run dev:renderer"
