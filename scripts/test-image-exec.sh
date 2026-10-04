@@ -157,6 +157,23 @@ int main(int argc, char **argv)
 		posix_spawn_file_actions_addchdir_np(&fa, "/");
 		return waited(posix_spawn(&pid, file, &fa, NULL, args, environ), &pid, "posix_spawn");
 	}
+	if (!strcmp(mode, "spawn-resetids-ignored-chld")) {
+		if (setresuid(1000, 2000, 1000) != 0)
+			return report("setresuid", errno);
+		if (signal(SIGCHLD, SIG_IGN) == SIG_ERR)
+			return report("signal", errno);
+		posix_spawnattr_t reset;
+		int err = posix_spawnattr_init(&reset);
+		if (!err)
+			err = posix_spawnattr_setflags(&reset, POSIX_SPAWN_RESETIDS);
+		if (!err)
+			err = posix_spawn_file_actions_addchdir_np(&fa, "/");
+		if (err)
+			return report("posix_spawnattr", err);
+		err = posix_spawnp(&pid, file, &fa, &reset, args, environ);
+		posix_spawnattr_destroy(&reset);
+		return err ? report("posix_spawnp", err) : 0;
+	}
 	if (!strcmp(mode, "payload-nofile3")) {
 		struct rlimit three = { 3, 3 };
 		close_range(3, ~0U, 0);
@@ -349,6 +366,7 @@ printf '#!/bin/sh\nexit 127\n' > "$HOST_DIR/exit127"
 mkdir -p "$WORK/cwd"
 printf '#!/bin/sh\nexit 7\n' > "$WORK/cwd/true"
 chmod 0755 "$WORK/bin/plain-script" "$HOST_DIR/argc-script" "$HOST_DIR/exit7" "$HOST_DIR/exit127" "$WORK/cwd/true"
+if [ "$(id -u)" -eq 0 ]; then chmod 0755 "$WORK"; fi
 printf 'echo NOT_EXECUTABLE\n' > "$WORK/noexec/plain-script"
 ln -s "$WORK/missing-target" "$WORK/dangling"
 
@@ -534,6 +552,13 @@ same "an open action filling RLIMIT_NOFILE=4 still runs the program" no "$HOST_D
 same "a program after chdir that exits 127 is not a failed exec" no "$PAYLOAD_DIR" '^ rc=127' "$CALLER" spawn-chdir ./exit127 "$HOST_DIR"
 same "concurrent trampoline errors stay with their own caller" no "$WORK" '^concurrent errno=ENOENT rc=0' "$CALLER" spawn-concurrent unused
 same "an ignored SIGCHLD does not hide a failed exec" no "$WORK" 'posix_spawn failed: ENOENT rc=3' "$CALLER" spawn-ignored-chld no-such-program
+if [ "$(id -u)" -eq 0 ]; then
+  CASE_PATH="$PAYLOAD_DIR:/usr/bin"
+  same "RESETIDS with ignored SIGCHLD still runs a PATH payload" yes "$PAYLOAD_DIR" "$PAYLOAD_LINE" \
+    "$CALLER" spawn-resetids-ignored-chld helper
+else
+  echo "skip RESETIDS spawn permission regression (requires root)"
+fi
 expect "a payload with no available descriptor fails without a host-loader bypass" '^execve failed: EMFILE$' "$CALLER" payload-nofile3 "$P"
 
 # Exercise the no-/proc path inside a private namespace when permitted.
