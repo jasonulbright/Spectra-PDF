@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.1004.152
+
+*Released 2026-10-04*
+
+**Reliable Linux AppImage and first-run consent**
+
+### Fixed
+- Linux packages now retain ICC profile licence acceptance in the user's configuration between launches.
+- Repair the self-contained Linux AppImage's bundled tool startup and execution path.
+
 ## 2026.1003.151
 
 *Released 2026-10-03*
