@@ -54,12 +54,13 @@
  *     trampoline's exec errno without relying on /proc or adding a file
  *     descriptor. The segment is marked for deletion before spawning and is
  *     removed when its last attachment goes away. With
- *     POSIX_SPAWN_RESETIDS, its owner is changed to the caller's real UID
- *     after the parent attaches, so the reset-UID trampoline can attach too.
- *     The trampoline attaches, publishes its state, then execs; exec detaches
- *     it automatically. The parent waits for that detach or the reported
- *     error. A program's own exit status, including 127, is left for its
- *     caller.
+ *     POSIX_SPAWN_RESETIDS, its owner is temporarily changed to the caller's
+ *     real UID after the parent attaches, so the reset-UID trampoline can
+ *     attach too. The parent restores ownership as soon as the trampoline
+ *     publishes its attachment. Linux records the child PID and detach time
+ *     when exec detaches the mapping, so an unrelated same-UID attachment
+ *     cannot hold the spawn call open. A program's own exit status, including
+ *     127, is left for its caller.
  * R6. No stack array is sized by caller data beyond a fixed bound:
  *     IMAGE_STACK_BYTES (1 KiB, 128 pointers) for pointer arrays and short
  *     strings, PATH_MAX for path strings. Larger arrays are anonymous
@@ -320,7 +321,7 @@ static int search_reaches_image(const struct image *im, const char *file, const 
  * failed exec publishes its errno. No descriptor, signal handler or /proc
  * access is involved. Each concurrent spawn owns a separate segment.
  */
-static int await_exec(pid_t child, int segment, int *state)
+static int await_exec(pid_t child, int segment, int *state, int reset_child_ids)
 {
 	struct timespec delay = { 0, 20000 };
 	for (;;) {
@@ -329,9 +330,15 @@ static int await_exec(pid_t child, int segment, int *state)
 			return value;
 		if (value == -1) {
 			struct shmid_ds info;
-			if (shmctl(segment, IPC_STAT, &info) == 0 && info.shm_nattch == 1) {
-				value = __atomic_load_n(state, __ATOMIC_ACQUIRE);
-				return value > 0 ? value : 0;
+			if (shmctl(segment, IPC_STAT, &info) == 0) {
+				if (reset_child_ids && info.shm_perm.uid != geteuid()) {
+					info.shm_perm.uid = geteuid();
+					(void)shmctl(segment, IPC_SET, &info);
+				}
+				if (info.shm_nattch == 1 || (info.shm_lpid == child && info.shm_dtime != 0)) {
+					value = __atomic_load_n(state, __ATOMIC_ACQUIRE);
+					return value > 0 ? value : 0;
+				}
 			}
 		}
 		siginfo_t info;
@@ -453,7 +460,7 @@ done:
 	image_buffer_put(&lb);
 	image_buffer_put(&pb);
 	image_buffer_put(&tb);
-	int exec_err = err == 0 ? await_exec(child, segment, state) : 0;
+	int exec_err = err == 0 ? await_exec(child, segment, state, reset_child_ids) : 0;
 	if (state != (void *)-1)
 		shmdt(state);
 	if (err != 0)

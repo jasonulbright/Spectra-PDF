@@ -556,8 +556,11 @@ if [ "$(id -u)" -eq 0 ]; then
   CASE_PATH="$PAYLOAD_DIR:/usr/bin"
   same "RESETIDS with ignored SIGCHLD still runs a PATH payload" yes "$PAYLOAD_DIR" "$PAYLOAD_LINE" \
     "$CALLER" spawn-resetids-ignored-chld helper
+  sh "$REPO_ROOT/scripts/test-image-exec-resetids-attachment.sh" "$LIB" ||
+    die "RESETIDS attachment handshake regression failed"
 else
   echo "skip RESETIDS spawn permission regression (requires root)"
+  echo "skip RESETIDS attachment handshake regression (requires root)"
 fi
 expect "a payload with no available descriptor fails without a host-loader bypass" '^execve failed: EMFILE$' "$CALLER" payload-nofile3 "$P"
 
