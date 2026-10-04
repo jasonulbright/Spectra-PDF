@@ -53,10 +53,13 @@
  *     started program. A private System V shared-memory segment carries the
  *     trampoline's exec errno without relying on /proc or adding a file
  *     descriptor. The segment is marked for deletion before spawning and is
- *     removed when its last attachment goes away. The trampoline attaches,
- *     publishes its state, then execs; exec detaches it automatically. The
- *     parent waits for that detach or the reported error. A program's own
- *     exit status, including 127, is left for its caller.
+ *     removed when its last attachment goes away. With
+ *     POSIX_SPAWN_RESETIDS, its owner is changed to the caller's real UID
+ *     after the parent attaches, so the reset-UID trampoline can attach too.
+ *     The trampoline attaches, publishes its state, then execs; exec detaches
+ *     it automatically. The parent waits for that detach or the reported
+ *     error. A program's own exit status, including 127, is left for its
+ *     caller.
  * R6. No stack array is sized by caller data beyond a fixed bound:
  *     IMAGE_STACK_BYTES (1 KiB, 128 pointers) for pointer arrays and short
  *     strings, PATH_MAX for path strings. Larger arrays are anonymous
@@ -284,6 +287,12 @@ static int has_actions(const posix_spawn_file_actions_t *actions)
 	return actions && actions->__used > 0;
 }
 
+static int resets_ids(const posix_spawnattr_t *attr)
+{
+	short flags = 0;
+	return attr && posix_spawnattr_getflags(attr, &flags) == 0 && (flags & POSIX_SPAWN_RESETIDS);
+}
+
 struct reach_state {
 	const struct image *im;
 	char real[PATH_MAX];
@@ -380,6 +389,7 @@ static int spawn_in_child(const struct image *im, int use_path, pid_t *pid, cons
 	char *library_arg = optional_arg(&lb, library_local, im->library_path);
 	char **args = image_buffer_get(&ab, args_local, sizeof args_local, (8 + argc + 1) * sizeof(char *));
 	int err = ENOMEM;
+	int reset_child_ids = resets_ids(attr) && getuid() != geteuid();
 	pid_t child = -1;
 	int segment = -1;
 	int *state = (void *)-1;
@@ -393,6 +403,20 @@ static int spawn_in_child(const struct image *im, int use_path, pid_t *pid, cons
 		}
 		state = shmat(segment, NULL, 0);
 		int attach_errno = errno;
+		if (state != (void *)-1 && reset_child_ids) {
+			struct shmid_ds info;
+			if (shmctl(segment, IPC_STAT, &info) != 0) {
+				err = errno;
+				(void)shmctl(segment, IPC_RMID, NULL);
+				goto done;
+			}
+			info.shm_perm.uid = getuid();
+			if (shmctl(segment, IPC_SET, &info) != 0) {
+				err = errno;
+				(void)shmctl(segment, IPC_RMID, NULL);
+				goto done;
+			}
+		}
 		// Linux permits attachment to an IPC_RMID segment while we hold it.
 		if (shmctl(segment, IPC_RMID, NULL) != 0) {
 			err = errno;
