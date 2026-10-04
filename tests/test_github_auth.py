@@ -88,9 +88,10 @@ def _clean_env(**extra: str) -> dict:
 
 
 @pytest.fixture
-def py_auth(monkeypatch):
+def py_auth(monkeypatch, server):
     monkeypatch.setattr(github_auth, "SCHEMES", frozenset({"http"}))
     monkeypatch.setattr(github_auth, "GITHUB_HOSTS", frozenset({"127.0.0.1"}))
+    monkeypatch.setattr(github_auth, "PORTS", frozenset({server}))
     monkeypatch.setattr(github_auth, "_token", [TOKEN])
     monkeypatch.setattr(github_auth, "_opener", [])
     return github_auth
@@ -270,17 +271,24 @@ needs_sh = pytest.mark.skipif(shutil.which("sh") is None, reason="no POSIX shell
 def _stub_dir(tmp_path: Path, gh_output: str | None) -> Path:
     stubs = tmp_path / "stubs"
     stubs.mkdir(parents=True)
-    (stubs / "curl").write_bytes(
+    curl_stub = (
         b'#!/bin/sh\nprintf \'%s\\n\' "$@" > "$STUB_LOG/args"\n'
         b'cat > "$STUB_LOG/stdin"\n'
         b'exit 0\n')
+    (stubs / "curl").write_bytes(curl_stub)
+    if os.name == "nt":
+        # Git Bash resolves curl.exe ahead of an extensionless script.
+        (stubs / "curl.exe").write_bytes(curl_stub)
     gh = (b'#!/bin/sh\nexit 1\n' if gh_output is None
           else b'#!/bin/sh\nprintf \'%s\\n\' "' + gh_output.encode() + b'"\n')
     (stubs / "gh").write_bytes(gh)
     if os.name == "nt":
+        (stubs / "gh.exe").write_bytes(gh)
+    if os.name == "nt":
         # Git for Windows can resolve the native Windows timeout.exe before
         # GNU timeout; their command-line syntax is unrelated.
         (stubs / "timeout").write_bytes(b'#!/bin/sh\nshift\nexec "$@"\n')
+        (stubs / "timeout.exe").write_bytes(b'#!/bin/sh\nshift\nexec "$@"\n')
     for stub in stubs.iterdir():
         stub.chmod(0o755)
     return stubs
@@ -381,6 +389,7 @@ HOST_CASES = [
     "https://github.com@example.invalid/x", "https://github.com:443@example.invalid/x",
     "https://example.invalid/?u=https://github.com/", "https://example.invalid#@github.com/",
     "ftp://github.com/x", "https://www.python.org/ftp/python/",
+    "https://github.com:8443/x", "https://api.github.com:80/x",
 ]
 
 
@@ -536,6 +545,8 @@ def test_powershell_sends_the_token_only_where_it_belongs(shell, tmp_path, serve
         (f"http://localhost:{server}/ok", {}, "", [("/ok", None)]),
         (f"http://127.0.0.1:{server}/cross", {"GH_TOKEN": TOKEN}, "",
          [("/cross", f"Bearer {TOKEN}"), ("/final", None)]),
+        (f"http://127.0.0.1:{server}/same", {"GH_TOKEN": TOKEN}, "",
+         [("/same", f"Bearer {TOKEN}"), ("/final", f"Bearer {TOKEN}")]),
     )
     for url, tokens, gh, expected in cases:
         seen.clear()
@@ -595,9 +606,8 @@ def test_powershell_scrub_keeps_the_token_for_its_own_fetch_and_hides_it_from_ch
 
 
 #: Start-HeldProgram is the one launcher of the bundled Ghostscript. It is
-#: loaded from the script's own syntax tree, so the probe runs the shipped
-#: function text with a stand-in program; the real launch target is a
-#: hash-verified tree.
+#: loaded from the script's own syntax tree and runs a native child through
+#: the held-program DLL-load gate with the same ProcessStartInfo environment.
 PS_HELD_LAUNCH_PROBE = r"""
 $ErrorActionPreference = 'Stop'
 $tokens = $null; $errors = $null
@@ -607,27 +617,30 @@ foreach ($name in @('ConvertTo-CommandLineArgument', 'Start-HeldProgram')) {{
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }}, $true)
     . ([scriptblock]::Create($definition.Extent.Text))
 }}
-$BundledGsLib = 'probe'
-$arg1 = 'C:' + [char]92 + 'folder with space' + [char]92
-$arg2 = 'quote' + [char]34 + 'inside'
-$code = "import os, sys; expected = ['C:' + chr(92) + 'folder with space' + chr(92), 'quote' + chr(34) + 'inside']; print('args', sys.argv[1:] == expected); print('held', 'GH_TOKEN' in os.environ, 'GITHUB_TOKEN' in os.environ, os.environ.get('GS_LIB'))"
-$run = Start-HeldProgram '{python}' '{directory}' @('-c', $code, $arg1, $arg2)
-if ($run.Code -ne 0) {{ throw "stand-in process exited $($run.Code)" }}
+$BundledGsLib = '%rom%Resource/Init/;%rom%lib/'
+$HeldProgramSource = '{held_source}'
+$code = 'if defined GH_TOKEN (echo leak) else (echo clean) & if defined GITHUB_TOKEN (echo leak) else (echo clean) & echo %GS_LIB%'
+$run = Start-HeldProgram $env:ComSpec $env:SystemRoot\System32 @('/d', '/c', $code)
+if ($run.Code -ne 0) {{ throw "held child exited $($run.Code): $($run.Errors)" }}
 Write-Output $run.Output
 """
 
 
 @pytest.mark.skipif(not POWERSHELLS, reason="no PowerShell")
 @pytest.mark.parametrize("shell", POWERSHELLS)
-def test_the_bundled_ghostscript_launch_never_passes_the_credential(shell, tmp_path) -> None:
+def test_the_held_launcher_scrubs_credentials_from_child(shell, tmp_path) -> None:
+    directory = ROOT / "resources" / "ghostscript"
+    if not (directory / "gswin64c.exe").is_file():
+        pytest.skip("no bundled Windows Ghostscript")
     script = PS_HELD_LAUNCH_PROBE.format(
         script=(SCRIPTS / "bundle-ghostscript.ps1").as_posix(),
-        python=Path(sys.executable).as_posix(), directory=tmp_path.as_posix())
+        held_source=(SCRIPTS / "held-program.cs").as_posix(),
+        exe=str(directory / "gswin64c.exe"), directory=str(directory))
     run = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", script],
                          capture_output=True, text=True, timeout=180,
                          env=_clean_env(GH_TOKEN=TOKEN, GITHUB_TOKEN=TOKEN))
-    assert "args True" in run.stdout, run.stdout + run.stderr
-    assert "held False False probe" in run.stdout, run.stdout + run.stderr
+    assert run.stdout.splitlines()[:2] == ["clean", "clean"], run.stdout + run.stderr
+    assert "%rom%Resource/Init/;%rom%lib/" in run.stdout, run.stdout + run.stderr
     assert TOKEN not in run.stdout + run.stderr
 
 
@@ -635,9 +648,9 @@ def test_every_bundled_ghostscript_start_goes_through_the_held_launcher() -> Non
     code = "\n".join(line for line in (SCRIPTS / "bundle-ghostscript.ps1").read_text(
         encoding="utf-8-sig").splitlines() if not line.lstrip().startswith("#"))
     starts = re.findall(r"Process\]::Start\(|Start-Process\b|&\s*\$gs|&\s*\$exe", code, re.I)
-    assert starts == ["Process]::Start("], starts
+    assert starts == [], starts
     launcher = code[code.index("function Start-HeldProgram"):code.index("function Invoke-BundledGs")]
-    assert "Process]::Start(" in launcher
+    assert "[SpectraHeldProgram]::Run(" in launcher
 
 
 @pytest.mark.skipif(not POWERSHELLS, reason="no PowerShell")
@@ -733,6 +746,16 @@ UNEXPORT_BOUNDARIES = [
     ("cargo-audit.sh", "github_token_unexport", "exec cargo audit"),
     ("cargo-audit.sh", "unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0",
      "exec cargo audit"),
+    ("setup-python-embed.sh", "github_token_unexport", '"$PY" -B'),
+    ("bundle-voikko.sh", "github_token_unexport", '"$PY"'),
+    ("bundle-icc.sh", "github_token_unexport", "python3 -"),
+    ("bundle-tesseract.sh", "github_token_unexport", '"$DEST/bin/tesseract"'),
+    ("bundle-jbig2enc.sh", "github_token_unexport", '"$DEST/bin/jbig2"'),
+    ("bundle-libreoffice.sh", "github_token_unexport", 'tar -xzf "$archive"'),
+    ("sync-edit-fonts.sh", "github_token_unexport", 'tar -xzf'),
+    ("sync-signature-fonts.sh", "github_token_unexport", "fetch_verified"),
+    ("lock-python-deps.sh", "github_token_unexport", '"$PY"'),
+    ("install-vendored-wheels.sh", "github_token_unexport", '"$PY"'),
     ("bundle-ghostscript.ps1", "Remove-GitHubTokenFromEnvironment", "& $SevenZip x $Installer"),
 ]
 
@@ -743,6 +766,36 @@ def test_no_build_or_vendored_program_inherits_the_credential(name, boundary, la
                      if not line.lstrip().startswith("#"))
     assert boundary in code and later in code, name
     assert code.index(boundary) < code.index(later), (name, boundary, later)
+
+
+def test_zstd_extraction_scrubs_before_archive_tools() -> None:
+    code = (SCRIPTS / "posix-common.sh").read_text(encoding="utf-8")
+    body = code.split("unpack_tar_zst() {", 1)[1].split("\n}", 1)[0]
+    scrub = body.index("github_token_unexport")
+    for command in ("zstd -dc", "tar -x -C", '"$py" -'):
+        assert scrub < body.index(command), command
+
+
+@needs_sh
+def test_posix_runtime_setup_scrubs_before_running_existing_python(tmp_path) -> None:
+    resources = tmp_path / "resources"
+    runtime = resources / "linux-x86_64" / "python" / "bin" / "python3"
+    runtime.parent.mkdir(parents=True)
+    version = re.search(r'PBS_PINNED_VERSION="([^"]+)"',
+                        (SCRIPTS / "setup-python-embed.sh").read_text()).group(1)
+    log = tmp_path / "runtime-env"
+    runtime.write_text(
+        '#!/bin/sh\n'
+        'printf "%s %s\\n" "${GH_TOKEN+present}" "${GITHUB_TOKEN+present}" >> "$PROBE_ENV_LOG"\n'
+        f'if [ "$1" = "-B" ]; then printf "%s\\n" "{version}"; exit 0; fi\n'
+        'exit 94\n', encoding="utf-8", newline="\n")
+    runtime.chmod(0o755)
+    run = _sh('sh scripts/setup-python-embed.sh',
+              _clean_env(GH_TOKEN=TOKEN, GITHUB_TOKEN=TOKEN,
+                         SPECTRA_RESOURCES=resources.as_posix(), PROBE_ENV_LOG=log.as_posix()))
+    assert run.returncode != 0, "the stub deliberately stops provisioning after the launch"
+    assert log.exists(), run.stdout + run.stderr
+    assert "present" not in log.read_text(), "the runtime inherited a credential"
 
 
 def test_the_parity_gates_hand_no_credential_to_every_gate() -> None:

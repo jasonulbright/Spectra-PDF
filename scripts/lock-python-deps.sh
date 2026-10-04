@@ -12,6 +12,7 @@
 # such as tzdata on Windows) may appear in one lock alone.
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 
 PY="$LINUX_RESOURCES/python/bin/python3"
 IN="$REPO_ROOT/scripts/python-requirements.in"

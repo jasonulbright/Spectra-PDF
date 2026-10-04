@@ -7,6 +7,7 @@
 #   sh scripts/bundle-jbig2enc.sh
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 require_tool curl sha256sum tar awk
 
 ARTIFACT_URL="https://github.com/jasonulbright/jbig2enc/releases/download/spectra-0.32-2/jbig2enc-0.32-linux-x86_64.tar.zst"

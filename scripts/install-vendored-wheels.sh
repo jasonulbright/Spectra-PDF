@@ -6,6 +6,7 @@
 #   sh scripts/install-vendored-wheels.sh <python>
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 
 PY="${1:?usage: install-vendored-wheels.sh <python>}"
 MANIFEST="$REPO_ROOT/scripts/vendored-wheels.tsv"

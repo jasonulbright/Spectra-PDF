@@ -42,6 +42,15 @@ github_host() {
   _gh_host="${_gh_host#https://}"
   _gh_host="${_gh_host%%[/?#]*}"
   _gh_host="${_gh_host##*@}"
+  case "$_gh_host" in
+    *:*)
+      _gh_port="${_gh_host#*:}"
+      if [ -n "$_gh_port" ]; then
+        while [ "${_gh_port#0}" != "$_gh_port" ]; do _gh_port="${_gh_port#0}"; done
+        [ "$_gh_port" = 443 ] || return 1
+      fi
+      ;;
+  esac
   _gh_host="${_gh_host%%:*}"
   case " $GITHUB_HOSTS " in *" $_gh_host "*) return 0 ;; esac
   return 1
@@ -173,6 +182,9 @@ require_tool() {
 # unpack_tar_zst ARCHIVE DIR. The Linux Python runtime reads zstd itself, so a
 # host without the zstd tool still unpacks once setup-python-embed.sh has run.
 unpack_tar_zst() {
+  # Downloads may have used the shell's private credential. Archive tools do
+  # not need it and must not inherit it, including the zstd fast path.
+  github_token_unexport
   mkdir -p "$2"
   if command -v zstd >/dev/null 2>&1; then
     zstd -dc "$1" | tar -x -C "$2"
@@ -180,7 +192,7 @@ unpack_tar_zst() {
   fi
   py="$LINUX_RESOURCES/python/bin/python3"
   [ -x "$py" ] || die "unpacking $1 needs zstd on PATH or scripts/setup-python-embed.sh run first"
-  "$py" - "$1" "$2" <<'PYEOF'
+  (github_token_unexport; "$py" - "$1" "$2") <<'PYEOF'
 import sys, tarfile
 import compression.zstd as zstd
 with zstd.open(sys.argv[1], "rb") as raw, tarfile.open(fileobj=raw, mode="r|") as tar:

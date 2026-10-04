@@ -14,11 +14,9 @@ $DownloadRetryAttempts = 4
 $DownloadRetryBaseDelaySeconds = 3
 $DownloadRetryTimeoutSeconds = 900
 
-# The hosts that receive the GitHub credential, over HTTPS only. Invoke-
-# WebRequest drops an Authorization header on every redirect (PowerShell 7
-# without -PreserveAuthorizationOnRedirect; Windows PowerShell 5.1 through
-# HttpWebRequest), so a release asset's redirect to its signed URL on another
-# host never carries it.
+# The hosts that receive the GitHub credential, over HTTPS on port 443 only.
+# Redirects are followed explicitly: same-origin hops retain authorization;
+# leaving that origin removes it for the rest of the redirect chain.
 $GitHubHosts = @(
     'api.github.com',
     'github.com',
@@ -33,7 +31,8 @@ function Test-GitHubUri {
     param([Parameter(Mandatory)][string]$Uri)
     $parsed = $null
     if (-not [Uri]::TryCreate($Uri, [UriKind]::Absolute, [ref]$parsed)) { return $false }
-    return ($parsed.Scheme -eq 'https' -and $GitHubHosts -contains $parsed.Host.ToLowerInvariant())
+    return ($parsed.Scheme -eq 'https' -and $parsed.Port -eq 443 -and
+        $GitHubHosts -contains $parsed.Host.ToLowerInvariant())
 }
 
 function Get-GitHubTokenFromGh {
@@ -200,6 +199,43 @@ function Test-TransientDownloadError {
         'connection attempt failed|OperationCanceled')
 }
 
+function Invoke-ScopedDownload {
+    param([string]$Uri, [string]$OutFile, [int]$TimeoutSec, [hashtable]$Headers, [string]$UserAgent)
+    $current = [Uri]$Uri
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    for ($hop = 0; ; $hop++) {
+        $remaining = $TimeoutSec - [int][Math]::Floor($watch.Elapsed.TotalSeconds)
+        if ($remaining -le 0) { throw 'download timed out while following redirects' }
+        $request = @{
+            Uri = $current.AbsoluteUri; OutFile = $OutFile; Headers = $Headers
+            UseBasicParsing = $true; PassThru = $true; MaximumRedirection = 0
+            TimeoutSec = $remaining; ErrorAction = 'SilentlyContinue'; ErrorVariable = 'hopErrors'
+        }
+        if ($UserAgent) { $request['UserAgent'] = $UserAgent }
+        try {
+            $hopErrors = @()
+            $response = Invoke-WebRequest @request
+            # Windows PowerShell returns the redirect response and writes a
+            # nonterminating maximum-redirection error. Retain that response;
+            # other failures still reach the retry policy with their status.
+            if (-not $response -and $hopErrors.Count) { throw $hopErrors[0] }
+        } catch {
+            $response = $_.Exception.Response
+            if (-not $response -or [int]$response.StatusCode -notin @(301, 302, 303, 307, 308)) { throw }
+        }
+        if ([int]$response.StatusCode -notin @(301, 302, 303, 307, 308)) { return }
+        if ($hop -ge 5) { throw 'download exceeded five redirects' }
+        $location = [string]$response.Headers.Location
+        if (-not $location) { throw 'download redirect has no Location header' }
+        $next = [Uri]::new($current, $location)
+        if ($next.Scheme -notin @('https', 'http')) { throw 'download redirect is not HTTP or HTTPS' }
+        if ($next.Scheme -ne $current.Scheme -or $next.Host -ne $current.Host -or $next.Port -ne $current.Port) {
+            $Headers = @{}
+        }
+        $current = $next
+    }
+}
+
 function Invoke-DownloadWithRetry {
     <#
     .SYNOPSIS
@@ -229,13 +265,11 @@ function Invoke-DownloadWithRetry {
         $request = @{
             Uri = $Uri
             OutFile = $OutFile
-            UseBasicParsing = $true
-            MaximumRedirection = 5
             TimeoutSec = $TimeoutSec
             Headers = (Get-GitHubAuthHeader -Uri $Uri)
         }
         if ($UserAgent) { $request['UserAgent'] = $UserAgent }
-        $Download = { Invoke-WebRequest @request }
+        $Download = { Invoke-ScopedDownload @request }
     }
     if ($Attempts -lt 1) { throw "download retry needs at least one attempt" }
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {

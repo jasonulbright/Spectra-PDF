@@ -8,6 +8,7 @@
 # Output: resources/linux-x86_64/python/ (bin/python3, lib/python3.X/...).
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 require_tool curl sha256sum tar
 
 PYTHON_VERSION="$(head -n1 "$REPO_ROOT/.python-version" | tr -d '[:space:]')"

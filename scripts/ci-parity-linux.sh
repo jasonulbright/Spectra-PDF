@@ -40,7 +40,7 @@ step sh scripts/build-appimage.sh --check
 step python3 scripts/appimage-packages.py --lint scripts/appimage-packages.tsv --pins vendor/anylinux-sharun/PIN.tsv
 step sh -n scripts/verify-appimage-contents.sh
 step sh -n scripts/appimage-catalog-gate.sh
-step sh scripts/test-image-exec.sh
+(github_token_unexport; step sh scripts/test-image-exec.sh)
 step sh scripts/bundle-libreoffice.sh
 step sh scripts/bundle-tesseract.sh
 step sh scripts/bundle-jbig2enc.sh

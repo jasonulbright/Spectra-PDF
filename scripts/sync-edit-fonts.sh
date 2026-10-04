@@ -8,6 +8,7 @@
 #   sh scripts/sync-edit-fonts.sh
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 require_tool curl sha256sum tar python3
 
 DEST="$RESOURCES_ROOT/fonts"

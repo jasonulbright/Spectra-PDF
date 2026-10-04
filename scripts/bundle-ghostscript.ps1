@@ -18,8 +18,8 @@
 #
 # The gate's boundary: it proves that the three files that ran are the pinned
 # upstream bytes, read and executed from one real directory held open for the
-# whole check. A process that can write into that real directory while the
-# handles are held can only add files, which the post-run enumeration reports.
+# whole check. Image-load events are checked before DLL initialization; an
+# added DLL is refused before its code runs, even if it is later removed.
 #
 # Run before packaging:
 #   powershell -ExecutionPolicy Bypass -File scripts\bundle-ghostscript.ps1
@@ -35,6 +35,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$HeldProgramSource = "$PSScriptRoot/held-program.cs"
 
 # Pinned installer checksum -- update deliberately alongside $GsVersion.
 # Source: the GitHub release API `digest` of gs10080w64.exe; the downloaded
@@ -271,6 +272,7 @@ function ConvertTo-CommandLineArgument {
 # or GITHUB_TOKEN on any path, whether or not the script has scrubbed its own.
 function Start-HeldProgram {
     param([string]$Exe, [string]$Directory, [string[]]$Arguments)
+    if (-not ('SpectraHeldProgram' -as [type])) { Add-Type -Path $HeldProgramSource }
     $start = New-Object System.Diagnostics.ProcessStartInfo
     $start.FileName = $Exe
     $start.WorkingDirectory = $Directory
@@ -283,14 +285,11 @@ function Start-HeldProgram {
     $start.EnvironmentVariables.Remove("GS_DLL")
     $start.EnvironmentVariables.Remove("GH_TOKEN")
     $start.EnvironmentVariables.Remove("GITHUB_TOKEN")
-    $process = [System.Diagnostics.Process]::Start($start)
-    $stderr = $process.StandardError.ReadToEndAsync()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $process.WaitForExit()
+    $run = [SpectraHeldProgram]::Run($start, $Directory)
     return [pscustomobject]@{
-        Code   = $process.ExitCode
-        Output = @($stdout -split "`r?`n" | Where-Object { $_ -ne "" })
-        Errors = @($stderr.Result -split "`r?`n" | Where-Object { $_ -ne "" })
+        Code   = $run.Code
+        Output = @($run.Output -split "`r?`n" | Where-Object { $_ -ne "" })
+        Errors = @($run.Errors -split "`r?`n" | Where-Object { $_ -ne "" })
     }
 }
 

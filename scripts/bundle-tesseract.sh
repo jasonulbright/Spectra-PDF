@@ -10,6 +10,7 @@
 #   sh scripts/bundle-tesseract.sh
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 require_tool curl sha256sum tar awk
 
 ARTIFACT_URL="https://github.com/jasonulbright/tesseract/releases/download/spectra-5.4.0-3/tesseract-5.4.0-linux-x86_64.tar.zst"

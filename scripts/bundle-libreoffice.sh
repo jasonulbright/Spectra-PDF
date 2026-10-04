@@ -13,6 +13,7 @@
 #   sh scripts/bundle-libreoffice.sh --gate-only [tree]
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 
 VERSION="26.2.5"
 ARCHIVE_VERSION="26.2.5.2"
