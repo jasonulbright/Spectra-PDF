@@ -12,6 +12,8 @@
 # setup-python-embed.ps1 then installs from the lockfile with --require-hashes.
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
+Remove-GitHubTokenFromEnvironment
 $DestDir = "$PSScriptRoot\..\resources\python"
 $InFile = "$PSScriptRoot\python-requirements.in"
 $OutFile = "$PSScriptRoot\python-requirements.txt"

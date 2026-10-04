@@ -21,10 +21,12 @@ BASE="https://raw.githubusercontent.com/LibreOffice/dictionaries/$COMMIT"
 MANIFEST="$REPO_ROOT/scripts/dictionaries.tsv"
 DEST="$LINUX_RESOURCES/dictionaries"
 
-python3 - "$MANIFEST" "$DEST" "$FETCH_CACHE/dictionaries-$COMMIT" "$BASE" <<'EOF'
-import hashlib, os, pathlib, shutil, sys, time, urllib.request
+python3 - "$MANIFEST" "$DEST" "$FETCH_CACHE/dictionaries-$COMMIT" "$BASE" "$REPO_ROOT/scripts" <<'EOF'
+import hashlib, os, pathlib, shutil, sys, time
 
 manifest, dest, cache, base = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]), sys.argv[4]
+sys.path.insert(0, sys.argv[5])
+import github_auth
 rows, seen = [], False
 for line in open(manifest, encoding="utf-8").read().splitlines():
     if not seen:
@@ -78,7 +80,7 @@ def fetch(r):
         return local
     for attempt in range(1, 5):
         try:
-            with urllib.request.urlopen(f"{base}/{r['upstream']}", timeout=300) as resp:
+            with github_auth.urlopen(f"{base}/{r['upstream']}", timeout=300) as resp:
                 local.write_bytes(resp.read())
             break
         except OSError:

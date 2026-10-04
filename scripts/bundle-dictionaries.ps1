@@ -111,9 +111,7 @@ function Get-Upstream {
     $local = Join-Path $CacheDir ($Path -replace '[\\/]', '_')
     if (-not (Test-Path $local)) {
         Write-Host "  fetching $Path"
-        Invoke-DownloadWithRetry -Description $Path -OutFile $local -Download {
-            Invoke-WebRequest -Uri "$Base/$Path" -OutFile $local -TimeoutSec 300
-        }
+        Invoke-DownloadWithRetry -Uri "$Base/$Path" -Description $Path -OutFile $local -TimeoutSec 300
     }
     $fetched[$Path] = $local
     return $local

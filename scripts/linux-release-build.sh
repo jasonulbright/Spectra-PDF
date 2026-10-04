@@ -55,6 +55,7 @@ step sh "$REPO_ROOT/scripts/bundle-tesseract.sh"
 step sh "$REPO_ROOT/scripts/bundle-jbig2enc.sh"
 step sh "$REPO_ROOT/scripts/bundle-dictionaries.sh"
 step sh "$REPO_ROOT/scripts/bundle-voikko.sh"
+github_token_unexport
 step node "$REPO_ROOT/scripts/sync-ocr-assets.mjs"
 step node "$REPO_ROOT/scripts/sync-pdfjs-assets.mjs"
 

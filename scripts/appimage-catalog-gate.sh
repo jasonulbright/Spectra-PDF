@@ -28,6 +28,7 @@
 # cannot create its sandbox; the catalog itself always uses firejail.
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 
 CATALOG_COMMIT="685ed765c93a07b3966d959f657e1cb83c0a43ac"
 CATALOG_RAW="https://raw.githubusercontent.com/AppImage/appimage.github.io/$CATALOG_COMMIT/code"

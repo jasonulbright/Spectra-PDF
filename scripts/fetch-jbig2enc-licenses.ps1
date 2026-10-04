@@ -26,6 +26,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 
 # Floor for a plausible licence text; pointer stubs run under 150 bytes.
 $MinNoticeBytes = 400
@@ -78,9 +79,9 @@ foreach ($notice in $Sources.Keys) {
                     # SourceForge is the one host here that PREFERS the default
                     # agent, so the alternate is fetched without the override.
                     if ($url -like "*sourceforge.net*") {
-                        Invoke-WebRequest -Uri $url -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
+                        Invoke-WebRequest -Uri $url -Headers (Get-GitHubAuthHeader -Uri $url) -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
                     } else {
-                        Invoke-WebRequest -Uri $url -UserAgent $UA -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
+                        Invoke-WebRequest -Uri $url -Headers (Get-GitHubAuthHeader -Uri $url) -UserAgent $UA -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
                     }
                     $got = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
                     if ($got.Trim().Length -eq 0) { throw "empty body" }

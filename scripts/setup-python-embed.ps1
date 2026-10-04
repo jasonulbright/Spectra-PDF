@@ -3,6 +3,7 @@
 
 . (Join-Path $PSScriptRoot "download-retry.ps1")
 . (Join-Path $PSScriptRoot "pip-bootstrap.ps1")
+Remove-GitHubTokenFromEnvironment
 # The one Python pin: every setup-python step in the workflows reads the same
 # file, so CI tests on the runtime this script ships.
 $PinFile = Join-Path $PSScriptRoot "..\.python-version"
@@ -33,9 +34,7 @@ $Installed = Get-EmbeddedVersion
 if ($Installed -ne $PythonVersion) {
     if ($Installed) { Write-Host "Replacing embedded Python $Installed" }
     Write-Host "Downloading $Url..."
-    Invoke-DownloadWithRetry -Description "Python $PythonVersion" -OutFile $ZipPath -Download {
-        Invoke-WebRequest -Uri $Url -OutFile $ZipPath -TimeoutSec $DownloadRetryTimeoutSeconds
-    }
+    Invoke-DownloadWithRetry -Uri $Url -Description "Python $PythonVersion" -OutFile $ZipPath
     $ActualSha256 = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($ActualSha256 -ne $ExpectedSha256) {
         throw "python-$PythonVersion-embed-amd64.zip has SHA-256 $ActualSha256; python.org publishes $ExpectedSha256"

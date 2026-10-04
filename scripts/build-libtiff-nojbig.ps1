@@ -27,6 +27,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
+Remove-GitHubTokenFromEnvironment
 
 # Pinned sources. The tarball hash is upstream's release artifact and is also the
 # sha256sum recorded in the MSYS2 recipe for this version -- two independent
@@ -55,8 +57,8 @@ New-Item -ItemType Directory -Force $Work | Out-Null
 $Tar = Join-Path $Work "tiff-$Version.tar.gz"
 $Patch = Join-Path $Work "install-headers.patch"
 Write-Host "Downloading $TarUrl..."
-Invoke-WebRequest -Uri $TarUrl -OutFile $Tar -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-Invoke-WebRequest -Uri $PatchUrl -OutFile $Patch -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+Invoke-WebRequest -Uri $TarUrl -Headers (Get-GitHubAuthHeader -Uri $TarUrl) -OutFile $Tar -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+Invoke-WebRequest -Uri $PatchUrl -Headers (Get-GitHubAuthHeader -Uri $PatchUrl) -OutFile $Patch -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 
 foreach ($pair in @(@($Tar, $TarSha256, "libtiff source"), @($Patch, $PatchSha256, "recipe patch"))) {
     $actual = (Get-FileHash $pair[0] -Algorithm SHA256).Hash

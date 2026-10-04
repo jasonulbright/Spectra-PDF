@@ -68,10 +68,7 @@ if ($allPresent) {
 New-Item -ItemType Directory -Force $Dest | Out-Null
 foreach ($item in $Wanted) {
     $Target = Join-Path $Dest $item.Out
-    Invoke-DownloadWithRetry -Description $item.Out -OutFile $Target -Download {
-        Invoke-WebRequest -Uri "$Base/$($item.In)" -OutFile $Target -UseBasicParsing `
-            -TimeoutSec $DownloadRetryTimeoutSeconds
-    }
+    Invoke-DownloadWithRetry -Uri "$Base/$($item.In)" -Description $item.Out -OutFile $Target
     $h = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
     if ($h -ne $item.Sha256) {
         Remove-Item $Target -Force

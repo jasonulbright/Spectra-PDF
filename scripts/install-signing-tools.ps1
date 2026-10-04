@@ -48,9 +48,7 @@ function Install-PinnedSigningClient {
 
     $nupkg = Join-Path $Root "$SigningClientPackage.$SigningClientVersion.nupkg"
     Write-Host "install-signing-tools: fetching $SigningClientPackage $SigningClientVersion"
-    Invoke-DownloadWithRetry -Description "$SigningClientPackage $SigningClientVersion" -OutFile $nupkg -Download {
-        Invoke-WebRequest -Uri $SigningClientUrl -OutFile $nupkg -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
-    }
+    Invoke-DownloadWithRetry -Uri $SigningClientUrl -Description "$SigningClientPackage $SigningClientVersion" -OutFile $nupkg
     $actual = Get-SigningClientSha256 -Path $nupkg
     if ($actual -ne $SigningClientSha256) {
         Remove-Item -LiteralPath $nupkg -Force -ErrorAction SilentlyContinue

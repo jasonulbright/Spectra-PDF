@@ -39,9 +39,7 @@ function Install-PinnedPip {
     # replace each other's archive between the hash check and the expand.
     $archive = Join-Path $env:TEMP "$PipWheel.$([guid]::NewGuid().ToString('N')).zip"
     try {
-        Invoke-DownloadWithRetry -Description $PipWheel -OutFile $archive -Download {
-            Invoke-WebRequest -Uri $PipUrl -OutFile $archive -UseBasicParsing -TimeoutSec $DownloadRetryTimeoutSeconds
-        }
+        Invoke-DownloadWithRetry -Uri $PipUrl -Description $PipWheel -OutFile $archive
         $actual = Get-PipWheelSha256 -Path $archive
         if ($actual -ne $PipSha256) {
             throw "$PipWheel has SHA-256 $actual; the pin is $PipSha256"

@@ -3212,6 +3212,14 @@ def _retry_blocks(text: str) -> list[tuple[int, int]]:
     return _blocks(text, r"-Download\s*\{")
 
 
+#: The scripts whose downloads pass a `-Download` scriptblock, which carries no
+#: credential. release-redo.yml overlays main's bundle-libreoffice.ps1 onto an
+#: older tag's download-retry.ps1, which has no `-Uri` mode, and the script
+#: asks only The Document Foundation's hosts.
+CUSTOM_DOWNLOAD_PS = ("bundle-libreoffice.ps1",)
+URI_DOWNLOAD = re.compile(r"Invoke-DownloadWithRetry\s+-Uri\s")
+
+
 @pytest.mark.parametrize("name", RETRY_ROUTED_PS)
 def test_every_powershell_download_runs_under_the_shared_retry(name: str) -> None:
     text = _ps_source(name)
@@ -3219,7 +3227,14 @@ def test_every_powershell_download_runs_under_the_shared_retry(name: str) -> Non
     blocks = _retry_blocks(text)
     calls = list(PS_DOWNLOAD_CMDLETS.finditer(text))
     curls = list(re.finditer(r"curl\.exe", text))
-    assert calls or curls, name + " performs no download"
+    uris = list(URI_DOWNLOAD.finditer(text))
+    assert calls or curls or uris, name + " performs no download"
+    if name in CUSTOM_DOWNLOAD_PS:
+        assert not re.search(r"(?i)\bhttps?://(?:[a-z0-9-]+\.)*github(?:usercontent)?\.com(?=[:/])", text), (
+            name + ": a credential-less download script names a GitHub host"
+        )
+    else:
+        assert not blocks, name + ": a download passes a -Download block, which carries no credential"
     for call in calls:
         assert any(start <= call.start() < end for start, end in blocks), (
             name + ": a download is not inside a -Download block"
@@ -3441,6 +3456,147 @@ def test_a_bounded_fetch_gives_up_instead_of_hanging(monkeypatch) -> None:
     assert len(calls) == module.ATTEMPTS
 
 
+#: A script that calls one of these and names a GitHub host fetches from
+#: GitHub; the helpers send the credential, which reaches them only through
+#: the step's environment.
+FETCH_HELPER_CALL = re.compile(
+    r"download-retry\.ps1|\b(?:fetch_verified|install_artifact|curl_fetch|github_token_resolve"
+    r"|github_auth|download_retry)\b"
+)
+GITHUB_URL = re.compile(
+    r"https://(?:api\.github\.com|github\.com|raw\.githubusercontent\.com"
+    r"|objects\.githubusercontent\.com|codeload\.github\.com"
+    r"|release-assets\.githubusercontent\.com)/"
+)
+FETCH_HELPER_FILES = {"download-retry.ps1", "posix-common.sh", "github_auth.py", "download_retry.py"}
+SCRIPT_NAME = re.compile(r"\b([A-Za-z0-9_-]+\.(?:sh|ps1|py))\b")
+STEP_TOKEN_ENV = re.compile(
+    r"^ {10}GH_TOKEN: \$\{\{ (?:secrets\.GITHUB_TOKEN|github\.token) \}\}$", re.M
+)
+GH_CLI = re.compile(r"(?:^|[\s(@&|])gh\s+(?:api|release|run|pr|issue)\b", re.M)
+#: Invocations that make no network request: a gate over an existing tree, a
+#: package-manager install, a lint.
+NO_FETCH_MODES = {
+    ("bundle-ghostscript.ps1", "-GateOnly"),
+    ("build-appimage.sh", "--install-packages"),
+    ("build-appimage.sh", "--check"),
+}
+
+
+def _code_lines(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+def _script_sources() -> dict[str, str]:
+    sources = {}
+    for name in _git("ls-files", "--cached", "--others", "--exclude-standard", "scripts").split():
+        path = ROOT / name
+        if path.suffix in (".sh", ".ps1", ".py") and path.parent == ROOT / "scripts":
+            sources[path.name] = _code_lines(path.read_text(encoding="utf-8-sig"))
+    return sources
+
+
+#: A script name in the position of a program run or a file dot-sourced.
+RUNS_SCRIPT = re.compile(
+    r"(?:\b(?:sh|bash)\s+\S*?|\bpython[\w.]*\"?\s+\S*?|-File\s+\S*?|PSScriptRoot\W+\S*?)"
+    r"([A-Za-z0-9_-]+\.(?:sh|ps1|py))\b"
+)
+
+
+def _closure(sources: dict[str, str], seed: set[str]) -> set[str]:
+    """seed plus every script that runs one of them, transitively."""
+    found = set(seed)
+    grew = True
+    while grew:
+        grew = False
+        for name, text in sources.items():
+            if name not in found and set(RUNS_SCRIPT.findall(text)) & found:
+                found.add(name)
+                grew = True
+    return found
+
+
+def _fetching_scripts() -> set[str]:
+    """Every tracked script that fetches from a GitHub host through a shared
+    helper, directly or by running another script that does."""
+    sources = _script_sources()
+    return _closure(sources, {
+        name for name, text in sources.items()
+        if name not in FETCH_HELPER_FILES and FETCH_HELPER_CALL.search(text)
+        and GITHUB_URL.search(text)
+    })
+
+
+def _gh_cli_scripts() -> set[str]:
+    sources = _script_sources()
+    return _closure(sources, {name for name, text in sources.items() if GH_CLI.search(text)})
+
+
+def _run_lines(step: str) -> list[str]:
+    """The command lines of a step's `run:` key, comments and git commands out."""
+    lines, inside = [], False
+    for line in step.splitlines():
+        key = re.match(r"^      (?:- |  )([A-Za-z-]+):(.*)$", line)
+        if key:
+            inside = key.group(1) == "run"
+            line = key.group(2) if inside else ""
+        if inside and line.strip() and not line.lstrip().startswith("#") \
+                and not re.search(r"\bgit\s", line):
+            lines.append(line.strip())
+    return lines
+
+
+def _fetches_from_github(line: str, fetching: set[str]) -> bool:
+    words = line.split()
+    for name in SCRIPT_NAME.findall(line):
+        if name in fetching and not any(script == name and flag in words
+                                        for script, flag in NO_FETCH_MODES):
+            return True
+    return False
+
+
+def test_every_workflow_step_that_fetches_carries_the_github_token() -> None:
+    """GitHub answers 60 anonymous API requests an hour per address; a fetch
+    helper sends the credential only when the step's environment has it."""
+    fetching = _fetching_scripts()
+    assert {"check-toolchains.py", "bundle-ghostscript.ps1", "build-appimage.sh",
+            "linux-release-build.sh", "appimage-catalog-gate.sh"} <= fetching
+    checked = 0
+    for workflow, step in _workflow_steps():
+        for line in _run_lines(step):
+            if not _fetches_from_github(line, fetching):
+                continue
+            checked += 1
+            assert STEP_TOKEN_ENV.search(step), (workflow, line)
+            if re.search(r"\bsudo\b", line):
+                assert "--preserve-env=GH_TOKEN" in line, (workflow, line)
+            if "docker run" in line:
+                assert "-e GH_TOKEN" in line, (workflow, line)
+    assert checked
+
+
+def test_no_workflow_step_carries_the_github_token_without_a_github_request() -> None:
+    """A step's environment reaches every program the step runs: installers,
+    package managers and vendored binaries. Only a step that fetches from
+    GitHub or runs the gh CLI carries the credential."""
+    fetching = _fetching_scripts()
+    gh_scripts = _gh_cli_scripts()
+    assert {"setup-python-embed.ps1", "install-signing-tools.ps1", "bundle-libreoffice.ps1",
+            "bundle-voikko.ps1"}.isdisjoint(fetching)
+    carrying = 0
+    for workflow, step in _workflow_steps():
+        if not STEP_TOKEN_ENV.search(step):
+            continue
+        carrying += 1
+        lines = _run_lines(step)
+        run = "\n".join(lines)
+        needs = (any(_fetches_from_github(line, fetching) for line in lines)
+                 or GH_CLI.search(run)
+                 or set(SCRIPT_NAME.findall(run)) & gh_scripts)
+        assert needs, (workflow, step.splitlines()[0])
+    assert carrying
+
+
 def test_hosted_validation_does_not_repeat_local_functional_suites() -> None:
     for workflow in WORKFLOWS:
         for job in _workflow_jobs(workflow):
@@ -3459,7 +3615,7 @@ def test_fresh_scheduler_and_security_audits_remain_hosted() -> None:
     assert "cargo test --lib scheduler -- --ignored" in commands
     assert commands.index("Create resource stubs") < commands.index("cargo test")
     audit = "\n".join(text for _, text in _job_steps("ci.yml", "audit"))
-    for command in ("npm audit", "cargo audit", "pip-audit -r scripts/python-requirements.txt", "pip-audit -r vendored-audit-requirements.txt"):
+    for command in ("npm audit", "sh scripts/cargo-audit.sh", "pip-audit -r scripts/python-requirements.txt", "pip-audit -r vendored-audit-requirements.txt"):
         assert command in audit
 
 
@@ -3477,10 +3633,31 @@ def test_local_supplement_mirrors_the_hosted_dependency_audits() -> None:
     audit = "\n".join(text for _, text in _job_steps("ci.yml", "audit"))
     for hosted, local in (
         ("npm audit --production --audit-level=high", "gate npm-audit npm audit --production --audit-level=high"),
-        ("cd src-tauri && cargo audit", "gate cargo-audit sh -c 'cd src-tauri && cargo audit'"),
+        ("sh scripts/cargo-audit.sh", "gate cargo-audit sh scripts/cargo-audit.sh"),
     ):
         assert hosted in audit
         assert local in script
+
+
+def test_the_cargo_audit_reads_a_database_fetched_with_the_credential() -> None:
+    """cargo-audit's own fetch is anonymous. The script fetches the database
+    with git on every run, fails when that fetch fails, and only then audits
+    with --no-fetch, so a stale or unfetched database never passes."""
+    code = _code_lines((ROOT / "scripts" / "cargo-audit.sh").read_text(encoding="utf-8"))
+    assert "github_token_resolve" in code
+    assert 'die "no GitHub credential' in code
+    assert 'GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"' in code
+    for fetch in ('git -C "$DB" fetch --quiet origin main || die',
+                  'git clone --quiet --branch main "$DB_URL" "$DB" || die'):
+        assert fetch in code
+        assert code.index(fetch) < code.index("cargo audit --no-fetch --db")
+    assert "--stale" not in code
+    for line in code.splitlines():
+        if re.search(r"\b(?:git|cargo)\s", line):
+            assert "_gh_token" not in line and "GH_TOKEN" not in line, line
+            assert "extraheader=" not in line and " -c " not in line, line
+    step = dict(_job_steps("ci.yml", "audit"))["cargo audit"]
+    assert STEP_TOKEN_ENV.search(step) and "sh scripts/cargo-audit.sh" in step
 
 
 def test_release_smokes_its_vendored_engine_before_publication() -> None:
@@ -4064,7 +4241,8 @@ def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_che
     assert "name: linux-appimage" in download and "path: linux-appimage" in download
     gate = by_name["The AppImage catalog's checks pass without WebKitGTK and GTK 3"]
     assert "chmod 0755 linux-appimage/spectrapdf_*_amd64.AppImage" in gate
-    assert "sudo sh scripts/appimage-catalog-gate.sh linux-appimage/spectrapdf_*_amd64.AppImage --work" in gate
+    assert ("sudo --preserve-env=GH_TOKEN sh scripts/appimage-catalog-gate.sh "
+            "linux-appimage/spectrapdf_*_amd64.AppImage --work") in gate
     assert "--no-firejail" not in gate
     script = (ROOT / "scripts" / "appimage-catalog-gate.sh").read_text(encoding="utf-8")
     assert 'VERSION_ID="22.04"' in script

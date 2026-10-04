@@ -26,6 +26,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "download-retry.ps1")
 
 # Floor for a plausible licence text. Shortest real notice here is ~700 bytes
 # (LZ4's BSD-2); pointer stubs run under 150.
@@ -154,7 +155,7 @@ foreach ($notice in $mustFetch) {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("lic-" + [System.Guid]::NewGuid().ToString("N") + ".tmp")
         foreach ($attempt in 1..3) {
             try {
-                Invoke-WebRequest -Uri $url -UserAgent $UA -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
+                Invoke-WebRequest -Uri $url -Headers (Get-GitHubAuthHeader -Uri $url) -UserAgent $UA -MaximumRedirection 5 -TimeoutSec 60 -OutFile $tmp
                 $got = [System.IO.File]::ReadAllText($tmp, [System.Text.Encoding]::UTF8)
                 if ($got.Trim().Length -eq 0) { throw "empty body" }
                 # Some upstreams keep a one-line pointer where the licence

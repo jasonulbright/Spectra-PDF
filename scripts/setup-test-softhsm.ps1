@@ -40,10 +40,7 @@ New-Item -ItemType Directory -Path $Work -Force | Out-Null
 
 try {
     Write-Host "Downloading test-only SoftHSM2 $Version ..."
-    Invoke-DownloadWithRetry -Description "SoftHSM2 $Version" -OutFile $Archive -Download {
-        Invoke-WebRequest -Uri $Url -OutFile $Archive -UseBasicParsing `
-            -TimeoutSec $DownloadRetryTimeoutSeconds
-    }
+    Invoke-DownloadWithRetry -Uri $Url -Description "SoftHSM2 $Version" -OutFile $Archive
     $actualArchive = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualArchive -ne $ArchiveSha256) {
         throw "SoftHSM2 archive checksum mismatch (expected $ArchiveSha256, got $actualArchive)"
