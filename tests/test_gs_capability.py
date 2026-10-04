@@ -438,8 +438,8 @@ $prefix = $source.Substring(0, $source.IndexOf('if ($GateOnly) {'))
 $real = ${function:Start-HeldProgram}
 if ($Mode -eq 'swap') {
     Set-Item function:Start-HeldProgram {
-        cmd /c rmdir $Junction | Out-Null
-        cmd /c mklink /J $Junction $Swap | Out-Null
+        cmd.exe /c rmdir $Junction | Out-Null
+        cmd.exe /c mklink /J $Junction $Swap | Out-Null
         Write-Host "LAUNCH:$($args[0])"
         & $real @args
     }.GetNewClosure()
@@ -471,7 +471,7 @@ def _held_tree_fixture(tmp_path):
     tree_b.mkdir()
     shutil.copy(os.path.join(os.environ["SystemRoot"], "System32", "hostname.exe"), tree_b / "gswin64c.exe")
     junction = tmp_path / "J"
-    subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(tree_a)], check=True,
+    subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(junction), str(tree_a)], check=True,
                    capture_output=True)
     return root, tree_a, tree_b, junction
 
