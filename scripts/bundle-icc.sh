@@ -7,6 +7,7 @@
 #   sh scripts/bundle-icc.sh [--manifest FILE] [--dest-dir DIR] [--notices FILE]
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 require_tool python3
 
 SOURCE_DIR="$REPO_ROOT/vendor/icc"

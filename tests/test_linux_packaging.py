@@ -175,7 +175,8 @@ def test_the_exec_library_moves_payload_programs_onto_the_image_loader():
     for banned in ("MAX_ARGS", "MAX_ENV", "LIST_SIZE", "SEARCH_SIZE", "malloc(", "socket(", "sigaction(", "sigprocmask("):
         assert banned not in library and banned not in core and banned not in trampoline, banned
     assert '#include "image-exec.h"' in trampoline
-    assert "PR_SET_NAME" in trampoline
+    assert "shmat(" in trampoline and "__atomic_store_n(state" in trampoline
+    assert "IPC_RMID" in library and "MADV_DONTFORK" in library
     build = _text(SCRIPTS / "build-appimage.sh")
     assert 'gcc -shared -fPIC -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec.so" "$IMAGE_EXEC_SOURCE"' in build
     assert ('gcc -static -O2 -Wall -Wextra -Werror -o "$APPDIR/lib/image-exec/image-exec-trampoline" '

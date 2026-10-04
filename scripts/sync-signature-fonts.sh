@@ -5,6 +5,7 @@
 #   sh scripts/sync-signature-fonts.sh
 
 . "$(dirname "$0")/posix-common.sh"
+github_token_unexport
 require_tool curl sha256sum
 
 COMMIT="ec626514f79f831f1ab848a82114a0ce7e2d6372"

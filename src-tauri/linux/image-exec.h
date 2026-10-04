@@ -45,7 +45,7 @@ struct image {
 /* Starts `path`; 0 when a spawn started, otherwise an errno value. */
 typedef int (*launch_fn)(const char *path, char *const argv[], char *const envp[], void *context);
 
-enum image_kind { IMAGE_HOST, IMAGE_INSIDE, IMAGE_PAYLOAD_PROGRAM };
+enum image_kind { IMAGE_HOST, IMAGE_INSIDE, IMAGE_PAYLOAD_PROGRAM, IMAGE_UNREADABLE };
 
 /*
  * A caller-sized array: `local` (`local_size` bytes on the caller's stack:
@@ -193,8 +193,8 @@ static inline int image_requests_interpreter(int fd)
  * as a host name, whose start then fails as it would. The name resolves
  * through open(O_PATH) and /proc/self/fd, or through realpath(3) when no
  * descriptor or no /proc is available. A payload file whose header cannot be
- * read for want of a descriptor classifies as inside the image: it starts as
- * the C library would start it, unchanged.
+ * read returns IMAGE_UNREADABLE with errno preserved: the caller must fail
+ * rather than accidentally start a dynamic payload on the host loader.
  */
 static inline enum image_kind image_classify(const struct image *im, const char *file, char real[PATH_MAX])
 {
@@ -224,7 +224,7 @@ static inline enum image_kind image_classify(const struct image *im, const char 
 		return IMAGE_INSIDE;
 	int rd = image_open(real, O_RDONLY);
 	if (rd < 0)
-		return IMAGE_INSIDE;
+		return IMAGE_UNREADABLE;
 	enum image_kind kind = image_requests_interpreter(rd) ? IMAGE_PAYLOAD_PROGRAM : IMAGE_INSIDE;
 	close(rd);
 	return kind;
@@ -341,6 +341,10 @@ static inline int image_env_action(const char *entry, const char *root)
  * the caller's own argv and envp when nothing is removed, a filtered copy of
  * envp otherwise. A filtered copy the kernel would refuse is not built; the
  * original start goes to the kernel, which refuses it with the same errno.
+ * If the filtered copy cannot be allocated, return ENOMEM instead of passing
+ * the unfiltered environment to a host loader. envp belongs to the caller and
+ * may be shared with its parent in a vfork child, so filtering it in place is
+ * not a safe fallback.
  */
 static inline int image_launch_host(const struct image *im, const char *file, char *const argv[], char *const envp[],
                                     launch_fn launch, void *context)
@@ -397,6 +401,8 @@ static inline int image_start(const struct image *im, const char *file, char *co
 {
 	char real[PATH_MAX];
 	switch (image_classify(im, file, real)) {
+	case IMAGE_UNREADABLE:
+		return errno;
 	case IMAGE_PAYLOAD_PROGRAM:
 		return image_launch_payload(im, real, argv, envp, launch, context);
 	case IMAGE_INSIDE:

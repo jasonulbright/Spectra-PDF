@@ -26,6 +26,7 @@ GITHUB_HOSTS = frozenset({
     "release-assets.githubusercontent.com",
 })
 SCHEMES = frozenset({"https"})
+PORTS = frozenset({443})
 GH_TIMEOUT_SECONDS = 15
 TOKEN_SHAPE = re.compile(r"[A-Za-z0-9_]+")
 
@@ -78,12 +79,13 @@ def _origin(url: str) -> tuple:
     except ValueError:
         return ("", "", None)
     host = (parts.hostname or "").lower()
-    return (parts.scheme.lower(), host, port)
+    scheme = parts.scheme.lower()
+    return (scheme, host, port if port is not None else {"https": 443, "http": 80}.get(scheme))
 
 
 def is_github(url: str) -> bool:
-    scheme, host, _port = _origin(url)
-    return scheme in SCHEMES and host in GITHUB_HOSTS
+    scheme, host, port = _origin(url)
+    return scheme in SCHEMES and host in GITHUB_HOSTS and port in PORTS
 
 
 def _authorize(request: urllib.request.Request) -> bool:

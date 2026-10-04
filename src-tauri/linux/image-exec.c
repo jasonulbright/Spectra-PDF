@@ -14,12 +14,17 @@
  *
  * The wrapper is transparent for every other start:
  *
- * R1. No limit is lower than the C library's. argv and envp are counted and
- *     the arrays a rewrite needs have exactly that size. A rewrite whose
- *     pointer arrays reach the kernel's argument limit is not built: a
- *     payload start fails with E2BIG, the kernel's answer for the rewritten
- *     start, and a host start goes to the kernel unfiltered, which refuses it
- *     with the errno it gives the filtered one.
+ * R1. No argument or environment size limit is lower than the C library's.
+ *     argv and envp are counted and the arrays a rewrite needs have exactly
+ *     that size. A rewrite whose pointer arrays reach the kernel's argument
+ *     limit is not built: a payload start fails with E2BIG, the kernel's
+ *     answer for the rewritten start, and a host start goes to the kernel
+ *     unfiltered, which refuses it with the errno it gives the filtered one.
+ *     If a host environment needs filtering but memory for its new pointer
+ *     array is unavailable, the start fails with ENOMEM. Passing the original
+ *     array would leak image-specific LD_ variables into a host process;
+ *     modifying envp is unsafe because it belongs to the caller and can be
+ *     shared with its parent in a vfork child.
  * R2. A host program receives the caller's own argv pointer, and the
  *     caller's own envp pointer when no entry is removed. A filtered copy
  *     exists only when an LD_ variable or a variable naming the image is
@@ -45,26 +50,22 @@
  * R5. The wrapper adds no descriptor to a spawned child, and the trampoline
  *     needs none to run the requested program. The caller's file actions see
  *     the descriptors and RLIMIT_NOFILE a native spawn gives them; so does the
- *     started program. The trampoline reports a failed exec through its own
- *     process: it sets its name (comm) to a marker that carries a random
- *     nonce from this library and the errno, then exits 127. This library
- *     watches the child without a signal handler and without touching the
- *     signal mask: waitid(WEXITED | WNOHANG | WNOWAIT) and a stat of
- *     /proc/<pid>/exe, which changes when the trampoline's exec succeeds. A
- *     child that exits with status 127 and the marker failed its exec:
- *     posix_spawn reaps it and returns the errno, as glibc does. Any other
- *     exit is the program's own, left for the caller to reap. A program
- *     cannot name itself with the nonce, so the two never coincide. Without
- *     /proc, or when the zombie's name cannot be read, a failed exec shows as
- *     exit status 127, which POSIX allows for an exec that fails after the
- *     child exists.
+ *     started program. A private System V shared-memory segment carries the
+ *     trampoline's exec errno without relying on /proc or adding a file
+ *     descriptor. The segment is marked for deletion before spawning and is
+ *     removed when its last attachment goes away. The trampoline attaches,
+ *     publishes its state, then execs; exec detaches it automatically. The
+ *     parent waits for that detach or the reported error. A program's own
+ *     exit status, including 127, is left for its caller.
  * R6. No stack array is sized by caller data beyond a fixed bound:
  *     IMAGE_STACK_BYTES (1 KiB, 128 pointers) for pointer arrays and short
  *     strings, PATH_MAX for path strings. Larger arrays are anonymous
  *     mappings, released on every path that returns (image_buffer_get in
  *     image-exec.h, which also states what a vfork child leaves mapped after
- *     a successful exec). Fixed buffers are PATH_MAX (a resolved name) and
- *     PATH_MAX + NAME_MAX + 2 (a PATH candidate, glibc's own bound).
+ *     a successful exec). A failed mapping needed to filter a host environment
+ *     returns ENOMEM rather than launching with the unfiltered environment.
+ *     Fixed buffers are PATH_MAX (a resolved name) and PATH_MAX + NAME_MAX + 2
+ *     (a PATH candidate, glibc's own bound).
  *
  * The exec wrappers may run in a vfork child: the next functions are bound
  * once at load, and image-exec.h neither calls malloc nor needs a signal.
@@ -84,7 +85,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
-#include <sys/random.h>
+#include <sys/shm.h>
 #include <sys/wait.h>
 #include <time.h>
 
@@ -304,78 +305,41 @@ static int search_reaches_image(const struct image *im, const char *file, const 
 	return image_path_walk(file, path, reaches_image, &s);
 }
 
-/* Eight hexadecimal digits the started program cannot predict. */
-static void make_nonce(char nonce[9])
-{
-	static unsigned long counter;
-	unsigned char bytes[4];
-	if (getrandom(bytes, sizeof bytes, GRND_NONBLOCK) != (ssize_t)sizeof bytes) {
-		struct timespec now;
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		unsigned long mix = (unsigned long)now.tv_nsec * 2654435761UL ^ (unsigned long)getpid() << 16 ^
-		                    __atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED);
-		memcpy(bytes, &mix, sizeof bytes);
-	}
-	static const char hex[] = "0123456789abcdef";
-	for (int i = 0; i < 4; i++) {
-		nonce[2 * i] = hex[bytes[i] >> 4];
-		nonce[2 * i + 1] = hex[bytes[i] & 15];
-	}
-	nonce[8] = '\0';
-}
-
 /*
- * The errno the exited trampoline `child` carries in its name, or 0 when the
- * exit is not the trampoline's failed exec.
+ * A pending trampoline has state 0; after attaching it publishes -1, then
+ * leaves that state on a successful exec (which detaches the segment). A
+ * failed exec publishes its errno. No descriptor, signal handler or /proc
+ * access is involved. Each concurrent spawn owns a separate segment.
  */
-static int failed_exec_errno(pid_t child, const siginfo_t *info, const char *nonce)
+static int await_exec(pid_t child, int segment, int *state)
 {
-	if (info->si_code != CLD_EXITED || info->si_status != 127)
-		return 0;
-	char stat_path[48];
-	image_copy(image_decimal(image_copy(stat_path, "/proc/"), (unsigned long)child), "/stat");
-	int fd = open(stat_path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return 0;
-	char text[128];
-	ssize_t got = read(fd, text, sizeof text - 1);
-	close(fd);
-	if (got <= 0)
-		return 0;
-	text[got] = '\0';
-	const char *name = strchr(text, '(');
-	if (!name || strncmp(name + 1, nonce, 8) != 0 || name[9] != 'e')
-		return 0;
-	int err = 0;
-	for (const char *d = name + 10; *d >= '0' && *d <= '9'; d++)
-		err = err * 10 + (*d - '0');
-	return err;
-}
-
-/*
- * Waits until the trampoline `child` has executed the requested program or
- * exited. Returns the errno of a failed exec, or 0.
- */
-static int await_exec(pid_t child, const struct stat *trampoline, const char *nonce)
-{
-	char exe[48];
-	image_copy(image_decimal(image_copy(exe, "/proc/"), (unsigned long)child), "/exe");
 	struct timespec delay = { 0, 20000 };
 	for (;;) {
+		int value = __atomic_load_n(state, __ATOMIC_ACQUIRE);
+		if (value > 0)
+			return value;
+		if (value == -1) {
+			struct shmid_ds info;
+			if (shmctl(segment, IPC_STAT, &info) == 0 && info.shm_nattch == 1) {
+				value = __atomic_load_n(state, __ATOMIC_ACQUIRE);
+				return value > 0 ? value : 0;
+			}
+		}
 		siginfo_t info;
 		memset(&info, 0, sizeof info);
 		if (waitid(P_PID, (id_t)child, &info, WEXITED | WNOHANG | WNOWAIT) != 0) {
 			if (errno == EINTR)
 				continue;
-			return 0;
+			value = __atomic_load_n(state, __ATOMIC_ACQUIRE);
+			return value > 0 ? value : 0;
 		}
-		if (info.si_pid == child)
-			return failed_exec_errno(child, &info, nonce);
-		struct stat st;
-		if (stat(exe, &st) == 0) {
-			if (st.st_dev != trampoline->st_dev || st.st_ino != trampoline->st_ino)
-				return 0;
-		} else if (errno == EACCES || errno == EPERM) {
+		if (info.si_pid == child) {
+			value = __atomic_load_n(state, __ATOMIC_ACQUIRE);
+			if (value > 0)
+				return value;
+			// Only the trampoline can exit before publishing the attached state.
+			if (value == 0 && info.si_code == CLD_EXITED)
+				return info.si_status ? info.si_status : EIO;
 			return 0;
 		}
 		nanosleep(&delay, NULL);
@@ -417,17 +381,38 @@ static int spawn_in_child(const struct image *im, int use_path, pid_t *pid, cons
 	char **args = image_buffer_get(&ab, args_local, sizeof args_local, (8 + argc + 1) * sizeof(char *));
 	int err = ENOMEM;
 	pid_t child = -1;
-	struct stat trampoline_stat;
-	int observable = 0;
-	char nonce[9];
+	int segment = -1;
+	int *state = (void *)-1;
+	char segment_arg[24];
 	if (trampoline && path_arg && library_arg && args) {
 		image_copy(image_copy(trampoline, im->root), IMAGE_TRAMPOLINE);
-		struct stat self_exe;
-		observable = stat(trampoline, &trampoline_stat) == 0 && stat("/proc/self/exe", &self_exe) == 0;
-		make_nonce(nonce);
+		segment = shmget(IPC_PRIVATE, sizeof *state, IPC_CREAT | 0600);
+		if (segment < 0) {
+			err = errno;
+			goto done;
+		}
+		state = shmat(segment, NULL, 0);
+		int attach_errno = errno;
+		// Linux permits attachment to an IPC_RMID segment while we hold it.
+		if (shmctl(segment, IPC_RMID, NULL) != 0) {
+			err = errno;
+			goto done;
+		}
+		if (state == (void *)-1) {
+			err = attach_errno;
+			goto done;
+		}
+		// An unrelated fork in another thread must not inherit an attachment:
+		// only this parent and the trampoline participate in the detach count.
+		if (madvise(state, sizeof *state, MADV_DONTFORK) != 0) {
+			err = errno;
+			goto done;
+		}
+		__atomic_store_n(state, 0, __ATOMIC_RELEASE);
+		image_decimal(segment_arg, (unsigned long)segment);
 		size_t n = 0;
 		args[n++] = trampoline;
-		args[n++] = nonce;
+		args[n++] = segment_arg;
 		args[n++] = use_path ? "spawnp" : "spawn";
 		args[n++] = path_arg;
 		args[n++] = (char *)im->root;
@@ -439,13 +424,16 @@ static int spawn_in_child(const struct image *im, int use_path, pid_t *pid, cons
 		args[n] = NULL;
 		err = next_spawn(&child, trampoline, actions, attr, args, envp);
 	}
+done:
 	image_buffer_put(&ab);
 	image_buffer_put(&lb);
 	image_buffer_put(&pb);
 	image_buffer_put(&tb);
+	int exec_err = err == 0 ? await_exec(child, segment, state) : 0;
+	if (state != (void *)-1)
+		shmdt(state);
 	if (err != 0)
 		return err;
-	int exec_err = observable ? await_exec(child, &trampoline_stat, nonce) : 0;
 	if (exec_err > 0) {
 		while (waitpid(child, NULL, 0) < 0 && errno == EINTR)
 			;

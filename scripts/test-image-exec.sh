@@ -12,10 +12,11 @@
 # Needs a C compiler, a static C library and a glibc with ld.so --argv0 (2.33
 # or later).
 #
-# Every semantics case runs the same call natively and with the library
-# preloaded: stdout, the exit status and the errno the caller reports must be
-# identical, and the native result must match the case's pattern. The
-# environment cases check the documented removal of the image's variables.
+# Every transparent semantics case runs the same call natively and with the
+# library preloaded: stdout, exit status and reported errno must match. The
+# resource-refusal case is explicit: if there is no memory for a filtered host
+# environment, the wrapper returns ENOMEM instead of leaking image loader
+# variables to the host program.
 
 set -eu
 
@@ -53,6 +54,7 @@ cat > "$WORK/caller.c" <<'EOF'
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +98,22 @@ static char **many(const char *first, long count, const char *each)
 static const char *thread_mode, *thread_file;
 static long thread_count;
 
+static void *spawn_many(void *unused)
+{
+	(void)unused;
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_init(&actions);
+	posix_spawn_file_actions_addchdir_np(&actions, "/");
+	char *args[] = { "missing", NULL };
+	for (int i = 0; i < 40; i++) {
+		pid_t pid;
+		int err = posix_spawn(&pid, "no-such-program", &actions, NULL, args, environ);
+		if (err != ENOENT) return (void *)1;
+	}
+	posix_spawn_file_actions_destroy(&actions);
+	return NULL;
+}
+
 /* Runs on a thread with a 64 KiB stack. */
 static void *small_stack(void *unused)
 {
@@ -122,6 +140,30 @@ int main(int argc, char **argv)
 	posix_spawn_file_actions_t fa;
 	posix_spawn_file_actions_init(&fa);
 	pid_t pid;
+	if (!strcmp(mode, "spawn-concurrent")) {
+		pthread_t threads[8];
+		for (int i = 0; i < 8; i++)
+			if (pthread_create(&threads[i], NULL, spawn_many, NULL)) return 2;
+		for (int i = 0; i < 8; i++) {
+			void *result;
+			pthread_join(threads[i], &result);
+			if (result) return 3;
+		}
+		puts("concurrent errno=ENOENT");
+		return 0;
+	}
+	if (!strcmp(mode, "spawn-ignored-chld")) {
+		signal(SIGCHLD, SIG_IGN);
+		posix_spawn_file_actions_addchdir_np(&fa, "/");
+		return waited(posix_spawn(&pid, file, &fa, NULL, args, environ), &pid, "posix_spawn");
+	}
+	if (!strcmp(mode, "payload-nofile3")) {
+		struct rlimit three = { 3, 3 };
+		close_range(3, ~0U, 0);
+		if (setrlimit(RLIMIT_NOFILE, &three)) return 2;
+		execve(file, args, environ);
+		return report("execve", errno);
+	}
 	if (!strcmp(mode, "execvp")) {
 		execvp(file, args);
 		return report("execvp", errno);
@@ -159,6 +201,24 @@ int main(int argc, char **argv)
 			env[n] = "LD_FOO=1";
 			env[n + 1] = NULL;
 		}
+		char *one[] = { "custom-argv0", NULL };
+		execve(file, one, env);
+		return report("execve", errno);
+	}
+	if (!strcmp(mode, "execve-env-low-as")) {
+		long n = atol(extra);
+		char **env = many("X=x", n - 1, "X=x");
+		env = realloc(env, ((size_t)n + 2) * sizeof *env);
+		env[n] = "LD_FOO=1";
+		env[n + 1] = NULL;
+		FILE *statm = fopen("/proc/self/statm", "r");
+		unsigned long pages = 0;
+		if (!statm || fscanf(statm, "%lu", &pages) != 1) return 2;
+		fclose(statm);
+		long page_size = sysconf(_SC_PAGESIZE);
+		if (page_size <= 0) return 2;
+		struct rlimit limit = { (rlim_t)pages * (rlim_t)page_size, RLIM_INFINITY };
+		if (setrlimit(RLIMIT_AS, &limit)) return 2;
 		char *one[] = { "custom-argv0", NULL };
 		execve(file, one, env);
 		return report("execve", errno);
@@ -311,8 +371,13 @@ fail() {
 same() {
   name="$1"; loader="$2"; dir="$3"; pattern="$4"; shift 4
   cases=$((cases + 1))
-  native="$(cd "$dir" && PATH="$CASE_PATH" "$@" 2>"$WORK/native.err")" && native_rc=0 || native_rc=$?
-  wrapped="$(cd "$dir" && LD_PRELOAD="$LIB" PATH="$CASE_PATH" "$@" 2>"$WORK/wrapped.err")" && wrapped_rc=0 || wrapped_rc=$?
+  if [ "${HIDE_PROC:-no}" = yes ]; then
+    native="$(cd "$dir" && unshare -Urnm "$WORK/without-proc" "$CASE_PATH" '' "$@" 2>"$WORK/native.err")" && native_rc=0 || native_rc=$?
+    wrapped="$(cd "$dir" && unshare -Urnm "$WORK/without-proc" "$CASE_PATH" "$LIB" "$@" 2>"$WORK/wrapped.err")" && wrapped_rc=0 || wrapped_rc=$?
+  else
+    native="$(cd "$dir" && PATH="$CASE_PATH" "$@" 2>"$WORK/native.err")" && native_rc=0 || native_rc=$?
+    wrapped="$(cd "$dir" && LD_PRELOAD="$LIB" PATH="$CASE_PATH" "$@" 2>"$WORK/wrapped.err")" && wrapped_rc=0 || wrapped_rc=$?
+  fi
   native_line="$(printf '%s rc=%s' "$native" "$native_rc" | tr '\n' ' ')"
   wrapped_line="$(printf '%s rc=%s' "$wrapped" "$wrapped_rc" | tr '\n' ' ')"
   if [ "$native" != "$wrapped" ] || [ "$native_rc" != "$wrapped_rc" ]; then
@@ -349,6 +414,21 @@ refuse() {
     fail "$name: unexpected /$pattern/ in: $(printf '%s' "$out" | tr '\n' ' ')"
   else
     echo "ok   $name"
+  fi
+}
+resource_refusal() {
+  name="$1"; shift
+  cases=$((cases + 1))
+  native="$(PATH="$DEFAULT_PATH" "$@" 2>"$WORK/native.err")" && native_rc=0 || native_rc=$?
+  wrapped="$(LD_PRELOAD="$LIB" PATH="$DEFAULT_PATH" "$@" 2>"$WORK/wrapped.err")" && wrapped_rc=0 || wrapped_rc=$?
+  if [ "$native_rc" -ne 0 ]; then
+    fail "$name: native exec was expected to fit its current address-space limit (rc=$native_rc)"
+  elif [ "$wrapped_rc" -ne 3 ] || ! printf '%s\n' "$wrapped" | grep -Eq '^execve failed: ENOMEM$'; then
+    fail "$name: expected a fail-closed ENOMEM, got [$wrapped] rc=$wrapped_rc"
+  elif grep -q LOADER_USED "$WORK/wrapped.err"; then
+    fail "$name: the host program ran with the image loader"
+  else
+    echo "ok   $name [native rc=0; filtered exec refused with ENOMEM]"
   fi
 }
 
@@ -452,6 +532,27 @@ same "a name longer than NAME_MAX" no "$WORK" 'execvp failed: ENAMETOOLONG rc=3'
 same "dup2 from a closed descriptor 3 fails as natively" no "$HOST_DIR" 'posix_spawn failed: EBADF rc=3' "$CALLER" spawn-dup2-3 ./helper
 same "an open action filling RLIMIT_NOFILE=4 still runs the program" no "$HOST_DIR" "$HOST_LINE" "$CALLER" spawn-nofile4 ./static-helper
 same "a program after chdir that exits 127 is not a failed exec" no "$PAYLOAD_DIR" '^ rc=127' "$CALLER" spawn-chdir ./exit127 "$HOST_DIR"
+same "concurrent trampoline errors stay with their own caller" no "$WORK" '^concurrent errno=ENOENT rc=0' "$CALLER" spawn-concurrent unused
+same "an ignored SIGCHLD does not hide a failed exec" no "$WORK" 'posix_spawn failed: ENOENT rc=3' "$CALLER" spawn-ignored-chld no-such-program
+expect "a payload with no available descriptor fails without a host-loader bypass" '^execve failed: EMFILE$' "$CALLER" payload-nofile3 "$P"
+
+# Exercise the no-/proc path inside a private namespace when permitted.
+# Platforms that restrict namespace creation still run every case above.
+if command -v unshare >/dev/null 2>&1 && unshare -Urnm true 2>/dev/null; then
+  cat > "$WORK/without-proc" <<'EOF'
+#!/bin/sh
+mount -t tmpfs tmpfs /proc || exit 2
+search="$1"; preload="$2"; shift 2
+exec env PATH="$search" LD_PRELOAD="$preload" "$@"
+EOF
+  chmod +x "$WORK/without-proc"
+  HIDE_PROC=yes
+  same "missing relative program reports ENOENT without /proc" no "$WORK" 'posix_spawn failed: ENOENT rc=3' \
+    "$CALLER" spawn-chdir no-such-program "$HOST_DIR"
+  same "a real exit 127 remains an exit without /proc" no "$WORK" '^ rc=127' \
+    "$CALLER" spawn-chdir ./exit127 "$HOST_DIR"
+  HIDE_PROC=no
+fi
 
 # No caller-sized array on a small thread stack.
 same "a filtered 10,000-entry environment on a 64 KiB thread stack" no "$WORK" '^argc=1 rc=0' "$CALLER" thread-env "$WORK/bin/argcount" 10000
@@ -467,6 +568,8 @@ expect "a host program keeps the host entries of a list" '^XDG_DATA_DIRS=/usr/sh
   "$CALLER" execle-env /usr/bin/env "GS_LIB=$ROOT/share/ghostscript" "XDG_DATA_DIRS=$ROOT/share:/usr/share"
 expect "a filtered 5,000-entry environment reaches the host program" '^envc=5000$' \
   "$CALLER" execve-env-ld "$WORK/bin/envcount" 5000
+resource_refusal "no address space for filtering fails closed rather than leaking LD_ entries" \
+  "$CALLER" execve-env-low-as /bin/true 10000
 
 [ "$failures" -eq 0 ] || die "image-exec: $failures of $cases case(s) failed"
 echo "image-exec: every case passed ($cases cases)"

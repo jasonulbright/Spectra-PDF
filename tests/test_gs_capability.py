@@ -354,6 +354,7 @@ $ErrorActionPreference = 'Stop'
 $source = Get-Content -LiteralPath $Script -Raw
 $prefix = $source.Substring(0, $source.IndexOf('if ($GateOnly) {'))
 . ([scriptblock]::Create($prefix)) -DestDir $Tree -Notices $Notices
+$HeldProgramSource = Join-Path (Split-Path $Script) 'held-program.cs'
 try {
     Invoke-BundledGs $Tree @('--version') | Out-Null
     Write-Host 'GUARD=RAN'
@@ -435,6 +436,7 @@ $ErrorActionPreference = 'Stop'
 $source = Get-Content -LiteralPath $Script -Raw
 $prefix = $source.Substring(0, $source.IndexOf('if ($GateOnly) {'))
 . ([scriptblock]::Create($prefix)) -DestDir $Junction -Notices $Notices
+$HeldProgramSource = Join-Path (Split-Path $Script) 'held-program.cs'
 $real = ${function:Start-HeldProgram}
 if ($Mode -eq 'swap') {
     Set-Item function:Start-HeldProgram {
@@ -442,6 +444,13 @@ if ($Mode -eq 'swap') {
         cmd.exe /c mklink /J $Junction $Swap | Out-Null
         Write-Host "LAUNCH:$($args[0])"
         & $real @args
+    }.GetNewClosure()
+} elseif ($Mode -eq 'dll') {
+    Set-Item function:Start-HeldProgram {
+        $added = Join-Path $args[1] 'vcruntime140.dll'
+        Copy-Item -LiteralPath "$env:SystemRoot\System32\vcruntime140.dll" -Destination $added
+        try { & $real @args }
+        finally { Remove-Item -LiteralPath $added -Force }
     }.GetNewClosure()
 } else {
     Set-Item function:Start-HeldProgram {
@@ -503,6 +512,20 @@ def test_a_junction_swapped_after_verification_still_runs_the_verified_bytes(tmp
         assert launch, out
         assert os.path.samefile(launch[0], tree_a / "gswin64c.exe"), out
         assert "RAN:0:10.08.0" in out, out
+    finally:
+        _remove_junction(junction)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the bundle script is Windows PowerShell")
+def test_a_transient_unverified_dll_is_refused_before_initialization(tmp_path):
+    root, tree_a, tree_b, junction = _held_tree_fixture(tmp_path)
+    try:
+        run = _run_held_tree_harness(tmp_path, root, "dll", junction, tree_b)
+        out = run.stdout + run.stderr
+        assert run.returncode == 0, out
+        assert "Refusing an unverified DLL before initialization:" in out, out
+        assert "vcruntime140.dll" in out and "RAN:" not in out, out
+        assert not (tree_a / "vcruntime140.dll").exists()
     finally:
         _remove_junction(junction)
 
