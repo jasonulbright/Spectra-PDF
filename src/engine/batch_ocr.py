@@ -230,7 +230,8 @@ class _AlreadyHandled(Exception):
 
 def _classify_load_error(exc: Exception) -> str:
     # The library text of a failed open carries the source's full path and
-    # parser internals, so a report row names only the class of failure.
+    # parser internals, so `reason` names only the class of failure; the text
+    # itself travels in the row's `detail` and the log line.
     if isinstance(exc, pikepdf.PasswordError):
         return "password-protected"
     return "unreadable"
@@ -823,6 +824,8 @@ def batch_ocr(
                         }
                 else:
                     result = {"rel": rel, "status": "skipped", "reason": classification}
+                if result is not None and classification == "unreadable":
+                    result["detail"] = str(exc)
 
             if pdf is not None:
                 working = enhanced or scratch or wrapped or abs_path
@@ -1302,6 +1305,8 @@ def _file_line(r: dict) -> str:
             line += f" ({r['reason']})"
     else:
         line = f"{tag}{r['rel']} — {r['reason']}" if r.get("reason") else f"{tag}{r['rel']}"
+        if r.get("detail"):
+            line += f" ({r['detail']})"
     if r.get("enhance"):
         # What the enhancement corrected — or why it corrected nothing — on
         # the same terms as the MRC note below: never left to inference.
