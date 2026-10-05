@@ -28,7 +28,7 @@ GITHUB_HOSTS = frozenset({
 SCHEMES = frozenset({"https"})
 PORTS = frozenset({443})
 GH_TIMEOUT_SECONDS = 15
-TOKEN_SHAPE = re.compile(r"[A-Za-z0-9_]+")
+TOKEN_SHAPE = re.compile(r"[A-Za-z0-9._~+/=-]+")
 
 _token: list[str] = []
 _opener: list[urllib.request.OpenerDirector] = []
@@ -58,7 +58,7 @@ def _from_gh() -> str:
 def token() -> str:
     """The credential, resolved once per process; "" when none resolves.
 
-    A value holding any character outside [A-Za-z0-9_] counts as none:
+    A value holding any character outside [A-Za-z0-9._~+/=-] counts as none:
     http.client refuses such a header value and quotes it in the error.
     """
     if not _token:

@@ -425,6 +425,7 @@ RESOLVE_CASES = [
     ({"GH_TOKEN": "  ", "GITHUB_TOKEN": "second"}, "second"),
     ({"GH_TOKEN": "a b", "GITHUB_TOKEN": "second"}, ""),
     ({"GITHUB_TOKEN": "\tsecond\n"}, "second"),
+    ({"GH_TOKEN": "aaa.bbb-ccc_ddd~e+f/g=="}, "aaa.bbb-ccc_ddd~e+f/g=="),
     ({}, ""),
 ]
 

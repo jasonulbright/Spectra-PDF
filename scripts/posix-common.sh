@@ -66,7 +66,7 @@ _gh_trim() {
 # github_token_resolve: sets _gh_token to GH_TOKEN, GITHUB_TOKEN, or the
 # output of `gh auth token`, in that order, or to "" when none resolves. The
 # first variable that holds more than whitespace decides; a value holding any
-# character outside [A-Za-z0-9_] then counts as none. The caller turns tracing
+# character outside [A-Za-z0-9._~+/=-] then counts as none. The caller turns tracing
 # off first.
 github_token_resolve() {
   _gh_token="${_gh_kept:-}"
@@ -86,7 +86,7 @@ github_token_resolve() {
       _gh_token="$(gh auth token 2>/dev/null)" || _gh_token=""
     fi
   fi
-  case "$_gh_token" in *[!A-Za-z0-9_]*) _gh_token="" ;; esac
+  case "$_gh_token" in *[!A-Za-z0-9._~+/=-]*) _gh_token="" ;; esac
 }
 
 # github_token_unexport: keeps the GH_TOKEN or GITHUB_TOKEN value for this
@@ -114,7 +114,7 @@ github_token_unexport() {
 # config file on stdin: no argument carries it, so the process list and a
 # traced command line never show it. Tracing is off while the token is read
 # and tested, because `set -x` prints assignments and test arguments expanded.
-# A token holding any character outside [A-Za-z0-9_] is not sent: the config
+# A token holding any character outside [A-Za-z0-9._~+/=-] is not sent: the config
 # line quotes it with no escaping. A GitHub host with no credential stops the
 # script before any request.
 curl_fetch() {
