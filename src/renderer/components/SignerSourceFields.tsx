@@ -530,6 +530,16 @@ export function SignerSourceFields({
                 data-testid={`${idPrefix}-store-cert`}
                 value={value.thumbprint ?? ''}
                 disabled={storeBusy || certOptions.length === 0}
+                title={(() => {
+                  const row = certOptions.find((r) => r.thumbprint === value.thumbprint);
+                  return row
+                    ? tChrome('dialog.signer.storeRow', {
+                      subject: row.subject,
+                      issuer: row.issuer,
+                      date: tDate(row.notAfter),
+                    })
+                    : undefined;
+                })()}
                 onChange={(e) => {
                   const row = certOptions.find((r) => r.thumbprint === e.target.value);
                   onChange({
@@ -982,9 +992,12 @@ function CscSignerFields({
 
   const fieldClass =
     'flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500';
+  // Wraps its row's buttons below it before it shrinks past legibility.
+  const selectFieldClass =
+    'flex-1 min-w-[10rem] px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500';
   const labelClass = 'text-xs text-neutral-400 w-20 shrink-0';
   const buttonClass =
-    'px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium';
+    'whitespace-nowrap px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium';
 
   if (draft) {
     return (
@@ -1115,7 +1128,7 @@ function CscSignerFields({
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className={labelClass}>{tChrome('dialog.signer.cscProvider')}</span>
         <select
           data-testid={`${idPrefix}-csc-provider`}
@@ -1130,7 +1143,8 @@ function CscSignerFields({
               authorization: null,
             });
           }}
-          className={fieldClass}
+          title={provider ? provider.name || provider.url : undefined}
+          className={selectFieldClass}
         >
           <option value="">{tChrome('dialog.signer.cscChooseProvider')}</option>
           {providers.map((p) => (
@@ -1162,7 +1176,7 @@ function CscSignerFields({
       </div>
 
       {provider && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className={labelClass}>{tChrome('dialog.signer.cscCredential')}</span>
           <select
             data-testid={`${idPrefix}-csc-credential`}
@@ -1177,7 +1191,8 @@ function CscSignerFields({
                 authorization: value.authorization,
               });
             }}
-            className={fieldClass}
+            title={(rows ?? []).find((r) => r.credential_id === value.credentialId)?.subject || undefined}
+            className={selectFieldClass}
           >
             <option value="">{tChrome('dialog.signer.cscChooseCredential')}</option>
             {(rows ?? []).map((r) => (

@@ -57,7 +57,7 @@ export interface PrintDialogProps {
 type Opts = ReturnType<typeof defaultPrintOptions>;
 
 const selectCls =
-  'w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm';
+  'px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm';
 const inputCls =
   'px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-60';
 const labelCls = 'block text-sm text-neutral-400 mb-1';
@@ -304,7 +304,31 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   };
 
   return (
-    <Shell onClose={onClose}>
+    <Shell
+      onClose={onClose}
+      footer={
+        <>
+          {error && (
+            <p className="text-sm text-red-400 me-auto [overflow-wrap:anywhere]" data-testid="print-error">{error}</p>
+          )}
+          <button
+            data-testid="print-cancel"
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+          >
+            {tChrome('dialog.common.cancel')}
+          </button>
+          <button
+            data-testid="print-submit"
+            disabled={!canPrint}
+            onClick={() => void handlePrint()}
+            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
+          >
+            {tChrome(busy ? 'dialog.print.printing' : 'dialog.print.print')}
+          </button>
+        </>
+      }
+    >
       <div className="flex gap-5">
       <div className="flex flex-col gap-4 flex-1 min-w-0">
         <div>
@@ -321,7 +345,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             <select
               id="print-printer"
               data-testid="print-printer"
-              className={selectCls}
+              className={selectCls + ' w-full'}
               value={printer}
               disabled={printers === null}
               onChange={(e) => setPrinter(e.target.value)}
@@ -377,11 +401,11 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
           {rangeErr && (
             <p className="text-xs text-red-400 mt-1" data-testid="print-range-error">{rangeErr}</p>
           )}
-          <div className="flex items-center gap-4 mt-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
             <select
               data-testid="print-subset"
               aria-label={tChrome('dialog.print.subsetAria')}
-              className={selectCls + ' w-auto'}
+              className={selectCls}
               value={opts.subset}
               onChange={(e) => set('subset', e.target.value as PageSubset)}
             >
@@ -389,7 +413,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <option value="odd">{tChrome('dialog.print.subsetOdd')}</option>
               <option value="even">{tChrome('dialog.print.subsetEven')}</option>
             </select>
-            <label className="flex items-center gap-1.5 text-sm">
+            <label className="flex items-center gap-1.5 text-sm whitespace-nowrap">
               <input
                 type="checkbox"
                 data-testid="print-reverse"
@@ -436,7 +460,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             <select
               data-testid="print-layout"
               aria-label={tChrome('dialog.print.layoutAria')}
-              className={selectCls + ' w-auto'}
+              className={selectCls}
               value={opts.layout}
               onChange={(e) => set('layout', e.target.value as PrintLayout)}
             >
@@ -501,12 +525,12 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
 
           {opts.layout === 'nup' && (
             <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-neutral-400">
+              <label className="text-sm text-neutral-400 whitespace-nowrap">
                 {tChrome('dialog.print.gridLabel')}{' '}
                 <select
                   data-testid="print-nup-rows"
                   aria-label={tChrome('dialog.print.rowsAria')}
-                  className={selectCls + ' w-auto inline-block'}
+                  className={selectCls + ' inline-block'}
                   value={opts.nupRows}
                   onChange={(e) => set('nupRows', Number(e.target.value))}
                 >
@@ -516,7 +540,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
                 <select
                   data-testid="print-nup-cols"
                   aria-label={tChrome('dialog.print.colsAria')}
-                  className={selectCls + ' w-auto inline-block'}
+                  className={selectCls + ' inline-block'}
                   value={opts.nupCols}
                   onChange={(e) => set('nupCols', Number(e.target.value))}
                 >
@@ -526,7 +550,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <select
                 data-testid="print-nup-order"
                 aria-label={tChrome('dialog.print.orderAria')}
-                className={selectCls + ' w-auto'}
+                className={selectCls}
                 value={opts.nupOrder}
                 onChange={(e) => set('nupOrder', e.target.value as NupOrder)}
               >
@@ -565,7 +589,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <select
                 data-testid="print-booklet-subset"
                 aria-label={tChrome('dialog.print.bookletSidesAria')}
-                className={selectCls + ' w-auto'}
+                className={selectCls}
                 value={opts.bookletSubset}
                 onChange={(e) => set('bookletSubset', e.target.value as BookletSubset)}
               >
@@ -576,7 +600,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <select
                 data-testid="print-booklet-binding"
                 aria-label={tChrome('dialog.print.bindingAria')}
-                className={selectCls + ' w-auto'}
+                className={selectCls}
                 value={opts.bookletBinding}
                 onChange={(e) => set('bookletBinding', e.target.value as BookletBinding)}
               >
@@ -591,7 +615,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
 
           {opts.layout === 'poster' && (
             <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-neutral-400">
+              <label className="text-sm text-neutral-400 whitespace-nowrap">
                 {tChrome('dialog.print.tileScale')}{' '}
                 <input
                   data-testid="print-poster-scale"
@@ -601,7 +625,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
                 />
                 {' '}{tChrome('dialog.print.percent')}
               </label>
-              <label className="text-sm text-neutral-400">
+              <label className="text-sm text-neutral-400 whitespace-nowrap">
                 {tChrome('dialog.print.overlap')}{' '}
                 <input
                   data-testid="print-poster-overlap"
@@ -644,7 +668,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             <select
               id="print-orientation"
               data-testid="print-orientation"
-              className={selectCls}
+              className={selectCls + ' w-full'}
               value={opts.layout === 'booklet' ? 'landscape' : opts.orientation}
               disabled={opts.layout === 'booklet'}
               onChange={(e) => set('orientation', e.target.value as OrientationMode)}
@@ -659,7 +683,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             <select
               id="print-paper"
               data-testid="print-paper"
-              className={selectCls}
+              className={selectCls + ' w-full'}
               value={opts.paper ?? ''}
               disabled={!caps || caps.papers.length === 0}
               onChange={(e) =>
@@ -679,7 +703,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <select
                 id="print-duplex"
                 data-testid="print-duplex"
-                className={selectCls}
+                className={selectCls + ' w-full'}
                 value={opts.duplex}
                 onChange={(e) => set('duplex', e.target.value as DuplexMode)}
               >
@@ -696,7 +720,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <select
                 id="print-color"
                 data-testid="print-color"
-                className={selectCls}
+                className={selectCls + ' w-full'}
                 value={opts.color}
                 onChange={(e) => set('color', e.target.value as ColorMode)}
               >
@@ -718,7 +742,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             <select
               id="print-annots"
               data-testid="print-annots"
-              className={selectCls}
+              className={selectCls + ' w-full'}
               value={opts.annots}
               onChange={(e) => set('annots', e.target.value as AnnotsMode)}
             >
@@ -741,7 +765,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
               <select
                 data-testid="print-image-dpi"
                 aria-label={tChrome('dialog.print.dpiAria')}
-                className={selectCls + ' w-auto'}
+                className={selectCls}
                 value={opts.imageDpi}
                 onChange={(e) => set('imageDpi', Number(e.target.value))}
               >
@@ -759,27 +783,6 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             Ghostscript device, so this dialog gates whole rather than by
             control. */}
         <GsRequiredNotice capability={gs} testId="print-gs" />
-        {error && (
-          <p className="text-sm text-red-400" data-testid="print-error">{error}</p>
-        )}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            data-testid="print-cancel"
-            onClick={onClose}
-            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
-          >
-            {tChrome('dialog.common.cancel')}
-          </button>
-          <button
-            data-testid="print-submit"
-            disabled={!canPrint}
-            onClick={() => void handlePrint()}
-            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
-          >
-            {tChrome(busy ? 'dialog.print.printing' : 'dialog.print.print')}
-          </button>
-        </div>
       </div>
 
       <div className="w-64 shrink-0 flex flex-col gap-2" data-testid="print-preview">
@@ -845,7 +848,20 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   );
 }
 
-function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): React.JSX.Element {
+/**
+ * The dialog's body scrolls between a fixed header and a fixed footer: with
+ * the actions inside the scrolling body, an option that grew the body ("pages
+ * per sheet") pushed Print and Cancel below the visible area.
+ */
+function Shell({
+  children,
+  footer,
+  onClose,
+}: {
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  onClose: () => void;
+}): React.JSX.Element {
   const shellRef = useAppModal(onClose);
   return (
     <div
@@ -860,10 +876,10 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
         aria-modal="true"
         aria-label={tChrome('dialog.print.title')}
         data-testid="print-dialog"
-        className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[960px] max-w-[96vw] max-h-[90vh] overflow-y-auto"
+        className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[960px] max-w-[96vw] max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-neutral-800">
           <h3 className="text-sm font-semibold">{tChrome('dialog.print.title')}</h3>
           <button
             data-testid="print-close"
@@ -873,7 +889,12 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
             {tChrome('dialog.common.close')}
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 min-h-0 flex-1 overflow-y-auto">{children}</div>
+        {footer && (
+          <div className="shrink-0 flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-neutral-800">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

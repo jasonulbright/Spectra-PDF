@@ -41,6 +41,7 @@ import {
 } from '../lib/combine';
 import { claimOutputFile } from '../lib/output-root-claim';
 import { useRowDrag, rowDragClass } from './useRowDrag';
+import { PathText } from './PathText';
 
 // Document ▸ Combine Files.
 //
@@ -613,8 +614,8 @@ export function CombineDialog({
 
         {result && (
           <div aria-live="polite">
-            <p className="text-sm break-all" data-testid="combine-done">
-              {tChromeCount('dialog.combine.done', result.pages, { path: result.output })}
+            <p className="text-sm [overflow-wrap:anywhere]" data-testid="combine-done">
+              <PathText text={tChromeCount('dialog.combine.done', result.pages, { path: result.output })} />
             </p>
             {(result.warnings ?? []).map((warning) => (
               <p key={warning} className="text-xs text-amber-400 mt-1" data-testid="combine-warning">

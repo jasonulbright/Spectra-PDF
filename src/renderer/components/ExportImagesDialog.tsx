@@ -5,6 +5,7 @@ import { dialog } from '../lib/tauri-bridge';
 import { gsBlocked, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from './GsRequiredNotice';
+import { PathText } from './PathText';
 import { TEST_HARNESS_ENABLED, registerExportImages } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
@@ -210,15 +211,17 @@ export function ExportImagesDialog({
             </p>
           )}
           {result && (
-            <p className="text-sm break-all" data-testid="export-images-done" aria-live="polite">
+            <p className="text-sm [overflow-wrap:anywhere]" data-testid="export-images-done" aria-live="polite">
               {/* One whole message; the target is a single path or a
                   pluralised file COUNT, resolved before interpolation. */}
-              {tChromeCount('dialog.exportImages.done', result.pages_rendered, {
-                target:
-                  result.outputs.length === 1
-                    ? result.outputs[0]
-                    : tChromeCount('dialog.exportImages.fileCount', result.outputs.length),
-              })}
+              <PathText
+                text={tChromeCount('dialog.exportImages.done', result.pages_rendered, {
+                  target:
+                    result.outputs.length === 1
+                      ? result.outputs[0]
+                      : tChromeCount('dialog.exportImages.fileCount', result.outputs.length),
+                })}
+              />
             </p>
           )}
 
