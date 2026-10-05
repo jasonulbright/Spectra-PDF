@@ -31,15 +31,20 @@ const withoutPlaceholders = (s: string): string => s.replace(/\{\{[^}]*\}\}/g, '
 describe('English UI copy', () => {
   it('never writes a count with a parenthesised plural', () => {
     expect(Object.entries(TABLES).filter(([, v]) => /\w\((?:s|es)\)/.test(v)).map(([k]) => k)).toEqual([]);
+    expect(ENGINE_MESSAGE_ROWS.filter((r) => /\w\((?:s|es)\)/.test(r.message)).map((r) => r.key)).toEqual([]);
   });
 
   it('uses American spelling', () => {
     const british =
-      /(?<![A-Za-z])(re)?(colour|licence|analys(e|ed|es|ing)\b|recognis|greyscale|grey\b|catalogue|centre|centred|modelled|cancelled|labelled|judgement|behaviour|rasteris)/i;
+      /(?<![A-Za-z])(re)?(colour|licence|analys(e|ed|es|ing)\b|recognis|greyscale|greyed|grey\b|catalogue|centre|centred|modelled|cancelled|labelled|judgement|behaviour|rasteris)/i;
     const tables = Object.entries(TABLES).filter(([, v]) => british.test(withoutPlaceholders(v)));
     const engine = ENGINE_MESSAGE_ROWS.filter((r) => british.test(withoutPlaceholders(r.message)));
+    // The generated catalog also carries the derived tables: guided-action
+    // step labels, tool descriptions, command titles, menu labels.
+    const derived = Object.entries(catalog('en')).filter(([, v]) => british.test(withoutPlaceholders(v)));
     expect(tables.map(([k]) => k)).toEqual([]);
     expect(engine.map((r) => r.key)).toEqual([]);
+    expect(derived.map(([k]) => k)).toEqual([]);
   });
 
   it('writes a dash, never a double hyphen, in engine messages', () => {
