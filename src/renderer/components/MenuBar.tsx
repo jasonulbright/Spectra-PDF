@@ -19,7 +19,8 @@ const itemCls =
   'text-neutral-200 outline-none data-[highlighted]:bg-blue-600 data-[highlighted]:text-white ' +
   'data-[disabled]:text-neutral-600 data-[disabled]:pointer-events-none';
 const contentCls =
-  'app-menu-content min-w-[200px] bg-neutral-800 border border-neutral-700 rounded-md shadow-2xl p-1 z-50';
+  'app-menu-content min-w-[200px] max-h-[var(--radix-menubar-content-available-height)] overflow-y-auto ' +
+  'bg-neutral-800 border border-neutral-700 rounded-md shadow-2xl p-1 z-50';
 // A chord names physical keys in the order they are pressed, so it is
 // notation and does not mirror.
 const shortcutCls =
