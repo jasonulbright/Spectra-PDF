@@ -92,7 +92,7 @@ const KEY_LABEL_KEYS: Record<string, UiKey> = {
 
 export function formatKey(key: string): string {
   const k = KEY_LABEL_KEYS[key];
-  return k ? tChrome(k) : key.length === 1 ? key.toUpperCase() : key;
+  return k ? tChrome(k) : key.length === 1 || /^f\d{1,2}$/.test(key) ? key.toUpperCase() : key;
 }
 
 /**
