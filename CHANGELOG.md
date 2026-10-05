@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.1005.153
+
+*Released 2026-10-05*
+
+Various bug fixes.
+
 ## 2026.1004.152
 
 *Released 2026-10-04*
