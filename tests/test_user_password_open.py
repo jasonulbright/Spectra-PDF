@@ -790,11 +790,19 @@ def test_gs_owner_process_liveness_tracks_a_real_child():
 def _dacl(path: str) -> str:
     import subprocess
 
+    env = {**os.environ, "SPECTRA_ACL_PATH": path}
+    # Windows PowerShell 5.1 cannot load its own modules when it inherits the
+    # PowerShell 7 module path. Give it its system module directory so Get-Acl
+    # autoloads from the matching installation.
+    env["PSModulePath"] = os.path.join(
+        env.get("SystemRoot", r"C:\Windows"),
+        "System32", "WindowsPowerShell", "v1.0", "Modules",
+    )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command",
          "(Get-Acl -LiteralPath $env:SPECTRA_ACL_PATH).Sddl"],
         capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL,
-        env={**os.environ, "SPECTRA_ACL_PATH": path},
+        env=env,
     )
     sddl = result.stdout.strip()
     return sddl[sddl.index("D:"):].split("S:")[0]
