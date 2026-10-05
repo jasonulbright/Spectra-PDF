@@ -69,6 +69,7 @@ import {
   type TrustConfig,
 } from '../lib/trust-store';
 import { CertificationBanner } from '../components/CertificationBanner';
+import { PathText } from '../components/PathText';
 import { useTranslation } from 'react-i18next';
 import { PermissionRefusal, signBlock } from '../lib/document-permission-text';
 import { tChrome, tChromeCount } from '../i18n';
@@ -619,7 +620,7 @@ export function SignaturesPanel(): React.ReactElement {
             {tChromeCount('panel.sig.found', result.signature_count)}
           </div>
           <CertificationBanner result={result} />
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
+          <div className="flex-1 min-h-[10rem] overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
             {result.signatures.map((sig, i) => (
               <SignatureCard
                 key={sig.field ?? i}
@@ -831,7 +832,7 @@ export function SignaturesPanel(): React.ReactElement {
             />
             {tChrome('panel.sig.pades')}
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.tsaUrl')}</span>
             <input
               data-testid="sign-tsa-url"
@@ -839,7 +840,8 @@ export function SignaturesPanel(): React.ReactElement {
               value={tsaUrl}
               placeholder={tChrome('panel.sig.tsaPlaceholder')}
               onChange={(e) => setTsaUrl(e.target.value)}
-              className="ltr-notation flex-1 min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              title={tChrome('panel.sig.tsaPlaceholder')}
+              className="ltr-notation flex-1 min-w-[16rem] px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <label className={`flex items-center gap-2 text-xs ${pades ? 'text-neutral-300' : 'text-neutral-600'}`}>
@@ -965,8 +967,8 @@ export function SignaturesPanel(): React.ReactElement {
                 : tChrome('panel.sig.certifiedLevelUnknown')}
             </div>
           )}
-          <div className="text-xs text-green-300/70 mt-0.5 truncate" title={signResult.output}>
-            {tChrome('panel.sig.savedTo', { path: signResult.output })}
+          <div className="text-xs text-green-300/70 mt-0.5 [overflow-wrap:anywhere]">
+            <PathText text={tChrome('panel.sig.savedTo', { path: signResult.output })} />
           </div>
         </div>
       )}

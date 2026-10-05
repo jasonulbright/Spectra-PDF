@@ -6,6 +6,7 @@ import type { FocusedTab } from '../state/types';
 import { invokeCommand } from '../commands/context';
 import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
+import { TAB_TAIL, splitTabLabel } from './tab-label';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import {
@@ -56,6 +57,28 @@ const tabBase =
   'select-none cursor-default shrink min-w-[104px] max-w-[420px] whitespace-nowrap outline-none';
 const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
+
+/**
+ * A tab label that truncates in the middle. The parts are inline boxes, not
+ * flex items: a flex item is block-level, and the label's text as read by
+ * `innerText` would then carry a line break inside the file name. The tail's
+ * reserve is in `ch` with slack, because a proportional face sets letters
+ * wider than the digit `ch` measures.
+ */
+function TabName({ name }: { name: string }): React.ReactElement {
+  const { head, tail } = splitTabLabel(name);
+  if (!tail) return <span className="truncate">{name}</span>;
+  return (
+    <span
+      dir="auto"
+      className="tab-name"
+      style={{ '--tab-tail-reserve': `${Math.ceil(TAB_TAIL * 1.4)}ch` } as React.CSSProperties}
+    >
+      <span className="tab-name-head">{head}</span>
+      <span className="tab-name-tail">{tail}</span>
+    </span>
+  );
+}
 
 export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.ReactElement {
   // Re-render on language change; labels resolve via tChrome.
@@ -250,7 +273,7 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
               className={`${tabBase} ${active ? activeCls : idleCls} ${draggingPath === path ? 'opacity-40' : ''}`}
             >
               <ChromeIcon icon="document" size={13} className="opacity-70 shrink-0" />
-              <span className="truncate">{f.name}</span>
+              <TabName name={f.name} />
               {dirty && (
                 <span data-testid={`tab-dirty-${i}`} className="status-dot w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
               )}

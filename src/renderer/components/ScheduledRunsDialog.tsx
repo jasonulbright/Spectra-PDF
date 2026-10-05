@@ -20,6 +20,7 @@ import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOcrLanguage, tStepTitle } from '../i18n';
 import { hostOs } from '../lib/platform-capabilities';
+import { lastRunView } from './schedule-timing';
 
 // Tools ▸ Scheduled Batch Runs owns the complete lifecycle: create, list, run
 // now, enable, disable, and delete. Windows Task Scheduler (a systemd user
@@ -218,16 +219,19 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     <span className="text-xs text-neutral-500">{r.status}</span>
                   </div>
                   <div className="text-xs text-neutral-500 mt-0.5">
-                    {tChrome(
-                      r.lastResult
-                        ? 'dialog.schedule.timingResult'
-                        : 'dialog.schedule.timing',
-                      {
-                        next: r.nextRun || tChrome('dialog.schedule.none'),
-                        last: r.lastRun || tChrome('dialog.schedule.never'),
-                        result: r.lastResult,
-                      },
-                    )}
+                    {(() => {
+                      const last = lastRunView(r.lastRun, r.lastResult);
+                      return tChrome(
+                        last.failureCode
+                          ? 'dialog.schedule.timingResult'
+                          : 'dialog.schedule.timing',
+                        {
+                          next: r.nextRun || tChrome('dialog.schedule.none'),
+                          last: last.ran ? r.lastRun : tChrome('dialog.schedule.never'),
+                          result: last.failureCode ?? '',
+                        },
+                      );
+                    })()}
                   </div>
                   {r.profile ? (
                     <>

@@ -5,6 +5,7 @@ import { dialog } from '../lib/tauri-bridge';
 import { gsBlocked, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from './GsRequiredNotice';
+import { PathText } from './PathText';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import {
@@ -269,9 +270,9 @@ export function ExportDocumentDialog({
             </p>
           )}
           {summary.length > 0 && (
-            <div className="text-sm break-all" data-testid="export-doc-done" aria-live="polite">
+            <div className="text-sm [overflow-wrap:anywhere]" data-testid="export-doc-done" aria-live="polite">
               {summary.map((line) => (
-                <p key={line}>{line}</p>
+                <p key={line}><PathText text={line} /></p>
               ))}
             </div>
           )}

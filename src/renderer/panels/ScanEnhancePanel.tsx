@@ -278,12 +278,13 @@ export function ScanEnhancePanel(): React.ReactElement {
         </label>
       </div>
 
-      {/* Two label/control pairs per row on a shared grid. As a wrapping
+      {/* One label/control pair per row on a shared grid. As a wrapping
           flex row each input started where its own label ended, so three
-          consecutive rows put their control at three x-positions.
-          `contents` on the label keeps the control associated with its
-          text while letting the pair be two grid cells. */}
-      <div className="grid grid-cols-[minmax(0,1fr)_5rem_minmax(0,1fr)_5rem] gap-x-3 gap-y-2 items-center">
+          consecutive rows put their control at three x-positions; two pairs
+          per row left each label a quarter of the dock and wrapped it to
+          four lines. `contents` on the label keeps the control associated
+          with its text while letting the pair be two grid cells. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-x-3 gap-y-2 items-center">
         <label className="contents text-xs text-neutral-500">
           <span className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.maxSkew')}</span>
           <input

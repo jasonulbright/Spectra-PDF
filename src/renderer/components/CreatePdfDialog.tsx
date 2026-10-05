@@ -56,6 +56,7 @@ import {
   type CaptureResult,
 } from '../lib/web-capture';
 import { WebCaptureDialog } from './WebCaptureDialog';
+import { PathText } from './PathText';
 import { platformCapability } from '../lib/platform-capabilities';
 
 // File ▸ Create PDF: ONE door for images, Office /
@@ -748,8 +749,8 @@ export function CreatePdfDialog({
           </fieldset>
         )}
 
-        <div className="grid grid-cols-3 gap-2">
-          <div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="col-span-2">
             <label className="block text-xs text-neutral-400 mb-1" htmlFor="create-pdf-page-size">
               {tChrome('dialog.createPdf.pageSize')}
             </label>
@@ -843,11 +844,11 @@ export function CreatePdfDialog({
 
         {result && (
           <div aria-live="polite">
-            <p className="text-sm break-all" data-testid="create-pdf-done">
+            <p className="text-sm [overflow-wrap:anywhere]" data-testid="create-pdf-done">
               {/* One whole message — the path rides as an interpolation
                   rather than sitting in a trailing span the wording would
                   have to wrap around. */}
-              {tChromeCount('dialog.createPdf.done', result.pages, { path: result.output })}
+              <PathText text={tChromeCount('dialog.createPdf.done', result.pages, { path: result.output })} />
             </p>
             {(result.warnings ?? []).map((warning) => (
               <p key={warning} className="text-xs text-amber-400 mt-1" data-testid="create-pdf-warning">
@@ -885,17 +886,19 @@ export function CreatePdfDialog({
                   data-testid="create-pdf-perfile-row"
                   data-state={outcome.output !== undefined ? 'built' : 'failed'}
                   data-output={outcome.output}
-                  className={'break-all ' + (outcome.output !== undefined ? 'text-neutral-300' : 'text-red-400')}
+                  className={'[overflow-wrap:anywhere] ' + (outcome.output !== undefined ? 'text-neutral-300' : 'text-red-400')}
                 >
-                  {outcome.output !== undefined
-                    ? tChrome('dialog.common.route', {
-                      source: baseName(outcome.source),
-                      dest: outcome.output,
-                    })
-                    : tChrome('canvas.common.fileFailure', {
-                      name: baseName(outcome.source),
-                      message: outcome.error ?? '',
-                    })}
+                  <PathText
+                    text={outcome.output !== undefined
+                      ? tChrome('dialog.common.route', {
+                        source: baseName(outcome.source),
+                        dest: outcome.output,
+                      })
+                      : tChrome('canvas.common.fileFailure', {
+                        name: baseName(outcome.source),
+                        message: outcome.error ?? '',
+                      })}
+                  />
                 </li>
               ))}
             </ul>

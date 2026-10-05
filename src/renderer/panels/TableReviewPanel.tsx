@@ -5,6 +5,7 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useEngine } from '../hooks/useEngine';
 import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
 import { NoFileOpen } from '../components/NoFileOpen';
+import { PathText } from '../components/PathText';
 import { getCanvasServices } from '../commands/context';
 import { runCommitGate } from '../lib/commit-gate';
 import { dialog } from '../lib/tauri-bridge';
@@ -421,9 +422,9 @@ export function TableReviewPanel(): React.ReactElement {
         </p>
       )}
       {summary.length > 0 && (
-        <div className="text-sm break-all" data-testid="table-review-done" aria-live="polite">
+        <div className="text-sm [overflow-wrap:anywhere]" data-testid="table-review-done" aria-live="polite">
           {summary.map((line) => (
-            <p key={line}>{line}</p>
+            <p key={line}><PathText text={line} /></p>
           ))}
         </div>
       )}

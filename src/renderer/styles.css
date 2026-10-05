@@ -5542,3 +5542,19 @@ input:not([type]) {
 .canvas-float-top {
   inset-block-start: calc(var(--canvas-inset-block-start, 0px) + 1rem);
 }
+
+/* Middle-truncated document tab label (components/TabStrip.tsx `TabName`):
+   the head takes the ellipsis, the tail always shows. */
+.tab-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.tab-name-head {
+  display: inline-block;
+  vertical-align: top;
+  max-width: calc(100% - var(--tab-tail-reserve, 12ch));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
