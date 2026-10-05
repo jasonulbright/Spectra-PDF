@@ -16,6 +16,7 @@ import {
   BatchPauseGate,
   batchRunControls,
   cancelledNoteKey,
+  shownReasonText,
   type BatchPauseState,
   type BatchProgress,
   type BatchReport,
@@ -1323,7 +1324,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             <div className="max-h-40 overflow-y-auto border border-neutral-800 rounded p-2">
               {skippedResults.map((r) => (
                 <p key={r.rel} className="text-xs text-amber-400">
-                  {tChrome('dialog.batch.rowReason', { rel: r.rel, reason: r.reason ?? '' })}
+                  {tChrome('dialog.batch.rowReason', { rel: r.rel, reason: shownReasonText(r) })}
                 </p>
               ))}
             </div>

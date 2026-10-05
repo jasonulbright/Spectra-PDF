@@ -222,13 +222,10 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     {(() => {
                       const last = lastRunView(r.lastRun, r.lastResult);
                       return tChrome(
-                        last.failureCode
-                          ? 'dialog.schedule.timingResult'
-                          : 'dialog.schedule.timing',
+                        last.failed ? 'dialog.schedule.timingFailed' : 'dialog.schedule.timing',
                         {
                           next: r.nextRun || tChrome('dialog.schedule.none'),
                           last: last.ran ? r.lastRun : tChrome('dialog.schedule.never'),
-                          result: last.failureCode ?? '',
                         },
                       );
                     })()}
@@ -357,13 +354,6 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <button
-              data-testid="schedule-close"
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
-            >
-              {tChrome('dialog.common.close')}
-            </button>
             <button
               data-testid="schedule-new"
               onClick={() => {

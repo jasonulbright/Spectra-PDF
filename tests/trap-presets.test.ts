@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 import {
   DEFAULT_TRAPPED,
   TRAPPED_VALUES,
@@ -7,6 +10,7 @@ import {
   isTrappedValue,
   orderedAssignments,
   rangeProblem,
+  trapFieldLabelKey,
   uncoveredPages,
   type TrapAssignment,
   type TrapVocabulary,
@@ -125,5 +129,35 @@ describe('assignment listing', () => {
 
   it('ignores the part of a range that falls outside the document', () => {
     expect(uncoveredPages([assignment(1, 99)], 3)).toEqual([]);
+  });
+});
+
+describe('field captions', () => {
+  // The engine's TRAP_FIELDS table is the vocabulary the panel lists; every
+  // name it shows except the colorant table gets a caption.
+  const engine = readFileSync(resolve(__dirname, '../src/engine/trapping.py'), 'utf8');
+  const start = engine.indexOf('TRAP_FIELDS: dict');
+  const table = engine.slice(start, start + engine.slice(start).search(/\r?\n\}\r?\n/));
+  const names = [...table.matchAll(/^\s+"([A-Za-z]+)": \{\s*"type": "([a-z]+)"/gm)];
+
+  it('reads the engine vocabulary', () => {
+    expect(names.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it('captions every listed parameter with a plain label that is not its wire name', () => {
+    for (const [, name, type] of names) {
+      if (type === 'colorants') continue;
+      const key = trapFieldLabelKey(name);
+      expect(key, name).not.toBeNull();
+      const caption = PANEL_STRINGS[key!];
+      expect(caption, name).toBeTruthy();
+      expect(caption, name).not.toBe(name);
+      expect(caption, name).not.toMatch(/[a-z][A-Z]/);
+    }
+  });
+
+  it('has no caption for a name the engine does not define', () => {
+    expect(trapFieldLabelKey('NotATrapParameter')).toBeNull();
+    expect(trapFieldLabelKey('toString')).toBeNull();
   });
 });

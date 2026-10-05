@@ -773,7 +773,7 @@ export const DIALOG_STRINGS = {
     'Scheduled runs happen through systemd user timers, so they run even when Spectra PDF is closed. A run missed because the computer was off or you were signed out starts as soon as your session is back. Everything here is managed from this window.',
   'dialog.schedule.empty': 'No scheduled runs yet.',
   'dialog.schedule.timing': 'Next: {{next}} · Last: {{last}}',
-  'dialog.schedule.timingResult': 'Next: {{next}} · Last: {{last}} ({{result}})',
+  'dialog.schedule.timingFailed': 'Next: {{next}} · Last: {{last}}. The last run failed.',
   'dialog.schedule.never': 'never',
   'dialog.schedule.none': '—',
   'dialog.schedule.guidedAction': 'Guided action: {{name}}',
@@ -949,6 +949,9 @@ export const DIALOG_STRINGS = {
   'dialog.batch.rowPartial': '{{rel}} — made searchable, but {{reason}}',
   'dialog.batch.rowMrc': '{{rel}} — {{note}}',
   'dialog.batch.rowEnhance': '{{rel}} — {{note}}',
+  'dialog.batch.unreadable': 'could not be read as a PDF',
+  'dialog.batch.unreadableRepairFailed':
+    'could not be read as a PDF, and repair did not help: {{detail}}',
   'dialog.batch.removeEmptyFolders': 'Delete empty folders left in the source folder',
   'dialog.batch.removeEmptyFoldersNote':
     'After the last file, removes folders inside the source folder that are empty. A folder with any file in it is kept, including hidden system files such as desktop.ini or Thumbs.db. The source folder itself stays. Links and junctions are not followed. A stopped run removes nothing.',

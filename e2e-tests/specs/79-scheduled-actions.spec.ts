@@ -115,7 +115,7 @@ describe('scheduled guided actions', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
     await browser.execute(() => localStorage.removeItem('guided-actions'));
     try {
-      await $('[data-testid="schedule-close"]').click();
+      await $('[data-testid="schedule-x"]').click();
     } catch {
       /* dialog already closed */
     }
