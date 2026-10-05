@@ -640,7 +640,7 @@ class TestOrder:
             }
         ])
         assert steps[0]["params"]["jpeg_quality"] == 90
-        with pytest.raises(ValueError, match="unknown parameter"):
+        with pytest.raises(ValueError, match="parameters not recognized"):
             validate_steps([{"op": "enhance_scan", "params": {"gs_path": "evil.exe"}}])
 
 

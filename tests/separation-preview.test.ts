@@ -801,7 +801,7 @@ describe('what a spot-to-process conversion reports', () => {
   });
 
   const SPOT_NAME = 'PANTONE 185 C';
-  const PLAIN = 'PANTONE 185 C is now process colour.';
+  const PLAIN = 'PANTONE 185 C is now process color.';
 
   const skipped = (over: Partial<SkippedShading> = {}): SkippedShading => ({
     shading: 1,
@@ -843,14 +843,14 @@ describe('what a spot-to-process conversion reports', () => {
 
   it('counts one skipped gradient in the singular', () => {
     expect(convertedToProcessMessage(SPOT_NAME, [skipped()])).toBe(
-      `${PLAIN} — 1 gradient still prints it: the conversion cannot describe its colour.`,
+      `${PLAIN} — 1 gradient still prints it: the conversion cannot describe its color.`,
     );
   });
 
   it('counts many skipped gradients in the plural', () => {
     const many = [skipped({ shading: 1 }), skipped({ shading: 2 }), skipped({ shading: 5 })];
     expect(convertedToProcessMessage(SPOT_NAME, many)).toBe(
-      `${PLAIN} — 3 gradients still print it: the conversion cannot describe their colour.`,
+      `${PLAIN} — 3 gradients still print it: the conversion cannot describe their color.`,
     );
   });
 

@@ -55,12 +55,14 @@ def repair(file: str, output: str) -> dict:
             file, suppress_warnings=True, allow_overwriting_input=True
         )
     except pikepdf.PasswordError:
-        raise ValueError("PDF is encrypted -- decrypt before repairing")
+        raise ValueError("PDF is encrypted — decrypt before repairing")
     except Exception as e2:
+        # The library text names the file by its full path and describes the
+        # parser's state; the cause stays chained for the log.
         raise RuntimeError(
-            f"PDF is too damaged for Tier 1 repair: {e2}. "
-            "Try 'rebuild' (Tier 2) or 'recover' (Tier 3)."
-        )
+            "The PDF is too damaged to repair. Try Rebuild, or Recover to "
+            "salvage the pages that can still be read."
+        ) from e2
 
     with pdf:
         page_count = len(pdf.pages)

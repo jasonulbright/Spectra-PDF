@@ -65,7 +65,7 @@ def test_the_output_intent_embeds_the_bundled_srgb_profile(tmp_pdf, tmp_path, fa
 def test_a_missing_bundled_profile_refuses_by_name(tmp_pdf, tmp_path, fake_gs):
     empty = tmp_path / "icc"
     empty.mkdir()
-    with pytest.raises(RuntimeError, match="bundled sRGB colour profile is missing"):
+    with pytest.raises(RuntimeError, match="bundled sRGB color profile is missing"):
         pdfa.convert_pdfa(tmp_pdf, str(tmp_path / "out.pdf"), icc_dir=str(empty))
     assert "cmd" not in fake_gs
     assert not (tmp_path / "out.pdf").exists()

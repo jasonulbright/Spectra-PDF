@@ -873,7 +873,7 @@ class TestSoftProofRefusals:
             self._plates(tmp_path, gs_path)["dir"], output=str(tmp_path / "a.png"),
             simulation={"source": "file", "profile": str(bogus)}, gs_path=gs_path)
         assert result["simulation"]["source"] == "none"
-        assert "not a colour profile this engine can read" in result["simulation"]["refusal"]
+        assert "not a color profile this engine can read" in result["simulation"]["refusal"]
         assert os.path.isfile(result["png"])
 
     def test_a_display_profile_refuses_by_name(self, tmp_path, gs_path, icc_dir):
@@ -1276,7 +1276,7 @@ class TestSimulationProfilesOffered:
             gs_path=gs_path, icc_dir=icc_dir)
         assert result["simulation"]["source"] == "none"
         assert "No Such Press v9" in result["simulation"]["refusal"]
-        assert "No colour profile named" in result["simulation"]["refusal"]
+        assert "No color profile named" in result["simulation"]["refusal"]
 
     def test_an_empty_profile_directory_refuses_rather_than_degrading(
         self, tmp_path, gs_path
@@ -1290,7 +1290,7 @@ class TestSimulationProfilesOffered:
             simulation={"source": "bundled"},
             gs_path=gs_path, icc_dir=str(empty))
         assert result["simulation"]["source"] == "none"
-        assert "No colour profiles are installed" in result["simulation"]["refusal"]
+        assert "No color profiles are installed" in result["simulation"]["refusal"]
 
 
 

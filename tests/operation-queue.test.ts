@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { QueueItem } from '../src/renderer/components/OperationQueue';
 import {
+  FRIENDLY_NAMES,
   describeResult,
   formatOutcome,
+  formatQueueLabel,
   isTrackableMethod,
   runTracked,
   upsertQueueItem,
@@ -32,6 +36,42 @@ describe('isTrackableMethod — internal-read exemptions', () => {
     for (const m of ['add_text_box', 'merge', 'sign_pdf', 'delete']) {
       expect(isTrackableMethod(m)).toBe(true);
     }
+  });
+});
+
+// A trackable method with no FRIENDLY_NAMES row reaches the queue and the log
+// as its raw engine id. Every method the engine registers, and every literal
+// method id a renderer call site names, is either an internal read or a named
+// operation; a name on an untracked method would be dead text.
+describe('every engine method is classified', () => {
+  const classified = (m: string): boolean => !isTrackableMethod(m) || Object.hasOwn(FRIENDLY_NAMES, m);
+
+  it('covers every method the engine registers', () => {
+    const main = readFileSync(resolve(__dirname, '../src/engine/__main__.py'), 'utf8');
+    const registered = [...main.matchAll(/server\.register\("([a-z_0-9]+)"/g)].map((m) => m[1]);
+    expect(registered.length).toBeGreaterThan(200);
+    expect(registered.filter((m) => !classified(m))).toEqual([]);
+  });
+
+  it('covers every literal method id at a renderer call site', () => {
+    const root = resolve(__dirname, '../src/renderer');
+    const callSite =
+      /\b(?:call|callRaw|performOperation|trackOperation|track)\(\s*(?:[A-Za-z_.]+\s*,\s*)?'([a-z][a-z_0-9]+)'/g;
+    const ids = new Set<string>();
+    for (const rel of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
+      if (!/\.tsx?$/.test(rel) || rel.startsWith('locales')) continue;
+      for (const m of readFileSync(join(root, rel), 'utf8').matchAll(callSite)) ids.add(m[1]);
+    }
+    expect(ids.size).toBeGreaterThan(100);
+    expect([...ids].filter((m) => !classified(m)).sort()).toEqual([]);
+  });
+
+  it('names only methods that reach the queue', () => {
+    expect(Object.keys(FRIENDLY_NAMES).filter((m) => !isTrackableMethod(m))).toEqual([]);
+  });
+
+  it('renders a read that was unnamed as its operation name, never its id', () => {
+    expect(formatQueueLabel({ method: 'list_text_paragraphs', file: 'a.pdf' }, 'en')).toBe('Read Paragraphs — a.pdf');
   });
 });
 

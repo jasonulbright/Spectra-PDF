@@ -302,7 +302,7 @@ def test_a_document_with_no_table_refuses_by_name(tmp_dir):
         [["BT /F1 11 Tf 72 700 Td (Nothing here resembles a table at all.) Tj ET"]],
     )
     out = os.path.join(tmp_dir, "prose.xlsx")
-    with pytest.raises(ValueError, match="no table was found on the 1 page"):
+    with pytest.raises(ValueError, match=r"no table was found on the pages analyzed \(1\)"):
         export_document(src, out, "xlsx")
     # A refusal is a RESULT: no workbook survives for a caller to mistake for one.
     assert not os.path.exists(out)

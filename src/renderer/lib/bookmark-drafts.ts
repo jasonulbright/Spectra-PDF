@@ -4,6 +4,7 @@ import type { EngineCall } from './engine-call';
 import type { OutlineNode } from './outline-reorder';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome } from '../i18n';
+import { errorText } from './error-text';
 
 type Preview = { tagged: boolean; headings: number; existing: number; skipped: number };
 export interface BookmarkDraft {
@@ -79,7 +80,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
       d.nodes = parsed.nodes; d.baseline = parsed.nodes; d.readOnly = parsed.readOnly;
       d.buffer = source.buffer; d.loaded = true; d.preview = null; d.previewToken = null;
       if (d.readOnly) d.status = tChrome('nav.bookmarks.incomplete');
-    } catch (e) { if (accepts()) d.error = String(e instanceof Error ? e.message : e); }
+    } catch (e) { if (accepts()) d.error = errorText(e); }
     finally { if (live(d) && d.loading === token) { d.loading = null; notify(); } }
   };
   const cancelLoad = (d: BookmarkDraft) => { if (live(d) && d.loading) { d.loading = null; notify(); } };
@@ -143,7 +144,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
           d.buffer = result.publication.buffer; d.baseline = submitted; d.queue.shift();
           d.dirty = !sameBookmarkTree(d.nodes, submitted); notify();
         }
-      } catch (e) { if (live(d)) { d.saveRefused = true; d.error = e instanceof Error ? e.message : String(e); d.blocked = !at(d); d.queue = []; } }
+      } catch (e) { if (live(d)) { d.saveRefused = true; d.error = errorText(e); d.blocked = !at(d); d.queue = []; } }
       finally { if (live(d)) { d.busy = false; d.running = null; d.status = ''; notify(); } }
     };
     // Set the owner promise before any await can run a competing flush.
@@ -155,7 +156,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
     try { await commit(); if (!live(d) || d.nodes !== nodes) return;
       d.loaded = false; d.buffer = null; d.nodes = []; d.baseline = []; d.dirty = false; d.blocked = false;
       d.readOnly = false; d.error = ''; d.saveRefused = false; d.status = ''; d.loading = null; d.preview = null; d.previewToken = null; d.queue = [];
-    } catch (e) { if (live(d)) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   const preview = async (d: BookmarkDraft, call: EngineCall, commit: () => Promise<void>) => {
@@ -169,7 +170,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
       if (!r || typeof r.tagged !== 'boolean' || !['headings', 'existing'].every(k => Number.isSafeInteger(r[k]) && Number(r[k]) >= 0)
           || !Array.isArray(r.skipped)) throw invalid();
       d.preview = { tagged: r.tagged, headings: Number(r.headings), existing: Number(r.existing), skipped: r.skipped.length };
-    } catch (e) { if (live(d) && d.previewToken === token) { d.preview = null; d.error = e instanceof Error ? e.message : String(e); } }
+    } catch (e) { if (live(d) && d.previewToken === token) { d.preview = null; d.error = errorText(e); } }
     finally { if (live(d)) { d.deriving = false; d.status = ''; notify(); } }
   };
   const cancelPreview = (d: BookmarkDraft) => { if (live(d)) { d.preview = null; d.previewToken = null; notify(); } };
@@ -187,7 +188,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
       d.status = Number.isSafeInteger(report.added) && report.added >= 0
         ? tChrome(report.source === 'autotag' ? 'nav.bookmarks.derive.builtFromDetected' : 'nav.bookmarks.derive.builtFromTags', { count: report.added })
         : tChrome('app.operation.unverified');
-    } catch (e) { if (live(d) && d.previewToken === token) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d) && d.previewToken === token) d.error = errorText(e); }
     finally { if (live(d)) { d.deriving = false; if (d.preview) d.status = ''; notify(); } }
   };
   const beforeSave = async (workingPath: string): Promise<void> => {

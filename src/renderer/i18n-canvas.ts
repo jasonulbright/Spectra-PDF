@@ -160,7 +160,7 @@ export const CANVAS_STRINGS = {
   'canvas.signature.arm': 'Place “{{name}}”',
   'canvas.signature.empty': 'No saved signatures yet',
 
-  'canvas.toolbar.colorGroup': 'Annotation colour',
+  'canvas.toolbar.colorGroup': 'Annotation color',
 
   // ── Properties bar ──────────────────────────────────────────────────
   'canvas.pbar.barLabel': 'Properties bar',
@@ -282,7 +282,7 @@ export const CANVAS_STRINGS = {
   'canvas.find.cursorTotal': '{{total}}',
   'canvas.find.prev': 'Previous match page (Shift+Enter)',
   'canvas.find.next': 'Next match page (Enter)',
-  'canvas.find.ocrProgress': 'Recognizing {{count}}…',
+  'canvas.find.ocrProgress': 'Recognizing pages: {{count}} left…',
   'canvas.find.ocrProgressTitle': 'Reading scanned pages',
   'canvas.find.ocrLanguage': 'OCR language for scanned pages',
   'canvas.find.applyOcrTitle':
@@ -377,11 +377,11 @@ export const CANVAS_STRINGS = {
 
   // ── Vector-object chrome ─────────────────────────────────────────────
   'canvas.editvec.shadingTitle':
-    'A gradient fill has no flat colour to change — move or delete it',
+    'A gradient fill has no flat color to change — move or delete it',
   'canvas.editvec.shading': 'Gradient fill',
-  'canvas.editvec.fillTitle': 'Fill colour',
+  'canvas.editvec.fillTitle': 'Fill color',
   'canvas.editvec.fill': 'Fill',
-  'canvas.editvec.strokeTitle': 'Stroke colour',
+  'canvas.editvec.strokeTitle': 'Stroke color',
   'canvas.editvec.stroke': 'Line',
   'canvas.editvec.widthTitle': 'Line width',
   'canvas.editvec.width': 'W',
@@ -445,16 +445,16 @@ export const CANVAS_STRINGS = {
   'canvas.editpara.splitGapTitle':
     'Gap between the halves when Enter splits inside the text (× line height)',
   'canvas.editpara.dragToAdjust': 'Drag to adjust',
-  'canvas.editpara.colour': 'Colour',
+  'canvas.editpara.colour': 'Color',
   'canvas.editpara.colourTitle':
-    'With text selected, recolours the selection; otherwise the whole paragraph',
+    'With text selected, recolors the selection; otherwise the whole paragraph',
   'canvas.editpara.font': 'Font',
   'canvas.editpara.keepFont': 'Keep original font',
   // FACE NAMES (Liberation Sans, an installed family) are proper nouns and
   // stay verbatim; the GROUP headings are ours.
   'canvas.editpara.bundled': 'Bundled',
   'canvas.editpara.installed': 'Installed',
-  'canvas.editpara.installedRestricted': 'Installed ({{count}} not shown — licence)',
+  'canvas.editpara.installedRestricted': 'Installed ({{count}} not shown — license)',
   // Vertical text CAN be restyled: the weight axis is real and an
   // installed vertical face is a first-class choice. What stays
   // unavailable is stated as the ABSENCE it is — no bundled vertical
@@ -488,8 +488,8 @@ export const CANVAS_STRINGS = {
 
   // ── The inline text-run editor ───────────────────────────────────────
   'canvas.edittext.sizePlaceholder': '{{size}}pt',
-  'canvas.edittext.keepColour': 'Keep current colour',
-  'canvas.edittext.colour': 'Colour {{color}}',
+  'canvas.edittext.keepColour': 'Keep current color',
+  'canvas.edittext.colour': 'Color {{color}}',
   'canvas.edittext.applyStyle': 'Apply style',
 
   // ── The workspace canvas view ────────────────────────────────────────
@@ -513,7 +513,7 @@ export const CANVAS_STRINGS = {
 
   // Edit-tool notices. `canvas.edit.cancelled` was ELEVEN copies of one
   // literal; the engine's own refusal text still passes through verbatim.
-  'canvas.edit.cancelled': 'Edit cancelled — the document was left unchanged.',
+  'canvas.edit.cancelled': 'Edit canceled — the document was left unchanged.',
   'canvas.edit.textNotEditable': 'This text is not editable.',
   'canvas.edit.imagePageGone': 'The page this image was placed on no longer exists.',
 
@@ -649,7 +649,7 @@ export const CANVAS_STRINGS = {
   'canvas.addtext.sizePlaceholder': 'size',
   'canvas.addtext.styleSelection': 'Style selection',
   'canvas.addtext.selectTextFirst': 'Select some text above first, then apply the span style.',
-  'canvas.addtext.pickAStyleFirst': 'Pick a size, colour, or style for the span first.',
+  'canvas.addtext.pickAStyleFirst': 'Pick a size, color, or style for the span first.',
   // The span CHIP is a compact symbolic readout: the range is notation, and
   // each optional segment is its own finished unit (the Comments panel's
   // "(N skipped)" suffix precedent), never an English fragment glued in code.
@@ -694,7 +694,7 @@ export const CANVAS_STRINGS = {
   'canvas.addtext.alternates': 'Alt',
   'canvas.addtext.alternatesTitle': 'Stylistic alternates (salt) — authors in Libertinus Serif',
   'canvas.addtext.altIndexTitle': 'Which stylistic alternate to use, when the face offers several',
-  'canvas.addtext.colour': 'Colour',
+  'canvas.addtext.colour': 'Color',
   'canvas.addtext.overflow': 'The text extends below the box — it will continue past it.',
   'canvas.addtext.adding': 'Adding…',
   'canvas.addtext.enterText': 'Enter some text to add.',
@@ -709,7 +709,7 @@ export const CANVAS_STRINGS = {
   'canvas.snap.type.endpoint': 'Endpoint',
   'canvas.snap.type.intersection': 'Intersection',
   'canvas.snap.type.midpoint': 'Midpoint',
-  'canvas.snap.type.center': 'Centre',
+  'canvas.snap.type.center': 'Center',
   'canvas.snap.type.guide': 'Guide',
   'canvas.snap.type.grid': 'Grid',
   'canvas.snap.type.edge': 'Edge',

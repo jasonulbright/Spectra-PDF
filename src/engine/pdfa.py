@@ -164,7 +164,7 @@ def _rgb_profile(icc_dir: str = "") -> str:
     candidate = icc_profiles.profile_dir(icc_dir).joinpath(*_SRGB_PROFILE)
     if not candidate.is_file():
         raise RuntimeError(
-            f"The bundled sRGB colour profile is missing ({candidate}), so no "
+            f"The bundled sRGB color profile is missing ({candidate}), so no "
             "PDF/A output intent can be written."
         )
     return str(candidate)

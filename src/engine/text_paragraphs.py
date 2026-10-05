@@ -5264,14 +5264,14 @@ def _prepare_styled(
             has_color = entry.get("color") is not None
             has_size = entry.get("size") is not None
             if not has_face and not has_color and not has_size:
-                raise ValueError("span style must set a colour, a face, or a size")
+                raise ValueError("span style must set a color, a face, or a size")
             if has_color:
                 try:
                     rgb = [max(0.0, min(1.0, float(c))) for c in entry.get("color")]
                 except (TypeError, ValueError):
                     rgb = []
                 if len(rgb) != 3:
-                    raise ValueError("span style colour must be [r, g, b]")
+                    raise ValueError("span style color must be [r, g, b]")
                 cs = (None, ("rg", tuple(rgb)))
                 if color_by_pos is None:
                     color_by_pos = [None] * n_cp

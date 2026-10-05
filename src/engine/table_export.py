@@ -943,8 +943,8 @@ def export_tables(
         vertical_writing = found["vertical_writing_runs"]
         if not found_regions:
             raise ValueError(
-                f"no table was found on the {len(wanted)} page(s) analyzed, so there is "
-                "nothing to write to a spreadsheet"
+                f"no table was found on the pages analyzed ({len(wanted)}), so there "
+                "is nothing to write to a spreadsheet"
             )
     regions = found_regions
 

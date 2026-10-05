@@ -116,7 +116,7 @@ def export_text(
     if len(empty) == len(extracted):
         raise ValueError(
             "this document has no text layer, so there is nothing to export as "
-            "text -- run OCR on it first to add one"
+            "text — run OCR on it first to add one"
         )
 
     separator = PAGE_BREAK if page_breaks else ""

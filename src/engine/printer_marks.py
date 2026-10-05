@@ -443,7 +443,7 @@ def _build_mark_form(pdf, page, trim, media, offset, length, weight, style,
         patch_w = _patch_width(runs, needed, length * 0.9)
         if patch_w is None:
             raise ValueError(
-                f"The colour bar cannot fit its {needed} patches along the top "
+                f"The color bar cannot fit its {needed} patches along the top "
                 f"edge of page {page_number}."
             )
         bar_h = max(1.0, length * 0.5)

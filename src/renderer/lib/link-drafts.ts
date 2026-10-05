@@ -8,6 +8,7 @@ import { pagesParam } from './page-scope';
 import { emptyTarget, defaultAppearance, isAuthored, targetPayload, appearancePayload,
   targetProblem, appearanceProblem, type DrawnLink, type PickedLink, type LinkRecord,
   type NamedDestination, type LinkTarget, type LinkAppearance } from './links';
+import { errorText } from './error-text';
 
 type Read = (method: string, params: Record<string, unknown>) => Promise<unknown>;
 export interface LinkDraft {
@@ -113,7 +114,7 @@ export function createLinkDrafts(readState: () => AppState) {
       s.links = parsed.links; s.names = parsed.names; s.buffer = buffer; finishPick(s);
     } catch (e) {
       if (live(s) && s.loading === token && readState().files.get(s.path)?.buffer === buffer)
-        s.error = e instanceof Error ? e.message : String(e);
+        s.error = errorText(e);
     } finally { if (live(s) && s.loading === token) { s.loading = null; notify(); } }
   };
   const cancelLoad = (s: LinkSession) => { if (s.loading) { s.loading = null; notify(); } };
@@ -130,7 +131,7 @@ export function createLinkDrafts(readState: () => AppState) {
   };
   const failDraw = (drawn: Parameters<typeof drawingSession>[0], error: unknown) => {
     const s = drawingSession(drawn); if (!s) return;
-    s.generation++; s.error = error instanceof Error ? error.message : String(error); notify();
+    s.generation++; s.error = errorText(error); notify();
   };
   const receiveDraw = (drawn: DrawnLink) => {
     const s = drawingSession(drawn); if (!s) return;
@@ -166,7 +167,7 @@ export function createLinkDrafts(readState: () => AppState) {
     try {
       await commit();
       if (live(s) && s.draft === draft) { s.busy = false; discard(s); }
-    } catch (e) { if (live(s)) s.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(s)) s.error = errorText(e); }
     finally { if (live(s)) { s.busy = false; notify(); } }
   };
   const run = async (s: LinkSession, method: OpMethod, params: Record<string, unknown>,
@@ -180,7 +181,7 @@ export function createLinkDrafts(readState: () => AppState) {
       if (result === null || result === EDIT_DECLINED) { s.status = ''; return; }
       accepted?.(result); s.buffer = null; s.found = null; s.status = done;
     } catch (e) {
-      if (live(s)) { s.error = e instanceof Error ? e.message : String(e); s.status = ''; }
+      if (live(s)) { s.error = errorText(e); s.status = ''; }
     } finally { if (live(s)) { s.busy = false; notify(); } }
   };
   const save = async (s: LinkSession, perform: PerformOperation) => {
@@ -224,7 +225,7 @@ export function createLinkDrafts(readState: () => AppState) {
       if (!p || !Number.isSafeInteger(p.count) || p.count < 0 || !Number.isSafeInteger(p.already_linked)
           || p.already_linked < 0 || p.already_linked > p.count) throw invalid();
       s.found = { count: p.count, already: p.already_linked, buffer, query };
-    } catch (e) { if (live(s) && s.query === query && at(s, buffer)) s.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(s) && s.query === query && at(s, buffer)) s.error = errorText(e); }
     finally { if (live(s)) { s.busy = false; notify(); } }
   };
   const derive = async (s: LinkSession, perform: PerformOperation) => {

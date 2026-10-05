@@ -282,7 +282,7 @@ def tag_page_content(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and tagging page content invalidates its "
-            "signatures -- the run must state that signed documents are included "
+            "signatures — the run must state that signed documents are included "
             "before it will touch one"
         )
 

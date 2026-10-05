@@ -48,7 +48,7 @@ class TestEmbeddingPermission:
         assert embedding_refusal(0x0004) is None
 
     def test_restricted_licence_is_refused_by_name(self):
-        assert "licence" in (embedding_refusal(0x0002) or "")
+        assert "license" in (embedding_refusal(0x0002) or "")
 
     def test_no_subsetting_and_bitmap_only_are_refused(self):
         # This engine ALWAYS subsets and always embeds outlines, so both are

@@ -3,6 +3,7 @@ import type { PerformOperation } from '../hooks/useOperations';
 import type { EngineCall } from './engine-call';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome } from '../i18n';
+import { errorText } from './error-text';
 
 export interface DocScript { name: string; js: string }
 export interface DocumentJsDraft {
@@ -54,7 +55,7 @@ export function createDocumentJsDrafts(readState: () => AppState) {
     try { const reply = await call('list_document_js', { file: d.workingPath, for_edit: true });
       if (!accepts()) return;
       d.scripts = parseDocumentJsRead(reply); d.baseline = d.scripts; d.selected = 0; d.buffer = buffer; d.loaded = true;
-    } catch (e) { if (accepts()) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (accepts()) d.error = errorText(e); }
     finally { if (live(d) && d.loading === token) { d.loading = null; notify(); } }
   };
   const cancelLoad = (d: DocumentJsDraft) => { if (live(d) && d.loading) { d.loading = null; notify(); } };
@@ -71,14 +72,14 @@ export function createDocumentJsDrafts(readState: () => AppState) {
     if (!editable(d) || !d.dirty || d.busy) return;
     let submitted: DocScript[];
     try { submitted = validateScripts(d.scripts); }
-    catch (e) { d.error = e instanceof Error ? e.message : String(e); notify(); return; }
+    catch (e) { d.error = errorText(e); notify(); return; }
     d.busy = true; d.error = ''; notify();
     try { const result = await operation(d.path, 'set_document_js', { scripts: submitted },
       { expectedWorkingPath: d.workingPath, expectedBuffer: d.buffer! });
       if (!live(d) || result === EDIT_DECLINED || result === null) return;
       if (!result.publication?.buffer || result.publication.path !== d.path || result.publication.workingPath !== d.workingPath) throw incomplete();
       d.buffer = result.publication.buffer; d.baseline = submitted; d.dirty = !same(d.scripts, submitted);
-    } catch (e) { if (live(d)) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   const reload = async (d: DocumentJsDraft, commit: () => Promise<void>) => {
@@ -86,7 +87,7 @@ export function createDocumentJsDrafts(readState: () => AppState) {
     const scripts = d.scripts; d.busy = true; notify();
     try { await commit(); if (!live(d) || d.scripts !== scripts) return;
       d.scripts = []; d.baseline = []; d.buffer = null; d.loaded = false; d.dirty = false; d.loading = null; d.error = ''; d.selected = 0;
-    } catch (e) { if (live(d)) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   return { get, reconcile, current, editable, conflict, load, cancelLoad, change, select, save, reload,

@@ -53,8 +53,8 @@ export const PANEL_STRINGS = {
   // profile, and the press an output preview proofs against. Everything else
   // in the product is unaffected, which is what the second sentence says.
   'panel.common.iccLicenceRequired':
-    'The colour profiles that ship with Spectra PDF are licensed separately, and that licence has not been accepted on this computer. Colour conversion, output intents and output preview stay off until it is; nothing else is affected.',
-  'panel.common.iccLicenceReview': 'Review the colour-profile licence',
+    'The color profiles that ship with Spectra PDF are licensed separately, and that license has not been accepted on this computer. Color conversion, output intents and output preview stay off until it is; nothing else is affected.',
+  'panel.common.iccLicenceReview': 'Review the color-profile license',
   'panel.common.useSelection': 'Use selection',
   'panel.common.useSelectionTitle': 'Fill this field with the pages selected in the page list',
 
@@ -80,7 +80,7 @@ export const PANEL_STRINGS = {
   'panel.compress.prepress': 'Prepress (300 dpi, highest)',
   'panel.compress.mrc': 'Scanned document (MRC)',
   'panel.compress.mrcHint':
-    'Separates a scan into a text stencil, an ink colour and a paper background. The text stays at the scan’s own resolution while the background compresses hard.',
+    'Separates a scan into a text stencil, an ink color and a paper background. The text stays at the scan’s own resolution while the background compresses hard.',
   'panel.compress.mrcSuggest':
     'Most of this document’s pages read as scans. The scanned-document setting usually makes those far smaller than a resolution change does.',
   'panel.compress.mrcSuggestApply': 'Use it',
@@ -95,9 +95,9 @@ export const PANEL_STRINGS = {
   'panel.compress.mrcPdfaSafe': 'Use only PDF/A-1 compatible filters',
   'panel.compress.mrcVerify': 'Verify the text after compressing',
   'panel.compress.mrcVerifyHint':
-    'Reads the page before and after and keeps the original scan for any page whose words did not survive. Slower, because every page is recognised twice.',
+    'Reads the page before and after and keeps the original scan for any page whose words did not survive. Slower, because every page is recognized twice.',
   'panel.compress.mrcVerifyLanguages': 'Language of the scan ({{summary}})',
-  'panel.compress.mrcResult': '{{pages}} scanned page(s) layered, {{untouched}} left as they were.',
+  'panel.compress.mrcResult': 'Scanned pages layered: {{pages}}. Pages left as they were: {{untouched}}.',
   'panel.compress.mrcFallbackNotice':
     'The JBIG2 encoder was not available, so the stencil uses CCITT G4 and the file is larger than the preset promises.',
   'panel.compress.mrcMixedCodecNotice_one':
@@ -106,7 +106,7 @@ export const PANEL_STRINGS = {
     '{{pages}} pages held too little type for the shared stencil dictionary and were compressed on their own.',
   'panel.compress.mrcVerifyResult': 'Text verified: {{similarity}}% of the words survived on the worst page.',
   'panel.compress.mrcVerifyBelowThreshold':
-    '{{pages}} page(s) kept their original scan because the text did not survive.',
+    'Pages that kept their original scan because the text did not survive: {{pages}}.',
   'panel.compress.custom': 'Custom DPI',
   'panel.compress.dpiLabel': 'DPI: {{dpi}}',
   'panel.compress.dpiAria': 'Image resolution in DPI',
@@ -134,7 +134,7 @@ export const PANEL_STRINGS = {
   'panel.split.rangesLabel': 'Page ranges (e.g. 1-5,10-15)',
   'panel.split.splitting': 'Splitting…',
   'panel.split.split': 'Split',
-  'panel.split.done': 'Extracted {{count}} pages',
+  'panel.split.done': 'Pages extracted: {{count}}',
   'panel.split.modeLabel': 'Split by',
   'panel.split.mode.ranges': 'Page ranges',
   'panel.split.mode.every_n': 'Number of pages',
@@ -160,13 +160,13 @@ export const PANEL_STRINGS = {
 
   'panel.recover.open': 'Open a damaged PDF to recover pages',
   'panel.recover.blurb':
-    'Salvage recovery for severely damaged PDFs. Extracts each page individually and assembles salvageable pages into a new clean PDF. Reports which pages were lost.',
-  'panel.recover.recovering': 'Recovering pages (Tier 3: per-page salvage)…',
+    'Copies every page that can still be read into a new PDF, and lists the pages that are lost.',
+  'panel.recover.recovering': 'Recovering pages…',
   'panel.recover.busy': 'Recovering…',
   'panel.recover.recover': 'Recover Pages',
   'panel.recover.doneAll': 'Recovered all {{count}} pages successfully.',
   'panel.recover.donePartial':
-    'Recovered {{recovered}}/{{total}} pages. {{lost}} page(s) could not be salvaged.',
+    'Pages recovered: {{recovered}} of {{total}}. Pages that could not be salvaged: {{lost}}.',
   'panel.recover.reportAria': 'Recovery report',
   'panel.recover.reportTitle': 'Recovery Report',
   'panel.recover.recoveredPages': 'Recovered: pages {{pages}}',
@@ -176,15 +176,15 @@ export const PANEL_STRINGS = {
 
   'panel.repair.open': 'Open a PDF to repair',
   'panel.repair.blurb':
-    'Light repair using pikepdf/QPDF. Fixes broken xref tables, stream lengths, and page tree corruption. Preserves annotations, bookmarks, and metadata.',
+    'Fixes a PDF whose internal structure is damaged, and keeps its comments, bookmarks and document properties.',
   'panel.repair.validating': 'Validating PDF structure…',
   'panel.repair.valid': 'PDF structure is valid. No issues found.',
-  'panel.repair.found': 'Found {{errors}} error(s), {{warnings}} warning(s).',
-  'panel.repair.repairing': 'Repairing PDF (Tier 1: QPDF rewrite)…',
+  'panel.repair.found': 'Errors: {{errors}}. Warnings: {{warnings}}.',
+  'panel.repair.repairing': 'Repairing the PDF…',
   'panel.repair.repaired':
-    'Repaired: {{from}} KB -> {{to}} KB, {{pages}} pages. {{issues}} issue(s) addressed.',
+    'Repaired: {{from}} KB → {{to}} KB. Pages: {{pages}}. Issues addressed: {{issues}}.',
   'panel.repair.noDamage':
-    'No damage found. A rewritten copy was saved: {{from}} KB -> {{to}} KB, {{pages}} pages.',
+    'No damage found. A rewritten copy was saved: {{from}} KB → {{to}} KB. Pages: {{pages}}.',
   'panel.repair.checking': 'Checking…',
   'panel.repair.validateFirst': 'Validate First',
   'panel.repair.busy': 'Repairing…',
@@ -273,7 +273,7 @@ export const PANEL_STRINGS = {
   'panel.extractText.save': 'Save as .txt',
   'panel.extractText.saving': 'Saving text…',
   'panel.extractText.saved': 'Saved {{chars}} characters to {{path}}',
-  'panel.extractText.done': 'Extracted {{chars}} characters from {{pages}} pages',
+  'panel.extractText.done': 'Characters extracted: {{chars}}. Pages: {{pages}}.',
   'panel.extractText.doneOne': 'Extracted {{chars}} characters from page {{page}}',
 
   'panel.grayscale.open': 'Open a PDF to convert to grayscale',
@@ -326,7 +326,7 @@ export const PANEL_STRINGS = {
   'panel.standards.row.encryption_removed': 'Encryption removed',
   'panel.standards.row.page_content_rasterized': 'Page content replaced by an image',
   'panel.standards.row.colorants_removed': 'Printing plates the conversion did not carry',
-  'panel.standards.row.colorant_shadings_rasterized': 'Gradients converted to process colour',
+  'panel.standards.row.colorant_shadings_rasterized': 'Gradients converted to process color',
   'panel.standards.row.images_removed': 'Images removed',
   'panel.standards.row.standard_identifiers_removed':
     'Conformance with another standard is no longer declared',
@@ -366,8 +366,8 @@ export const PANEL_STRINGS = {
   'panel.comments.pageLine': '{{label}} · Page {{page}}',
   'panel.comments.editNote': 'Edit note',
   'panel.comments.addNote': 'Add note',
-  'panel.comments.recolourTo': 'Recolour to {{color}}',
-  'panel.comments.recolour': 'Recolour',
+  'panel.comments.recolourTo': 'Recolor to {{color}}',
+  'panel.comments.recolour': 'Recolor',
   'panel.comments.delete': 'Delete',
   'panel.comments.notShown_one':
     '{{count}} more comment in the file that this list can’t edit — Delete All still removes it.',
@@ -467,7 +467,7 @@ export const PANEL_STRINGS = {
   'panel.comments.summaryDone':
     'Saved to {{output}} — sheets: {{sheets}}, comments: {{written}}',
   'panel.comments.summaryReconcile':
-    '{{found}} in the document = {{written}} written + {{filtered}} filtered + {{unmodelled}} not modelled',
+    '{{found}} in the document = {{written}} written + {{filtered}} filtered out + {{unmodelled}} of a type the summary cannot show',
   'panel.comments.summaryNoPosition':
     'Written without a badge, because their position could not be read: {{count}}',
   'panel.comments.summaryBodyRefused':
@@ -833,7 +833,7 @@ export const PANEL_STRINGS = {
   'panel.links.appearance.underline': 'Underline',
   'panel.links.appearance.beveled': 'Beveled',
   'panel.links.appearance.inset': 'Inset',
-  'panel.links.appearance.color': 'Colour',
+  'panel.links.appearance.color': 'Color',
   'panel.links.appearance.highlight': 'Click effect',
   'panel.links.appearance.highlight.none': 'None',
   'panel.links.appearance.highlight.invert': 'Invert',
@@ -851,7 +851,7 @@ export const PANEL_STRINGS = {
   'panel.links.problem.readOnly': 'This app does not author that kind of link.',
   'panel.links.problem.width': 'A border width cannot be negative.',
   'panel.links.problem.style': 'Choose solid, dashed or underline.',
-  'panel.links.problem.color': 'Choose a colour.',
+  'panel.links.problem.color': 'Choose a color.',
 
   'panel.pageLabels.open': 'Open a PDF to set page number labels',
   'panel.pageLabels.blurb':
@@ -962,13 +962,13 @@ export const PANEL_STRINGS = {
 
   'panel.rebuild.open': 'Open a PDF to rebuild',
   'panel.rebuild.blurb':
-    'Deep rebuild via Ghostscript. Re-renders every page through the GS interpreter into a fresh PDF. Fixes font embedding issues, colorspace problems, and corrupt content streams.',
+    'Writes every page into a new PDF, which fixes damaged fonts, colors and page content.',
   'panel.rebuild.note':
-    'Note: May lose interactive elements (form fields, JavaScript actions). Use Tier 1 Repair first for lighter fixes.',
-  'panel.rebuild.rebuilding': 'Rebuilding PDF (Tier 2: Ghostscript round-trip)…',
+    'Form fields and JavaScript actions can be lost. Try Repair first.',
+  'panel.rebuild.rebuilding': 'Rebuilding the PDF…',
   'panel.rebuild.rebuildingBtn': 'Rebuilding…',
   'panel.rebuild.rebuild': 'Rebuild',
-  'panel.rebuild.done': 'Rebuilt: {{from}} KB -> {{to}} KB, {{pages}} pages.',
+  'panel.rebuild.done': 'Rebuilt: {{from}} KB → {{to}} KB. Pages: {{pages}}.',
 
   // ── Preflight ───────────────────────────────────────────────────────────
   //
@@ -983,13 +983,13 @@ export const PANEL_STRINGS = {
   // key while a USER profile's name is authored content that is never
   // translated, which is why the schema carries both fields.
   'panel.preflight.open': 'Open a PDF to run print preflight',
-  'panel.preflight.analysing': 'Analysing…',
+  'panel.preflight.analysing': 'Analyzing…',
   'panel.preflight.rerun': 'Re-run',
   'panel.preflight.allPassed': 'Ready to print — all {{count}} checks passed.',
   'panel.preflight.images_one': '{{count}} image',
   'panel.preflight.images_other': '{{count}} images',
-  'panel.preflight.colour': ' · colour: {{families}}',
-  'panel.preflight.export': 'Export…',
+  'panel.preflight.colour': ' · color: {{families}}',
+  'panel.preflight.export': 'Export report…',
   'panel.preflight.exporting': 'Saving the report…',
   'panel.preflight.exported': 'Report saved to {{path}}',
   'panel.preflight.show': 'Show',
@@ -1052,7 +1052,7 @@ export const PANEL_STRINGS = {
 
   'panel.preflight.category.document': 'Document',
   'panel.preflight.category.pages': 'Pages',
-  'panel.preflight.category.colour': 'Colour',
+  'panel.preflight.category.colour': 'Color',
   'panel.preflight.category.fonts': 'Fonts',
   'panel.preflight.category.images': 'Images',
   'panel.preflight.category.content': 'Content',
@@ -1069,7 +1069,7 @@ export const PANEL_STRINGS = {
     'A damaged cross-reference table is a file a press may not open.',
   'panel.preflight.check.output_intent': 'Output intent present',
   'panel.preflight.explain.output_intent':
-    'The output intent names the printing condition the colour was prepared for.',
+    'The output intent names the printing condition the color was prepared for.',
   'panel.preflight.check.pdfx_claim': 'PDF/X version claim matches',
   'panel.preflight.explain.pdfx_claim':
     'A document claiming a standard is judged against that standard.',
@@ -1094,15 +1094,15 @@ export const PANEL_STRINGS = {
   'panel.preflight.check.page_count': 'Page count fits the job',
   'panel.preflight.explain.page_count':
     'A saddle-stitched job needs a page count its binding can fold.',
-  'panel.preflight.check.colour_family': 'No forbidden colour family',
+  'panel.preflight.check.colour_family': 'No forbidden color family',
   'panel.preflight.explain.colour_family':
-    'RGB on a press is converted by the RIP, to a colour nobody chose.',
+    'RGB on a press is converted by the RIP, to a color nobody chose.',
   'panel.preflight.check.grayscale_only': 'Grayscale only',
   'panel.preflight.explain.grayscale_only':
-    'A single-plate job must carry no colour a second plate would need.',
-  'panel.preflight.check.device_independent_colour': 'No device-independent colour',
+    'A single-plate job must carry no color a second plate would need.',
+  'panel.preflight.check.device_independent_colour': 'No device-independent color',
   'panel.preflight.explain.device_independent_colour':
-    'Some standards require every colour to be device colour.',
+    'Some standards require every color to be device color.',
   'panel.preflight.check.spot_ink_count': 'Spot ink count is within the limit',
   'panel.preflight.explain.spot_ink_count':
     'Each spot ink is another plate, another wash-up and another cost.',
@@ -1142,7 +1142,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.check.image_compression': 'Image compression is permitted',
   'panel.preflight.explain.image_compression':
     'Some standards forbid a codec a RIP of their era cannot decode.',
-  'panel.preflight.check.image_colour_space': 'Images are in a permitted colour space',
+  'panel.preflight.check.image_colour_space': 'Images are in a permitted color space',
   'panel.preflight.explain.image_colour_space':
     'An image in the wrong space is converted by the RIP, not by anyone.',
   'panel.preflight.check.live_transparency': 'No live transparency',
@@ -1185,7 +1185,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.detail.output_intent_not_allowed':
     'The output intent “{{identifier}}” is not one the profile allows ({{allowed}}).',
   'panel.preflight.detail.output_intent_profile_missing':
-    'The output intent “{{identifier}}” embeds no colour profile.',
+    'The output intent “{{identifier}}” embeds no color profile.',
   'panel.preflight.detail.pdfx_claim_missing':
     'The document claims no PDF/X version; the profile expects {{expected}}.',
   'panel.preflight.detail.pdfx_claim_mismatch':
@@ -1215,7 +1215,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.detail.not_grayscale':
     '{{family}} on page {{page}} needs a plate this job does not have.',
   'panel.preflight.detail.device_independent_colour':
-    '{{family}} on page {{page}} is device-independent colour.',
+    '{{family}} on page {{page}} is device-independent color.',
   'panel.preflight.detail.too_many_spots':
     '{{count}} spot inks, against a limit of {{max}}.',
   'panel.preflight.detail.spot_not_allowed':
@@ -1307,7 +1307,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.param.min_pages': 'Fewest pages',
   'panel.preflight.param.max_pages': 'Most pages',
   'panel.preflight.param.multiple_of': 'Multiple of',
-  'panel.preflight.param.forbidden_families': 'Forbidden colour families',
+  'panel.preflight.param.forbidden_families': 'Forbidden color families',
   'panel.preflight.param.require_grayscale': 'Grayscale required',
   'panel.preflight.param.max_spots': 'Most spot inks',
   'panel.preflight.param.allowed_names': 'Approved ink names',
@@ -1375,7 +1375,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.duplicateProfile': 'Duplicate',
   'panel.preflight.deleteProfile': 'Delete',
   'panel.preflight.importProfile': 'Import…',
-  'panel.preflight.exportProfile': 'Export…',
+  'panel.preflight.exportProfile': 'Export profile…',
   'panel.preflight.copySuffix': '{{name}} (copy)',
   'panel.preflight.profileSaved': 'Saved the profile “{{name}}”.',
   'panel.preflight.profileRemoved': 'Removed the profile “{{name}}”.',
@@ -1412,10 +1412,10 @@ export const PANEL_STRINGS = {
     'Banners and signage read at a distance: 100 dpi photographs and a half-inch bleed.',
   'profile.preflight.pdfx_1a': 'PDF/X-1a:2001',
   'profile.preflight.pdfx_1a.desc':
-    'Device colour only, no transparency, an embedded output intent, PDF 1.3.',
+    'Device color only, no transparency, an embedded output intent, PDF 1.3.',
   'profile.preflight.pdfx_3': 'PDF/X-3:2002',
   'profile.preflight.pdfx_3.desc':
-    'PDF/X-1a with device-independent colour permitted. Still PDF 1.3, still flattened.',
+    'PDF/X-1a with device-independent color permitted. Still PDF 1.3, still flattened.',
   'profile.preflight.pdfx_4': 'PDF/X-4',
   'profile.preflight.pdfx_4.desc':
     'Live transparency and optional content permitted, at PDF 1.6.',
@@ -1438,7 +1438,7 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.overLimit': '{{pct}}% of the page is over {{limit}}%',
   'panel.outputPreview.withinLimit': 'Nothing on the page is over {{limit}}%',
   'panel.outputPreview.inks': 'Inks',
-  'panel.outputPreview.spots': 'Spot colours',
+  'panel.outputPreview.spots': 'Spot colors',
   'panel.outputPreview.showAll': 'All',
   'panel.outputPreview.hideAll': 'None',
   'panel.outputPreview.noPlates': 'No separations yet — turn the preview on to raster this page.',
@@ -1462,21 +1462,21 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.simulationFile': 'Choose a profile file…',
   'panel.outputPreview.simulationUsing': 'Proofing through {{name}}',
   'panel.outputPreview.simulationAssumed':
-    'Spot colours that are not described in CMYK are proofed through an assumed source space: {{spaces}}',
+    'Spot colors that are not described in CMYK are proofed through an assumed source space: {{spaces}}',
   'panel.outputPreview.paperWhite': 'Simulate paper white',
   'panel.outputPreview.blackInk': 'Simulate black ink',
   'panel.outputPreview.blackInkForced':
     'Simulating paper white already holds the black ink at its own value.',
   'panel.outputPreview.simulationCaveat':
-    'An ink that could not be read is missing from this proof, so it shows the page short one colour.',
+    'An ink that could not be read is missing from this proof, so it shows the page short one color.',
   'panel.outputPreview.simulationOff': 'Not proofed: {{reason}}',
   'panel.outputPreview.inspect': 'Point inspector',
   'panel.outputPreview.inspectHint':
-    'Click the page to read what is painted at that point, in what colour space, and at what resolution.',
+    'Click the page to read what is painted at that point, in what color space, and at what resolution.',
   'panel.outputPreview.inspectBusy': 'Reading that point…',
   'panel.outputPreview.inspectNothing': 'Nothing is painted at that point.',
   'panel.outputPreview.inspectFailed': 'That point could not be read: {{reason}}',
-  'panel.outputPreview.inspectSpace': 'Colour space: {{space}}',
+  'panel.outputPreview.inspectSpace': 'Color space: {{space}}',
   'panel.outputPreview.inspectResource': 'Named in the document as {{name}}',
   'panel.outputPreview.inspectComponents': 'Values: {{values}}',
   'panel.outputPreview.inspectColorant': 'Colorant: {{names}}',
@@ -1484,7 +1484,7 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.inspectBase': 'Base space: {{space}}',
   'panel.outputPreview.inspectComponentCount': 'Components: {{count}}',
   'panel.outputPreview.inspectPatternType':
-    'Pattern type {{type}} — a pattern paints no single colour.',
+    'Pattern type {{type}} — a pattern paints no single color.',
   'panel.outputPreview.inspectDepth': 'Bit depth: {{bpc}}',
   'panel.outputPreview.inspectResolution': 'Effective resolution: {{dpi}} dpi',
   'panel.outputPreview.inspectResolutionAxes':
@@ -1518,7 +1518,7 @@ export const PANEL_STRINGS = {
 
   'panel.inkManager.open': 'Open a PDF to manage its inks',
   'panel.inkManager.blurb':
-    'Two spellings of one spot colour print on two plates. Show one ink as another to check the result, then rewrite the document to make it so — or convert a spot to process, exactly, through its own tint transform.',
+    'Two spellings of one spot color print on two plates. Show one ink as another to check the result, then rewrite the document to make it so — or convert a spot to process, exactly, through its own tint transform.',
   'panel.inkManager.noInks': 'This document declares no inks of its own.',
   'panel.inkManager.density': 'Density',
   'panel.inkManager.moveUp': 'Earlier in the print sequence',
@@ -1536,26 +1536,26 @@ export const PANEL_STRINGS = {
   'panel.inkManager.applyAnyway': 'Apply anyway',
   'panel.inkManager.applying': 'Applying the alias…',
   'panel.inkManager.aliasApplied': '{{source}} now prints on {{target}}.',
-  'panel.inkManager.sameColour': '{{source}} and {{target}} describe the same colour.',
+  'panel.inkManager.sameColour': '{{source}} and {{target}} describe the same color.',
   'panel.inkManager.differentColour':
     '{{source}} and {{target}} first differ at {{tint}}% tint.',
   'panel.inkManager.convertHeading': 'Convert to process',
   'panel.inkManager.convertNote':
-    'Replaces the spot with its alternate colour space everywhere it is painted — fills, strokes, images, shadings and patterns — through its own tint transform. Total ink rises where one plate becomes several.',
+    'Replaces the spot with its alternate color space everywhere it is painted — fills, strokes, images, shadings and patterns — through its own tint transform. Total ink rises where one plate becomes several.',
   'panel.inkManager.convert': 'Convert {{name}} to process',
   'panel.inkManager.converting': 'Converting…',
-  'panel.inkManager.converted': '{{name}} is now process colour.{{skipped}}',
+  'panel.inkManager.converted': '{{name}} is now process color.{{skipped}}',
   'panel.inkManager.convertedSkipped_one':
-    ' — {{count}} gradient still prints it: the conversion cannot describe its colour.',
+    ' — {{count}} gradient still prints it: the conversion cannot describe its color.',
   'panel.inkManager.convertedSkipped_other':
-    ' — {{count}} gradients still print it: the conversion cannot describe their colour.',
+    ' — {{count}} gradients still print it: the conversion cannot describe their color.',
 
   'panel.printerMarks.open': 'Open a PDF to add printer marks',
   'panel.printerMarks.blurb':
     'Marks are drawn outside the trim, so the page grows to hold them and the crop box grows with it. The trim, bleed and art boxes never move — they still describe the same paper. Removing the marks puts the boxes back exactly.',
   'panel.printerMarks.crop': 'Crop marks',
   'panel.printerMarks.registration': 'Registration targets',
-  'panel.printerMarks.colorbars': 'Colour bars',
+  'panel.printerMarks.colorbars': 'Color bars',
   'panel.printerMarks.pageinfo': 'Page information',
   'panel.printerMarks.style': 'Style',
   'panel.printerMarks.styleWestern': 'Western',
@@ -1569,10 +1569,10 @@ export const PANEL_STRINGS = {
   'panel.printerMarks.sourceCrop': 'No trim box: marks are placed against the crop box.',
   'panel.printerMarks.sourceMedia': 'No trim box: marks are placed against the media box.',
   'panel.printerMarks.sourceDefault': 'This page declares no boxes; a letter page is assumed.',
-  'panel.printerMarks.noTrimBox': '{{pages}} page(s) declare no trim box.',
+  'panel.printerMarks.noTrimBox': 'Pages that declare no trim box: {{pages}}.',
   'panel.printerMarks.tooLarge':
     'This growth would push a page past PDF’s 14400 pt limit. Reduce the offset or the length.',
-  'panel.printerMarks.present': '{{pages}} page(s) already carry printer marks.',
+  'panel.printerMarks.present': 'Pages that already carry printer marks: {{pages}}.',
   'panel.printerMarks.add': 'Add marks',
   'panel.printerMarks.remove': 'Remove marks',
   'panel.printerMarks.adding': 'Adding printer marks…',
@@ -1590,9 +1590,9 @@ export const PANEL_STRINGS = {
   'panel.hairlines.replacementProblem':
     'A replacement below the threshold would leave the strokes it corrected as hairlines.',
   'panel.hairlines.count':
-    '{{count}} hairline(s): {{strokes}} stroke(s), {{annotations}} annotation border(s).',
+    'Hairlines: {{count}}. Strokes: {{strokes}}. Annotation borders: {{annotations}}.',
   'panel.hairlines.widthRow': '{{count}} at {{width}} pt',
-  'panel.hairlines.unreadable': 'Page(s) {{pages}} could not be read.',
+  'panel.hairlines.unreadable': 'Pages that could not be read: {{pages}}.',
   'panel.hairlines.measure': 'Measure again',
   'panel.hairlines.fix': 'Raise the hairlines',
   'panel.hairlines.fixing': 'Raising hairline strokes…',
@@ -1701,26 +1701,26 @@ export const PANEL_STRINGS = {
   'panel.flattener.balanceValue': '{{percent}}%',
   'panel.flattener.resolution': 'Rasterize regions at',
   'panel.flattener.dpiOption': '{{dpi}} dpi',
-  'panel.flattener.regions': '{{regions}} region(s) would be rasterized.',
+  'panel.flattener.regions': 'Regions that would be rasterized: {{regions}}.',
   'panel.flattener.categoryTransparent': 'Transparent objects: {{count}}',
   'panel.flattener.categoryAffected': 'Objects under transparency: {{count}}',
   'panel.flattener.categoryRasterized': 'Objects inside a region: {{count}}',
   'panel.flattener.categoryStrokes': 'Strokes inside a region: {{count}}',
   'panel.flattener.categoryText': 'Text inside a region: {{count}}',
   'panel.flattener.categoryPatterns': 'Patterns inside a region: {{count}}',
-  'panel.flattener.categoryUnknown': 'Objects that could not be analysed: {{count}}',
+  'panel.flattener.categoryUnknown': 'Objects that could not be analyzed: {{count}}',
   'panel.flattener.outlineText': 'Convert all text to outlines',
   'panel.flattener.outlineTextNote':
     'Converted text can no longer be selected, searched or extracted.',
   'panel.flattener.outlineStrokes': 'Convert all strokes to outlines',
   'panel.flattener.outlineReport':
-    'Would convert {{runs}} text run(s) and {{strokes}} stroked path(s).',
+    'Would convert text runs: {{runs}}. Stroked paths: {{strokes}}.',
   'panel.flattener.outlineInvisible':
-    '{{runs}} of those run(s) draw nothing and are simply removed, including any text layer left by recognition.',
+    'Of those text runs, the ones that draw nothing are removed, including any text layer left by recognition: {{runs}}.',
   'panel.flattener.outlineSubstituted':
     'Text whose font this document does not embed takes its outlines from: {{faces}}',
   'panel.flattener.outlineRefusals': 'Cannot convert: {{reasons}}',
-  'panel.flattener.unreadable': 'Page(s) {{pages}} could not be read.',
+  'panel.flattener.unreadable': 'Pages that could not be read: {{pages}}.',
   'panel.flattener.unknownNote':
     'This document cannot be flattened: {{reasons}}',
   'panel.flattener.none': 'This document has no live transparency.',
@@ -1728,13 +1728,13 @@ export const PANEL_STRINGS = {
     'A larger balance merges regions, which removes seams and rasterizes more of the page; a smaller one keeps more text and vectors live and produces more regions.',
   'panel.flattener.apply': 'Flatten transparency',
   'panel.flattener.flattening': 'Flattening transparency…',
-  'panel.flattener.flattened': 'Transparency flattened; {{regions}} region(s) rasterized.',
+  'panel.flattener.flattened': 'Transparency flattened. Regions rasterized: {{regions}}.',
 
   'panel.trapPresets.open': 'Open a PDF to author its trapping presets',
   'panel.trapPresets.blurb':
     'Trapping presets are authored over the standard in-RIP trapping parameters and assigned to page ranges. Exporting to PostScript writes each range’s parameters into that page’s own setup, which is where a RIP that traps reads them.',
   'panel.trapPresets.scope':
-    'The parameters are written for a device to act on; no trap network is added to the document here, so the document is never claimed to be trapped on this account.',
+    'The parameters are written for a device to act on. No trap network is added to the document here, so Spectra PDF does not mark the document as trapped.',
   'panel.trapPresets.name': 'Preset name',
   'panel.trapPresets.pages': 'Pages',
   'panel.trapPresets.pagesTo': 'to',
@@ -1747,7 +1747,7 @@ export const PANEL_STRINGS = {
   'panel.trapPresets.remove': 'Remove',
   'panel.trapPresets.empty': 'No preset is assigned to any page yet.',
   'panel.trapPresets.row': '{{name}} — pages {{first}} to {{last}}',
-  'panel.trapPresets.uncovered': 'Page(s) {{pages}} have no preset assigned.',
+  'panel.trapPresets.uncovered': 'Pages with no preset assigned: {{pages}}.',
   'panel.trapPresets.unusedInks':
     'This document does not use {{inks}}; those overrides will have no effect here.',
   'panel.trapPresets.trapped': 'Declare the document as trapped',
@@ -1756,14 +1756,14 @@ export const PANEL_STRINGS = {
   'panel.trapPresets.apply': 'Save the assignments',
   'panel.trapPresets.assigning': 'Saving the trapping assignments…',
   'panel.trapPresets.assigned':
-    '{{count}} assignment(s) saved; the document declares Trapped {{trapped}}.',
+    'Assignments saved: {{count}}. The document declares Trapped {{trapped}}.',
   'panel.trapPresets.export': 'Export PostScript',
   'panel.trapPresets.exporting': 'Writing PostScript…',
-  'panel.trapPresets.exported': 'PostScript written; {{pages}} page(s) carry trapping setup.',
+  'panel.trapPresets.exported': 'PostScript written. Pages that carry trapping setup: {{pages}}.',
 
   'panel.prepress.open': 'Open a PDF to prepare for print',
   'panel.prepress.blurb':
-    "Converts the document's colours to DeviceCMYK for commercial printing, through a colour-managed (ICC) transform. Writes a new file.",
+    "Converts the document's colors to DeviceCMYK for commercial printing, through a color-managed (ICC) transform. Writes a new file.",
   'panel.prepress.renderIntent': 'Render intent',
   'panel.prepress.intentRelative': 'Relative colorimetric (print default)',
   'panel.prepress.intentPerceptual': 'Perceptual (photographic)',
@@ -1785,7 +1785,7 @@ export const PANEL_STRINGS = {
   'panel.prepress.pdfxBlurb':
     'Or produce a PDF/X print master — the CMYK conversion plus a conformance marker and an output intent naming the printing condition (embedding the chosen destination profile when one is set above).',
   'panel.prepress.standard': 'Standard',
-  'panel.prepress.x3': 'PDF/X-3 (colour-managed, default)',
+  'panel.prepress.x3': 'PDF/X-3 (color-managed, default)',
   'panel.prepress.x1a': 'PDF/X-1a (legacy CMYK exchange)',
   'panel.prepress.x4': 'PDF/X-4 (keeps live transparency)',
   'panel.prepress.condition': 'Condition',
@@ -1914,7 +1914,7 @@ export const PANEL_STRINGS = {
     'An item holding anything else has put its body where no reader looks for it.',
   'panel.a11y.check.list_semantics': 'Lists are tagged as lists',
   'panel.a11y.explain.list_semantics':
-    'Labelled paragraphs, and one list tagged as two, each need a person to look.',
+    'Labeled paragraphs, and one list tagged as two, each need a person to look.',
   'panel.a11y.check.heading_tag_mixing': 'One heading convention, not two',
   'panel.a11y.explain.heading_tag_mixing':
     'Numbered and unnumbered heading tags together give the outline two answers.',
@@ -1935,7 +1935,7 @@ export const PANEL_STRINGS = {
   'panel.a11y.check.bookmarks': 'Long document has bookmarks',
   'panel.a11y.explain.bookmarks':
     'Bookmarks are how a long document is navigated without reading it through.',
-  'panel.a11y.check.contrast': 'Text has sufficient colour contrast',
+  'panel.a11y.check.contrast': 'Text has sufficient color contrast',
   'panel.a11y.explain.contrast':
     'Text must stand out from what is painted under it, at the published ratio.',
   'panel.a11y.check.tagged_content': 'All page content is tagged',
@@ -2075,7 +2075,7 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.suspects_unreadable':
     'The mark information could not be read, so whether the document flags its own tagging is unknown.',
   'panel.a11y.detail.graphics_outside_marked_content':
-    'Page {{page}} paints {{operations}} thing(s) outside every marked sequence, so they are neither tagged nor declared decoration.',
+    'Page {{page}} paints things outside every marked sequence, so they are neither tagged nor declared decoration. Count: {{operations}}.',
   'panel.a11y.detail.unicode_never_mapped':
     'In “{{font}}” on page {{page}}, code {{code}} claims to spell {{declared}}, which is not a character any glyph spells.',
   'panel.a11y.detail.unicode_contradicts_font':
@@ -2089,7 +2089,7 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.figure_inline_in_text':
     'A {{role}} sits inside a {{parent}}, where a picture stands in the position a word occupies.',
   'panel.a11y.detail.figure_covers_the_page':
-    'This {{role}} paints nothing but a field of colour over {{share}}% of the page.',
+    'This {{role}} paints nothing but a field of color over {{share}}% of the page.',
   'panel.a11y.detail.element_spans_separated_blocks':
     'This {{role}} covers {{blocks}} lines set further apart than the lines inside them.',
   'panel.a11y.detail.siblings_share_one_block':
@@ -2101,7 +2101,7 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.sequence_spans_columns':
     'Sequence {{mcid}} on page {{page}} reaches across {{bands}} columns.',
   'panel.a11y.detail.sequence_draws_backwards':
-    'Sequence {{mcid}} on page {{page}} draws its own words right to left {{jumps}} time(s).',
+    'Sequence {{mcid}} on page {{page}} draws its own words right to left. Count: {{jumps}}.',
   'panel.a11y.detail.list_numbering_not_ordered':
     'The items are numbered and the list declares “{{declared}}”, so a reader announces the count as decoration.',
   'panel.a11y.detail.list_numbering_ordered':
@@ -2121,7 +2121,7 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.adjacent_lists_declare_alike':
     'This list follows another declaring the same “{{numbering}}”, so the two may be one list split in half.',
   'panel.a11y.detail.heading_conventions_mixed':
-    'The document uses {{numbered}} numbered heading(s) and {{generic}} unnumbered one(s), so its outline has two answers about each level.',
+    'The document mixes numbered and unnumbered headings, so its outline has two answers about each level. Numbered: {{numbered}}. Unnumbered: {{generic}}.',
   'panel.a11y.detail.paragraph_is_set_like_a_heading':
     'This paragraph is set at {{size}} pt against body copy at {{body}} pt.',
   'panel.a11y.detail.heading_is_set_like_body_text':
@@ -2496,7 +2496,7 @@ export const PANEL_STRINGS = {
   'panel.sig.changesUnknown': 'a change of an unreported kind',
   'panel.sig.certifiedBy': 'Certified by {{signer}}',
   'panel.sig.certifiedLevelUnknown':
-    'This document states what may change in it in a way this version does not recognise.',
+    'This document states what may change in it in a way this version does not recognize.',
   'panel.sig.certificationViolated':
     'The signature in field {{field}} reports a change the certification does not allow: {{change}}.',
   'panel.sig.certificationUnreadable':
@@ -2591,7 +2591,7 @@ export const PANEL_STRINGS = {
   'panel.settings.version': 'Version {{version}}',
   'panel.settings.vendor': 'Vendor: {{vendor}}',
   'panel.settings.identityName': 'Identity name',
-  'panel.settings.identityPlaceholder': 'Used by dynamic stamps’ {name} token',
+  'panel.settings.identityPlaceholder': 'For example: Alex Morgan',
   'panel.settings.identityHint': 'Shown where a stamp label uses {name} — e.g. “Reviewed by {name} {date}”.',
   'panel.settings.snapshotDpi': 'Snapshot resolution (pixels per inch)',
   'panel.settings.snapshotDpiHint':
@@ -2606,8 +2606,8 @@ export const PANEL_STRINGS = {
   'panel.settings.spellCheckAsYouType': 'Underline misspellings while editing text',
   'panel.settings.spellCheckAsYouTypeHint':
     'The paragraph editor marks words that are not in the chosen dictionary. Which dictionary that is, and any words you have added yourself, are set in the Spelling panel.',
-  'panel.settings.compressionQuality': 'Default Compression Quality',
-  'panel.settings.mrcPreset': 'Default Scan (MRC) Preset',
+  'panel.settings.compressionQuality': 'Default compression quality',
+  'panel.settings.mrcPreset': 'Default scan (MRC) preset',
   'panel.settings.singleKey': 'Use single-key accelerators to access tools',
   'panel.settings.singleKeyHint': 'H Hand · V Select · U Highlight · X Text · D Draw · K Stamp — off by default',
   'panel.settings.batchLogs': 'Batch OCR logs',
@@ -2635,7 +2635,7 @@ export const PANEL_STRINGS = {
   'panel.settings.themeLight': 'Light',
   'panel.settings.themeHighContrast': 'High contrast',
   'panel.settings.themeForcedColors':
-    'A system contrast theme is on, so the system palette controls the colours of this window and the theme above has no effect until you turn it off. Documents keep their own colours either way.',
+    'A system contrast theme is on, so the system palette controls the colors of this window and the theme above has no effect until you turn it off. Documents keep their own colors either way.',
   'panel.settings.minimizeToTray': 'Minimize to system tray on close',
   'panel.settings.startMinimized': 'Start minimized to tray',
   'panel.settings.startWithWindows': 'Start with Windows',
@@ -2762,7 +2762,7 @@ export const PANEL_STRINGS = {
   'panel.takeoff.armTitle': 'Count into this group',
   'panel.takeoff.edit': 'Edit',
   'panel.takeoff.nameAria': 'Group name',
-  'panel.takeoff.colorAria': 'Use the colour {{color}}',
+  'panel.takeoff.colorAria': 'Use the color {{color}}',
   'panel.takeoff.forget': 'Forget group',
   'panel.takeoff.forgetTitle':
     'Remove this group from the remembered list. Marks already placed keep their group.',
@@ -2911,18 +2911,18 @@ export const PANEL_STRINGS = {
   // The mark's appearance, in the format's own vocabulary. One surface for
   // both producers: the band drawn on the page and every mark the search
   // makes read the same persisted record.
-  'panel.redactProps.fill': 'Box colour',
+  'panel.redactProps.fill': 'Box color',
   'panel.redactProps.code': 'Code',
   'panel.redactProps.noCode': 'No code',
   'panel.redactProps.overlay': 'Overlay text',
   'panel.redactProps.overlayPlaceholder': 'Drawn over the box — e.g. (b)(6)',
   'panel.redactProps.align': 'Align',
   'panel.redactProps.alignLeft': 'Left',
-  'panel.redactProps.alignCenter': 'Centred',
+  'panel.redactProps.alignCenter': 'Centered',
   'panel.redactProps.alignRight': 'Right',
   'panel.redactProps.size': 'Text size',
   'panel.redactProps.sizeAuto': '0 fits the box',
-  'panel.redactProps.textColor': 'Text colour',
+  'panel.redactProps.textColor': 'Text color',
   'panel.redactProps.textColorAuto': 'Match the box automatically',
   'panel.redactProps.repeat': 'Repeat the text to fill the box',
   'panel.redactProps.importSet': 'Import a code set…',
@@ -3115,12 +3115,12 @@ export const PANEL_STRINGS = {
   'panel.fieldActions.actionUnauthorable':
     'This field also carries an action this app does not author ({{kinds}}). Applying here removes it.',
   'panel.prepareForm.reasonRuleWithoutLabel':
-    'Page {{page}}: {{count}} line(s) with no label beside them were left out — they read as a table, not a fill-in.',
+    'Page {{page}}: lines with no label beside them were left out, because they read as a table, not a fill-in. Count: {{count}}.',
   'panel.prepareForm.reasonCovered':
-    'Page {{page}}: {{count}} region(s) already carry a field.',
+    'Page {{page}}: regions that already carry a field: {{count}}.',
   'panel.prepareForm.reasonRadioDemoted':
-    'Page {{page}}: {{count}} group(s) had no distinct option labels, so each option is offered on its own.',
-  'panel.prepareForm.reasonOther': 'Page {{page}}: {{count}} region(s) were not offered.',
+    'Page {{page}}: groups with no distinct option labels, so each option is offered on its own: {{count}}.',
+  'panel.prepareForm.reasonOther': 'Page {{page}}: regions that were not offered: {{count}}.',
 
   'panel.tableReview.open': 'Open a PDF to check its tables',
   'panel.tableReview.blurb':

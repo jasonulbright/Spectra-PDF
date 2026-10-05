@@ -205,7 +205,7 @@ def refuse_unknown_colorants(page: int, detail: str) -> None:
     claim about one document.
     """
     raise ValueError(
-        f"Page {page} uses a colour space this engine cannot read, so the "
+        f"Page {page} uses a color space this engine cannot read, so the "
         f"inks on it cannot all be established: {detail}"
     )
 
@@ -927,7 +927,7 @@ def render_separations(
     limit = MAX_SPOTS_CEILING
     if n > limit:
         raise ValueError(
-            f"This page uses {n} spot colours; separation preview supports {limit}."
+            f"This page uses {n} spot colors; separation preview supports {limit}."
         )
 
     request = soft_proof.read_request(simulation)
@@ -1011,7 +1011,7 @@ def render_separations(
     if _FOLD_MARKER in stdout or _FOLD_MARKER in stderr:
         shutil.rmtree(out_dir, ignore_errors=True)
         raise ValueError(
-            f"Ghostscript folded {n} spot colours into process; "
+            f"Ghostscript folded {n} spot colors into process; "
             "raise the spot limit or reduce the document's spots."
         )
     if result.returncode != 0:

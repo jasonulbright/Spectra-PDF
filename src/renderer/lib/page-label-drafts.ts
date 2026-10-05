@@ -3,6 +3,7 @@ import type { PerformOperation } from '../hooks/useOperations';
 import type { EngineCall } from './engine-call';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome, tChromeCount } from '../i18n';
+import { errorText } from './error-text';
 
 export interface LabelRange { start: number; style: string; prefix: string; startAt: number }
 type Spec = { style: string; prefix: string; value: number };
@@ -97,7 +98,7 @@ export function createPageLabelDrafts(readState: () => AppState) {
     const accepts = () => at(d, file.buffer) && d.loading === token && !d.dirty && !readState().pageDirtyPaths.includes(d.path);
     try { const reply = await call('get_page_labels', { file: d.workingPath }); if (!accepts()) return;
       d.ranges = parseLabelRead(reply, file.pageCount); d.baseline = d.ranges; d.pages = file.pageCount; d.buffer = file.buffer; d.loaded = true;
-    } catch (e) { if (accepts()) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (accepts()) d.error = errorText(e); }
     finally { if (live(d) && d.loading === token) { d.loading = null; notify(); } }
   };
   const cancelLoad = (d: PageLabelDraft) => { if (live(d) && d.loading) { d.loading = null; notify(); } };
@@ -146,7 +147,7 @@ export function createPageLabelDrafts(readState: () => AppState) {
       if (!result.publication?.buffer || result.publication.path !== d.path || result.publication.workingPath !== d.workingPath) throw invalid();
       d.buffer = result.publication.buffer; d.baseline = submitted; d.dirty = !sameLabelRanges(d.ranges, submitted);
       d.status = submitted.length ? tChromeCount('panel.pageLabels.applied', submitted.length) : tChrome('panel.pageLabels.removed');
-    } catch (e) { if (live(d)) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; if (d.error || d.dirty) d.status = ''; notify(); } }
   };
   const reload = async (d: PageLabelDraft, commit: () => Promise<void>) => {
@@ -154,7 +155,7 @@ export function createPageLabelDrafts(readState: () => AppState) {
     const rows = d.ranges; d.busy = true; notify();
     try { await commit(); if (!live(d) || d.ranges !== rows) return;
       d.loaded = false; d.buffer = null; d.ranges = []; d.baseline = []; d.dirty = false; d.loading = null; d.error = ''; d.status = '';
-    } catch (e) { if (live(d)) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   return { get, reconcile, editable, conflict, load, cancelLoad, change, apply, reload,

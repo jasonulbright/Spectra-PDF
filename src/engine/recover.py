@@ -134,7 +134,7 @@ def recover(file: str, output: str) -> dict:
     try:
         source = open_pdf(file, suppress_warnings=False)
     except pikepdf.PasswordError:
-        raise ValueError("PDF is encrypted -- decrypt before recovery")
+        raise ValueError("PDF is encrypted — decrypt before recovery")
     except Exception as e:
         raise RuntimeError(
             f"Cannot open file for recovery: {e}. "

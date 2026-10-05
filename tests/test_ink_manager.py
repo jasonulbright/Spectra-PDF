@@ -119,7 +119,7 @@ class TestAliasing:
         src = two_spots_pdf(tmp_path / "curve.pdf", "Spot A", "Spot B",
                             (0.0, 1.0, 0.75, 0.0), (1.0, 0.0, 0.0, 0.0))
         out = str(tmp_path / "aliased.pdf")
-        with pytest.raises(ValueError, match="describe different colours"):
+        with pytest.raises(ValueError, match="describe different colors"):
             alias_ink(src, out, "Spot B", "Spot A")
         result = alias_ink(src, out, "Spot B", "Spot A", accept_target_transform=True)
         assert result["transforms_matched"] is False
@@ -328,7 +328,7 @@ class TestShadingsTheCompositionCannotDescribe:
         ]
         assert sorted(entry["reason"] for entry in result["skipped"]) == sorted([
             "the shading maps a point in the plane, not one parametric value",
-            "the shading states a background colour in the colorant's own space",
+            "the shading states a background color in the colorant's own space",
         ])
         assert len({entry["shading"] for entry in result["skipped"]}) == 2
 

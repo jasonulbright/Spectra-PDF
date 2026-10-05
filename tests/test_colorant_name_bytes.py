@@ -557,7 +557,7 @@ class TestInkConversionsNameEachInkByItsText:
     def test_a_refusal_names_the_ink(self, tmp_path, inks, shown):
         from engine.ink_manager import spot_to_process
 
-        with pytest.raises(ValueError, match=f'^Ink "{shown}" declares no alternate colour space.$'):
+        with pytest.raises(ValueError, match=f'^Ink "{shown}" declares no alternate color space.$'):
             spot_to_process(_write(tmp_path, _UNCONVERTIBLE), str(tmp_path / "out.pdf"), inks)
 
     def test_an_alias_between_two_inks_shown_alike_selects_each_by_its_bytes(self, tmp_path):

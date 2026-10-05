@@ -488,9 +488,9 @@ class TestAppearanceRoundTrip:
             author({"width": "thick"})
         with pytest.raises(ValueError, match="style must be solid, dashed or underline"):
             author({"width": 1, "style": "wavy"})
-        with pytest.raises(ValueError, match="colour must be three numbers"):
+        with pytest.raises(ValueError, match="color must be three numbers"):
             author({"width": 1, "color": [1, 0]})
-        with pytest.raises(ValueError, match="colour must be three numbers"):
+        with pytest.raises(ValueError, match="color must be three numbers"):
             author({"width": 1, "color": [1, 0, 2]})
         with pytest.raises(ValueError, match="highlight must be none, invert"):
             author({"width": 1, "highlight": "glow"})

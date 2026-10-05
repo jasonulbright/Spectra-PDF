@@ -1136,7 +1136,7 @@ def jbig2_check(data: bytes, globals_data: bytes | None, width: int, height: int
             if len(segment.data) < 17:
                 raise TaintError("truncated JBIG2 data in the image")
             if segment.data[16] & 0x08:
-                raise TaintError("a JBIG2 colour extension")
+                raise TaintError("a JBIG2 color extension")
         known.add(segment.number)
     info = page_info[0].data
     if len(info) < 19:

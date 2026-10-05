@@ -509,18 +509,18 @@ def _space(cs, resolve, depth: int = 0) -> _Space:
     read. A component count guessed wrong would write the fill across the wrong
     samples — a visible corruption on a security operation."""
     if depth > 4 or cs is None:
-        refuse("an unreadable colour space")
+        refuse("an unreadable color space")
     if isinstance(cs, (pikepdf.Array, list)):
         entries = list(cs)
         if not entries:
-            refuse("an unreadable colour space")
+            refuse("an unreadable color space")
         head = _ABBREVIATED_VALUES.get(token_text(entries[0]), token_text(entries[0]))
         if head == "/Indexed":
             if len(entries) < 4:
-                refuse("an unreadable colour space")
+                refuse("an unreadable color space")
             base = _space(entries[1], resolve, depth + 1)
             if base.family == "indexed":
-                refuse("an unreadable colour space")
+                refuse("an unreadable color space")
             lookup = entries[3]
             try:
                 table = (
@@ -540,19 +540,19 @@ def _space(cs, resolve, depth: int = 0) -> _Space:
             try:
                 count = len(list(entries[1]))
             except (TypeError, ValueError):
-                refuse("an unreadable colour space")
+                refuse("an unreadable color space")
             if count < 1:
-                refuse("an unreadable colour space")
+                refuse("an unreadable color space")
             return _Space("tint", count)
         if head == "/ICCBased":
             stream = entries[1] if len(entries) > 1 else None
             try:
                 n = int(stream.get("/N"))
             except Exception:
-                refuse("an unreadable colour space")
+                refuse("an unreadable color space")
             family = _ICC_FAMILIES.get(n)
             if family is None:
-                refuse(f"an unsupported {n}-component ICC colour space")
+                refuse(f"an unsupported {n}-component ICC color space")
             return _Space(family, n)
         if head == "/Lab":
             lab_range = (-100.0, 100.0, -100.0, 100.0)
@@ -569,17 +569,17 @@ def _space(cs, resolve, depth: int = 0) -> _Space:
         if head in _DEVICE_SPACES:
             family, ncomp = _DEVICE_SPACES[head]
             return _Space(family, ncomp)
-        refuse(f"an unsupported colour space {head}")
+        refuse(f"an unsupported color space {head}")
 
     name = key_text(cs)
     if name in _DEVICE_SPACES:
         family, ncomp = _DEVICE_SPACES[name]
         return _Space(family, ncomp)
     if name == "/Pattern":
-        refuse("a pattern colour space")
+        refuse("a pattern color space")
     resolved = resolve(name) if resolve is not None else None
     if resolved is None:
-        refuse(f"an unsupported colour space {name}")
+        refuse(f"an unsupported color space {name}")
     return _space(resolved, resolve, depth + 1)
 
 
@@ -692,7 +692,7 @@ def _colour_key_safe(fill: list, ranges, maxv: int) -> list:
         if lo > 0:
             fill[index] = lo - 1
             return fill
-    refuse("a colour-key mask that would make every fill colour transparent")
+    refuse("a color-key mask that would make every fill color transparent")
 
 
 # ── packed samples ────────────────────────────────────────────────────────
@@ -1408,7 +1408,7 @@ def _dct_rewrite(raster: _Raster, destroy, role: str, fill) -> tuple:
     if (layout.width, layout.height) != (raster.width, raster.height):
         refuse("a JPEG whose size contradicts the image dictionary")
     if len(layout.components) != raster.space.ncomp:
-        refuse("a JPEG whose channel count contradicts its colour space")
+        refuse("a JPEG whose channel count contradicts its color space")
     _check_size(raster.width, raster.height, raster.width * max(len(layout.components), 1))
     try:
         widened = codec_taint.jpeg_taint(layout, destroy, raster.width, raster.height)
@@ -1421,7 +1421,7 @@ def _dct_rewrite(raster: _Raster, destroy, role: str, fill) -> tuple:
         refuse("undecodable JPEG data")
     with image:
         if image.mode not in ("L", "RGB", "CMYK"):
-            refuse(f"an unsupported JPEG colour mode {image.mode}")
+            refuse(f"an unsupported JPEG color mode {image.mode}")
         qtables = getattr(image, "quantization", None)
         # Read-only and backed by the decoder's bytes; the writable copy is
         # taken once the decoder's own raster is released.
@@ -1526,7 +1526,7 @@ def _jpx_rewrite(raster: _Raster, destroy, role: str, fill):
     with image:
         mode = image.mode
         if mode not in ("L", "LA", "RGB", "RGBA"):
-            refuse(f"an unsupported JPEG 2000 colour mode {mode}")
+            refuse(f"an unsupported JPEG 2000 color mode {mode}")
         decoded = np.asarray(image)
     if decoded.ndim == 2:
         decoded = decoded[:, :, None]

@@ -398,7 +398,7 @@ describe('action files (export/import)', () => {
     );
     expect(() =>
       parseActionFile(f({ name: 'x', steps: [{ op: 'compress', params: { gs_path: 'evil.exe' } }] })),
-    ).toThrow(/unknown parameter\(s\) \[gs_path\]/);
+    ).toThrow(/parameters not recognized: gs_path/);
     expect(() =>
       parseActionFile(f({ name: 'x', steps: [{ op: 'compress', params: { quality: 'bogus' } }] })),
     ).toThrow(/invalid value 'bogus' for 'quality'/);

@@ -229,9 +229,11 @@ class _AlreadyHandled(Exception):
 
 
 def _classify_load_error(exc: Exception) -> str:
+    # The library text of a failed open carries the source's full path and
+    # parser internals, so a report row names only the class of failure.
     if isinstance(exc, pikepdf.PasswordError):
         return "password-protected"
-    return f"unreadable: {exc}"
+    return "unreadable"
 
 
 def dest_conflicts_with_source(source_root: str, dest_root: str) -> bool:
@@ -313,14 +315,14 @@ def _move_file(src: Path, dest: Path) -> str:
     if target.stat().st_size != src.stat().st_size:
         target.unlink(missing_ok=True)
         raise RuntimeError(
-            f"move aborted: short copy to {target} -- the original was left in place"
+            f"move aborted: short copy to {target} — the original was left in place"
         )
     try:
         src.unlink()
     except OSError as exc:
         raise RuntimeError(
             f"copied to {target} but could not remove the original {src}: {exc} "
-            "-- the file now exists in BOTH places"
+            "— the file now exists in BOTH places"
         ) from None
     return str(target)
 
@@ -650,15 +652,15 @@ def batch_ocr(
         raise ValueError(f"Source folder not found: {source}")
     if repair_only and (mrc or enhance or include_images):
         raise ValueError(
-            "Repair-only mode runs no OCR -- MRC compression, scan enhancement and "
+            "Repair-only mode runs no OCR — MRC compression, scan enhancement and "
             "image files cannot be combined with it."
         )
     if in_place:
         if dest:
-            raise ValueError("In-place mode takes no destination -- the originals are replaced.")
+            raise ValueError("In-place mode takes no destination — the originals are replaced.")
         if moved_root:
             raise ValueError(
-                "In-place mode cannot also move processed originals -- the processed "
+                "In-place mode cannot also move processed originals — the processed "
                 "file IS the original."
             )
         dest_path = source_path  # rel joins resolve to the originals themselves
@@ -668,7 +670,7 @@ def batch_ocr(
         dest_path = Path(dest).resolve()
         if dest_conflicts_with_source(str(source_path), str(dest_path)):
             raise ValueError(
-                "The destination must be outside the source folder -- choose a separate "
+                "The destination must be outside the source folder — choose a separate "
                 "folder for the searchable copies."
             )
     for label, root in (("moved", moved_root), ("error", error_root)):
@@ -817,7 +819,7 @@ def batch_ocr(
                         result = {
                             "rel": rel,
                             "status": "skipped",
-                            "reason": f"{classification}; repair did not help: {repair_exc}",
+                            "reason": f"{classification}. Repair did not help: {repair_exc}",
                         }
                 else:
                     result = {"rel": rel, "status": "skipped", "reason": classification}

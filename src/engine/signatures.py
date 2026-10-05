@@ -1252,7 +1252,7 @@ class StoreSigner(signers.Signer):
             # door every other signing refusal does rather than surfacing as a
             # library failure.
             raise ValueError(
-                "Signing was cancelled — Windows was not given permission to use the key."
+                "Signing was canceled — Windows was not given permission to use the key."
             ) from None
         if algorithm == "ecdsa":
             return wincert.ecdsa_der(raw)
@@ -1320,7 +1320,7 @@ def _signer_source(
             ) from None
         except wincert.SigningCancelled:
             raise ValueError(
-                "Signing was cancelled — Windows was not given permission to use the key."
+                "Signing was canceled — Windows was not given permission to use the key."
             ) from None
         try:
             yield StoreSigner(handle)
@@ -1352,7 +1352,7 @@ def _signer_source(
             text = str(exc)
             kind = type(exc).__name__
             if "No token" in text:
-                msg = f'No token labelled "{pkcs11_token}" in this module.'
+                msg = f'No token labeled "{pkcs11_token}" in this module.'
             elif "PIN" in text.upper() or "PinIncorrect" in kind or "PinInvalid" in kind:
                 msg = "The token rejected the PIN."
             else:

@@ -141,8 +141,8 @@ export const CHROME_STRINGS = {
   'imageres.single': '{{images}} at {{dpi}} DPI',
   'imageres.range': '{{images}} from {{min}} to {{max}} DPI, median {{median}}',
   'imageres.unmeasured': 'Not measurable: {{unmeasured}}',
-  'imageres.scanned': 'Scanned document — {{scanned}} of {{pages}} pages classify as scans.',
-  'imageres.scanPages': '{{scanned}} of {{pages}} pages classify as scans.',
+  'imageres.scanned': 'Scanned document — pages that classify as scans: {{scanned}} of {{pages}}.',
+  'imageres.scanPages': 'Pages that classify as scans: {{scanned}} of {{pages}}.',
 
   // File Explorer context-menu commands. The shell handler DLL compiles the
   // two verb labels from every catalog at build time and substitutes

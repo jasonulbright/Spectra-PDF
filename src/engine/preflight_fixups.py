@@ -313,7 +313,7 @@ def _alias_spot(source: str, output: str, run: _Run) -> int:
     if not origin or not target:
         raise ValueError(
             "alias_spot needs the ink to move and the ink it joins — an alias "
-            "is a decision about which plate a colour prints on, and no machine "
+            "is a decision about which plate a color prints on, and no machine "
             "may make it."
         )
     alias_ink(
