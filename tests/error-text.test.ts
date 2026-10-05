@@ -40,6 +40,14 @@ describe('withoutFilePath', () => {
     expect(withoutFilePath(`${temp.toLowerCase()}: bad`, temp)).toBe('bad');
   });
 
+  it('strips only a leading path and keeps one inside the sentence', () => {
+    expect(withoutFilePath(`${temp}: Access is denied`, temp)).toBe('Access is denied');
+    expect(withoutFilePath(`Failed to read ${temp}: Access is denied`, temp)).toBe(
+      `Failed to read ${temp}: Access is denied`,
+    );
+    expect(withoutFilePath('Access is denied', temp)).toBe('Access is denied');
+  });
+
   it('leaves a message that does not name the path', () => {
     expect(withoutFilePath('This file is not a PDF.', temp)).toBe('This file is not a PDF.');
     expect(withoutFilePath('x', '')).toBe('x');

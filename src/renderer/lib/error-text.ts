@@ -30,6 +30,6 @@ function escapeRegExp(text: string): string {
 export function withoutFilePath(message: string, path: string): string {
   if (!path) return message;
   const separators = escapeRegExp(path).replace(/\\\\|\//g, '[\\\\/]');
-  const prefix = new RegExp(`${separators}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, 'gi');
+  const prefix = new RegExp(`^\\s*${separators}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, 'i');
   return message.replace(prefix, '').trim();
 }
