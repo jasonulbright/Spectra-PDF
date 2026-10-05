@@ -223,6 +223,47 @@ describe('OS forced colors', () => {
       expect(await probeButtonBorder('.page')).toBe(0);
     });
 
+    it('a pressed colour swatch keeps its own colour', async () => {
+      const highlight = await systemColor('Highlight');
+      const fill = await browser.execute((sel: string) => {
+        const host = document.querySelector(sel);
+        if (!host) return null;
+        const b = document.createElement('button');
+        b.className = 'properties-bar-swatch color-swatch';
+        b.setAttribute('aria-pressed', 'true');
+        b.style.backgroundColor = 'rgb(220, 38, 38)';
+        host.appendChild(b);
+        const bg = getComputedStyle(b).backgroundColor;
+        b.remove();
+        return bg;
+      }, '.tool-dock');
+      expect(fill).toBe('rgb(220, 38, 38)');
+      expect(fill).not.toBe(highlight);
+    });
+
+    it('a search hit in a selected row paints in Mark and MarkText', async () => {
+      expect(await browser.execute(() => CSS.supports('color', 'Mark'))).toBe(true);
+      const mark = await systemColor('Mark');
+      const markText = await systemColor('MarkText');
+      const painted = await browser.execute((sel: string) => {
+        const host = document.querySelector(sel);
+        if (!host) return null;
+        const row = document.createElement('div');
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', 'true');
+        const hit = document.createElement('mark');
+        hit.className = 'search-hit-mark';
+        hit.textContent = 'term';
+        row.appendChild(hit);
+        host.appendChild(row);
+        const cs = getComputedStyle(hit);
+        const out = { background: cs.backgroundColor, color: cs.color };
+        row.remove();
+        return out;
+      }, '.tool-dock');
+      expect(painted).toEqual({ background: mark, color: markText });
+    });
+
     it('the theme picker says the system is in control', async () => {
       expect(await invokeAppCommand('edit.preferences')).toBe(true);
       await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });

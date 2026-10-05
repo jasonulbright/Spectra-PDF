@@ -5206,8 +5206,9 @@ input:not([type]) {
    lost it with no border to stand in. Six kinds came out; there is one rule
    per kind. Large regions that lose only their tint from the shell are left
    alone — every seam around them is drawn by a neighbour that carries a real
-   border. Focus rings are left alone too: outline-color is forced like any
-   other colour, so a forced focus ring is the palette's own.
+   border. Focus rings are left to the palette, which forces outline-color like
+   any other colour, except on the selected controls below: their opt-out from
+   forcing covers the outline too, so they restate the ring in a system colour.
    ──────────────────────────────────────────────────────────────────────── */
 @media (forced-colors: active) {
   /* The utility framework's preflight zeroes border-width on every element,
@@ -5240,7 +5241,7 @@ input:not([type]) {
   .secondary-tool.active,
   .prefs-cat.active,
   .nav-icon-btn.active,
-  [aria-pressed="true"]:not(.page *):not(.annot-swatch),
+  [aria-pressed="true"]:not(.page *):not(.annot-swatch):not(.color-swatch),
   [aria-selected="true"]:not(.page *) {
     forced-color-adjust: none;
     background: Highlight !important;
@@ -5252,10 +5253,35 @@ input:not([type]) {
     .secondary-tool.active,
     .prefs-cat.active,
     .nav-icon-btn.active,
-    [aria-pressed="true"]:not(.page *):not(.annot-swatch),
+    [aria-pressed="true"]:not(.page *):not(.annot-swatch):not(.color-swatch),
     [aria-selected="true"]:not(.page *)
-  ) :not(.page, .page *, .thumb-frame, .thumb-frame *, .annot-swatch, .color-swatch, .status-dot) {
+  ) :not(.page, .page *, .thumb-frame, .thumb-frame *, .annot-swatch, .color-swatch, .status-dot, mark) {
     color: HighlightText !important;
+  }
+  /* The authored ring colour is drawn for the theme's surface and can vanish
+     against the forced Canvas around the control. */
+  :is(
+    .tool-op.active,
+    .secondary-tool.active,
+    .prefs-cat.active,
+    .nav-icon-btn.active,
+    [aria-pressed="true"]:not(.page *):not(.annot-swatch):not(.color-swatch),
+    [aria-selected="true"]:not(.page *)
+  ):focus-visible {
+    outline-color: CanvasText !important;
+  }
+  /* A search hit inside a selected row keeps its own pair: the authored
+     translucent accent no longer contrasts with HighlightText on Highlight. */
+  :is(
+    .tool-op.active,
+    .secondary-tool.active,
+    .prefs-cat.active,
+    .nav-icon-btn.active,
+    [aria-pressed="true"]:not(.page *):not(.annot-swatch):not(.color-swatch),
+    [aria-selected="true"]:not(.page *)
+  ) mark {
+    background: Mark !important;
+    color: MarkText !important;
   }
 
   /* A hairline divider is a background on a one-pixel box; Canvas on Canvas
