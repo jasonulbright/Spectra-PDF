@@ -19,6 +19,7 @@ import {
   isTrappedValue,
   orderedAssignments,
   rangeProblem,
+  trapFieldLabelKey,
   uncoveredPages,
   type TrapAssignment,
   type TrapFields,
@@ -241,50 +242,60 @@ export function TrapPresetsPanel(): React.ReactElement {
         <div className="flex flex-col gap-1 max-h-72 overflow-auto pe-1">
           {(vocabulary?.fields ?? [])
             .filter((spec) => spec.type !== 'colorants')
-            .map((spec) => (
-              <label
-                key={spec.name}
-                className="flex items-center justify-between gap-2 text-xs text-neutral-400"
-                data-testid={`trap-field-${spec.name}`}
-              >
-                {/* A trapping parameter name is a wire vocabulary a RIP reads,
-                    not prose — it is never translated. */}
-                <span className="font-mono">{spec.name}</span>
-                {spec.type === 'boolean' ? (
-                  <input
-                    type="checkbox"
-                    checked={Boolean(fields[spec.name])}
-                    onChange={(e) => setFields((current) => ({
-                      ...current, [spec.name]: e.target.checked,
-                    }))}
-                  />
-                ) : spec.type === 'choice' ? (
-                  <select
-                    className="px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
-                    value={String(fields[spec.name] ?? '')}
-                    onChange={(e) => setFields((current) => ({
-                      ...current, [spec.name]: e.target.value,
-                    }))}
-                  >
-                    {(spec.choices ?? []).map((choice) => (
-                      <option key={choice} value={choice}>{choice}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type={spec.type === 'number' || spec.type === 'integer' ? 'number' : 'text'}
-                    className="w-28 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
-                    step={spec.type === 'integer' ? 1 : 0.1}
-                    min={spec.min}
-                    max={spec.max}
-                    value={String(fields[spec.name] ?? '')}
-                    onChange={(e) => setFields((current) => ({
-                      ...current, [spec.name]: coerceField(spec, e.target.value),
-                    }))}
-                  />
-                )}
-              </label>
-            ))}
+            .map((spec) => {
+              const captionKey = trapFieldLabelKey(spec.name);
+              return (
+                <label
+                  key={spec.name}
+                  className="flex items-center justify-between gap-2 text-xs text-neutral-400"
+                  data-testid={`trap-field-${spec.name}`}
+                >
+                  {/* A trapping parameter name is a wire vocabulary a RIP reads,
+                      not prose — it is never translated; only the caption is. */}
+                  <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                    {captionKey && (
+                      <span className="text-neutral-300" data-testid={`trap-field-caption-${spec.name}`}>
+                        {tChrome(captionKey)}
+                      </span>
+                    )}
+                    <span className="font-mono text-neutral-500">{spec.name}</span>
+                  </span>
+                  {spec.type === 'boolean' ? (
+                    <input
+                      type="checkbox"
+                      checked={Boolean(fields[spec.name])}
+                      onChange={(e) => setFields((current) => ({
+                        ...current, [spec.name]: e.target.checked,
+                      }))}
+                    />
+                  ) : spec.type === 'choice' ? (
+                    <select
+                      className="px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+                      value={String(fields[spec.name] ?? '')}
+                      onChange={(e) => setFields((current) => ({
+                        ...current, [spec.name]: e.target.value,
+                      }))}
+                    >
+                      {(spec.choices ?? []).map((choice) => (
+                        <option key={choice} value={choice}>{choice}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={spec.type === 'number' || spec.type === 'integer' ? 'number' : 'text'}
+                      className="w-28 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+                      step={spec.type === 'integer' ? 1 : 0.1}
+                      min={spec.min}
+                      max={spec.max}
+                      value={String(fields[spec.name] ?? '')}
+                      onChange={(e) => setFields((current) => ({
+                        ...current, [spec.name]: coerceField(spec, e.target.value),
+                      }))}
+                    />
+                  )}
+                </label>
+              );
+            })}
         </div>
 
         <button

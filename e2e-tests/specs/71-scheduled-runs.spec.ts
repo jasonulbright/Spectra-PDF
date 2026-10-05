@@ -281,6 +281,6 @@ describe('scheduled batch runs', () => {
     expect(taskExists(TASK_NAME)).toBe(false);
     const runs = await scheduleList();
     expect(runs.find((r) => r.name === TASK_NAME)).toBeUndefined();
-    await $('[data-testid="schedule-close"]').click();
+    await $('[data-testid="schedule-x"]').click();
   });
 });

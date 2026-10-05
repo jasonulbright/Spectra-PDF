@@ -8,6 +8,8 @@
 // assignments claim the same page, and what a fresh preset starts as. There is
 // no DOM test environment, so those rules live in the model, not the component.
 
+import type { PanelKey } from '../i18n-panels';
+
 export type TrapFieldType =
   | 'number'
   | 'integer'
@@ -125,6 +127,30 @@ export function coerceField(spec: TrapFieldSpec, raw: string | boolean): unknown
     return text.length > 0 ? text : null;
   }
   return raw;
+}
+
+const FIELD_LABEL_KEYS: Readonly<Record<string, PanelKey>> = {
+  BlackColorLimit: 'panel.trapPresets.fieldLabel.BlackColorLimit',
+  BlackDensityLimit: 'panel.trapPresets.fieldLabel.BlackDensityLimit',
+  BlackWidth: 'panel.trapPresets.fieldLabel.BlackWidth',
+  Enabled: 'panel.trapPresets.fieldLabel.Enabled',
+  HalftoneName: 'panel.trapPresets.fieldLabel.HalftoneName',
+  ImageInternalTrapping: 'panel.trapPresets.fieldLabel.ImageInternalTrapping',
+  ImagemaskTrapping: 'panel.trapPresets.fieldLabel.ImagemaskTrapping',
+  ImageResolution: 'panel.trapPresets.fieldLabel.ImageResolution',
+  ImageToObjectTrapping: 'panel.trapPresets.fieldLabel.ImageToObjectTrapping',
+  ImageTrapPlacement: 'panel.trapPresets.fieldLabel.ImageTrapPlacement',
+  SlidingTrapLimit: 'panel.trapPresets.fieldLabel.SlidingTrapLimit',
+  StepLimit: 'panel.trapPresets.fieldLabel.StepLimit',
+  TrapColorScaling: 'panel.trapPresets.fieldLabel.TrapColorScaling',
+  TrapSetName: 'panel.trapPresets.fieldLabel.TrapSetName',
+  TrapWidth: 'panel.trapPresets.fieldLabel.TrapWidth',
+};
+
+/** The caption key for a trapping parameter name, or null for a name with no
+ *  authored caption (the row then shows the parameter name alone). */
+export function trapFieldLabelKey(name: string): PanelKey | null {
+  return Object.prototype.hasOwnProperty.call(FIELD_LABEL_KEYS, name) ? FIELD_LABEL_KEYS[name] : null;
 }
 
 /** Is the claim one of the three PDF/X allows? */

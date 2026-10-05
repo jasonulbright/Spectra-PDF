@@ -8,6 +8,7 @@ import {
   BatchPauseGate,
   batchRunControls,
   cancelledNoteKey,
+  shownReasonText,
   type BatchEntry,
   type BatchIo,
   type BatchPdfDoc,
@@ -135,7 +136,11 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
     repairInspect: async (src) => {
       inspected.push(src);
       const verdict = opts.inspect?.[src];
-      if (!verdict) throw new Error('PDF is too damaged for Tier 1 repair');
+      if (!verdict) {
+        throw new Error(
+          'The PDF is too damaged to repair. Try Rebuild, or Recover to salvage the pages that can still be read.',
+        );
+      }
       return {
         path: `${src}.repaired.tmp`,
         damaged: verdict.damaged,
@@ -234,7 +239,12 @@ describe('runBatchOcr', () => {
     expect(report.results).toEqual([
       { rel: 'a\\scan.pdf', status: 'ocr', pagesOcrd: 2 },
       { rel: 'born.pdf', status: 'copied' },
-      { rel: 'broken.pdf', status: 'skipped', reason: 'unreadable: bad XRef' },
+      {
+        rel: 'broken.pdf',
+        status: 'skipped',
+        reason: 'unreadable: bad XRef',
+        shown: { kind: 'unreadable' },
+      },
     ]);
     // OCR'd file: applied to the mirrored path with 1-based page numbers,
     // parents ensured first; born-digital copied to its mirrored path.
@@ -575,6 +585,7 @@ describe('runBatchOcr — auto-repair', () => {
       rel: 'bad.pdf',
       status: 'skipped',
       reason: 'unreadable: bad XRef',
+      shown: { kind: 'unreadable' },
     });
     expect(discarded).toEqual([]);
   });
@@ -605,6 +616,8 @@ describe('runBatchOcr — auto-repair', () => {
     // repairToScratch would have thrown 'too damaged' had it run.
     expect(report.results[0].reason).toBe('password-protected');
     expect(report.results[0].repaired).toBeUndefined();
+    expect(report.results[0].shown).toBeUndefined();
+    expect(shownReasonText(report.results[0])).toBe('password-protected');
   });
 
   it('keeps the ORIGINAL diagnosis when repair does not help', async () => {
@@ -616,6 +629,42 @@ describe('runBatchOcr — auto-repair', () => {
       repairDamaged: true,
     });
     expect(report.results[0].reason).toBe('unreadable: bad XRef; repair did not help: too damaged');
+    expect(report.results[0].shown).toEqual({ kind: 'repairFailed', detail: 'too damaged' });
+  });
+
+  it('shows the failure without the parser text or a file path; the log reason keeps both', async () => {
+    const pathError = new Error(
+      'C:\\src\\bad.pdf: unable to find trailer dictionary while recovering damaged file',
+    );
+    const { io } = makeIo({
+      'C:\\src\\bad.pdf': { pages: [], loadError: new Error('Invalid PDF structure.') },
+    });
+    io.repairToScratch = async () => {
+      throw pathError;
+    };
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, {
+      repairDamaged: true,
+    });
+    const row = report.results[0];
+    expect(row.reason).toBe(
+      'unreadable: Invalid PDF structure.; repair did not help: ' +
+        'C:\\src\\bad.pdf: unable to find trailer dictionary while recovering damaged file',
+    );
+    const shown = shownReasonText(row);
+    expect(shown).toBe(
+      'could not be read as a PDF, and repair did not help: ' +
+        'unable to find trailer dictionary while recovering damaged file',
+    );
+    expect(shown).not.toContain('C:\\');
+    expect(shown).not.toContain('Invalid PDF structure');
+    expect(shown).not.toContain(',;');
+    expect(shown).not.toMatch(/Tier/);
+  });
+
+  it('shows an unreadable file in plain words', async () => {
+    const { io } = makeIo({ 'C:\\src\\bad.pdf': damaged });
+    const report = await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io);
+    expect(shownReasonText(report.results[0])).toBe('could not be read as a PDF');
   });
 
   it('writes the repaired bytes back over the original only when asked', async () => {
@@ -901,7 +950,8 @@ describe('runBatchOcr — repair only', () => {
       {
         rel: 'dead.pdf',
         status: 'skipped',
-        reason: 'repair failed: PDF is too damaged for Tier 1 repair',
+        reason:
+          'repair failed: The PDF is too damaged to repair. Try Rebuild, or Recover to salvage the pages that can still be read.',
       },
     ]);
     expect(copies).toEqual([

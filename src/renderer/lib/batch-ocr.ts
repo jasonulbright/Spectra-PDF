@@ -13,6 +13,8 @@
 
 import { displayRectToPdf } from './pdfx-build';
 import { rawEngineMessage } from './engine-messages';
+import { errorText, withoutFilePath } from './error-text';
+import { tChrome } from '../i18n';
 import type { PageGeometry } from './redaction';
 import type { OcrApplyPage } from './ocr-apply';
 import type { OcrResult, OcrWord } from '../ocr/types';
@@ -28,6 +30,10 @@ export interface BatchEntry {
  * repaired bytes are the output. */
 export type BatchFileStatus = 'ocr' | 'copied' | 'skipped' | 'repaired';
 
+export type BatchShownReason =
+  | { kind: 'unreadable' }
+  | { kind: 'repairFailed'; detail: string };
+
 export interface BatchFileResult {
   rel: string;
   status: BatchFileStatus;
@@ -38,6 +44,10 @@ export interface BatchFileResult {
    * scanned pages recognized, some blank) carries the shortfall here so
    * "made searchable" never silently overstates (regression). */
   reason?: string;
+  /** What the dialog shows in place of `reason` when `reason` carries detail
+   * a reader cannot act on: a parser's internal message or a file path.
+   * `reason` keeps that detail for the batch log. */
+  shown?: BatchShownReason;
   /** Where the ORIGINAL was moved to, when a moved/error root was given
    * Absent means the source is where it always was. */
   movedTo?: string;
@@ -433,10 +443,19 @@ export async function runBatchOcr(
               rel: entry.rel,
               status: 'skipped',
               reason: `${classification}; repair did not help: ${messageOf(repairErr)}`,
+              shown: {
+                kind: 'repairFailed',
+                detail: shownDetail(repairErr, [entry.abs, enhanced, scratch]),
+              },
             };
           }
         } else {
-          result = { rel: entry.rel, status: 'skipped', reason: classification };
+          result = {
+            rel: entry.rel,
+            status: 'skipped',
+            reason: classification,
+            ...(classification === 'password-protected' ? {} : { shown: { kind: 'unreadable' as const } }),
+          };
         }
       }
 
@@ -727,6 +746,23 @@ async function repairOnlyEntry(
  */
 function messageOf(err: unknown): string {
   return rawEngineMessage(err);
+}
+
+/** The display text of a failure: the localized message without an
+ * operating-system error code and without a leading "<path>: " for any of
+ * `paths` (the source, or a staging copy the run created). */
+function shownDetail(err: unknown, paths: readonly (string | null)[]): string {
+  let text = errorText(err);
+  for (const path of paths) if (path) text = withoutFilePath(text, path);
+  return text;
+}
+
+/** The on-screen reason of a report row; `reason` when nothing replaces it. */
+export function shownReasonText(result: BatchFileResult): string {
+  const shown = result.shown;
+  if (!shown) return result.reason ?? '';
+  if (shown.kind === 'unreadable') return tChrome('dialog.batch.unreadable');
+  return tChrome('dialog.batch.unreadableRepairFailed', { detail: shown.detail });
 }
 
 class BatchCancelledError extends Error {
