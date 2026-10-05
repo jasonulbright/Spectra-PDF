@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { QueueItem } from '../src/renderer/components/OperationQueue';
 import {
+  DOCUMENTLESS_METHODS,
   FRIENDLY_NAMES,
   describeResult,
   formatOutcome,
@@ -64,6 +65,52 @@ describe('every engine method is classified', () => {
     }
     expect(ids.size).toBeGreaterThan(100);
     expect([...ids].filter((m) => !classified(m)).sort()).toEqual([]);
+  });
+
+  it('passes no file to an ungated method that is listed as naming no document', () => {
+    const root = resolve(__dirname, '../src/renderer');
+    const callSite =
+      /\b(?:call|callRaw|performOperation|trackOperation|track)\(\s*(?:[A-Za-z_.]+\s*,\s*)?'([a-z][a-z_0-9]+)'\s*(,?)/g;
+    const listed = new Set<string>(DOCUMENTLESS_METHODS);
+    const passesFile = (params: string): boolean =>
+      /(?:^|[{,\s])['"]?file['"]?\s*(?::|,|\})/.test(params);
+    expect([passesFile('{ file: path }'), passesFile('{ dir, file }'), passesFile('{ filePath: p }')]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    const withFile: string[] = [];
+    const opaque: string[] = [];
+    let seen = 0;
+    for (const rel of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
+      if (!/\.tsx?$/.test(rel) || rel.startsWith('locales')) continue;
+      const text = readFileSync(join(root, rel), 'utf8');
+      for (const m of text.matchAll(callSite)) {
+        if (!listed.has(m[1])) continue;
+        seen += 1;
+        if (!m[2]) continue;
+        // The rest of the argument list, up to the paren that closes the call.
+        let depth = 1;
+        let end = m.index + m[0].length;
+        while (end < text.length && depth > 0) {
+          const ch = text[end];
+          if (ch === '(' || ch === '{' || ch === '[') depth += 1;
+          else if (ch === ')' || ch === '}' || ch === ']') depth -= 1;
+          end += 1;
+        }
+        const params = text.slice(m.index + m[0].length, end - 1).trim();
+        if (!params.startsWith('{')) {
+          opaque.push(`${m[1]} @ ${rel}`);
+          continue;
+        }
+        if (passesFile(params)) withFile.push(`${m[1]} @ ${rel}`);
+      }
+    }
+    expect(seen).toBeGreaterThan(5);
+    expect(withFile).toEqual([]);
+    // Parameters built elsewhere cannot be read here; each such site is
+    // checked by hand before it joins this list.
+    expect(opaque.map((s) => s.split(' @ ')[0]).sort()).toEqual(['preview_stamp_appearance']);
   });
 
   it('names only methods that reach the queue', () => {

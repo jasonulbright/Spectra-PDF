@@ -184,6 +184,32 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   web_capture: 'Capture Web Page',
 };
 
+/**
+ * Calls that pass no document: profile and preset catalogs, signing
+ * credential listings, the stamp preview drawn on a blank page, the engine
+ * liveness probe. The commit gate has nothing to protect for them, and running
+ * it would flush pending page edits for opening a picker.
+ *
+ * `ink_settings_defaults` takes a `file` and reads it. It is hidden and
+ * ungated only while no renderer call passes it one: a read of a workspace
+ * document must see the pending page edits, so a caller that passes a file
+ * makes it a named, gated method instead. tests/operation-queue.test.ts fails
+ * on any call site in this list that passes a `file`.
+ */
+export const DOCUMENTLESS_METHODS = [
+  'ping',
+  'list_preflight_profiles',
+  'validate_preflight_profile',
+  'trap_preset_defaults',
+  'validate_trap_preset',
+  'ink_settings_defaults',
+  'supported_export_formats',
+  'list_pkcs11_certificates',
+  'list_csc_credentials',
+  'preview_stamp_appearance',
+  'print_preview_cleanup',
+] as const;
+
 /** Methods that are internal lookups, not user-facing operations. */
 // Reads. They are NOT user-facing operations, so they don't belong in the
 // queue — and, more importantly, `useEngine.call` runs the COMMIT GATE for
@@ -347,21 +373,7 @@ const INTERNAL_METHODS = new Set([
   // gate, and routing it through would commit the user's pending page edits
   // on every ink checkbox.
   'composite_separations',
-  // Calls that name no document: profile and preset catalogs, signing
-  // credential listings, the stamp preview drawn on a blank page, the engine
-  // liveness probe. The commit gate has nothing to protect for them, and
-  // running it would flush pending page edits for opening a picker.
-  'ping',
-  'list_preflight_profiles',
-  'validate_preflight_profile',
-  'trap_preset_defaults',
-  'validate_trap_preset',
-  'ink_settings_defaults',
-  'supported_export_formats',
-  'list_pkcs11_certificates',
-  'list_csc_credentials',
-  'preview_stamp_appearance',
-  'print_preview_cleanup',
+  ...DOCUMENTLESS_METHODS,
   // Reads issued only through `callRaw` on paths outside the workspace or on
   // scratch extracts (folder listings, cross-file search, OCR of a page
   // raster, the print preview of already-committed bytes).
