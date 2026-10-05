@@ -68,7 +68,7 @@ compare.dpiMustBetween	exact	compare	dpi must be between 36 and 300.
 compare.ghostscriptRenderFailed	pattern	compare	Ghostscript render failed for {{v0}}: {{v1}}
 compare.malformedPpmDataExpected	pattern	compare	Malformed PPM data: expected exactly {{body_len}} pixel bytes after the header, found {{v1}}: {{v2}}
 compare.malformedPpmHeaderMissing	pattern	compare	Malformed PPM header (missing separator after maxval): {{v0}}
-compare.pageStructureLooksDamaged	pattern	compare	Page structure of {{name}} looks damaged: its page tree lists {{structural}} page(s) but Ghostscript could only render {{rendered}} — a comparison would be silently incomplete. Repair the file first.
+compare.pageStructureLooksDamaged	pattern	compare	Page structure of {{name}} looks damaged: pages in its page tree: {{structural}}; pages Ghostscript could render: {{rendered}}. A comparison would be silently incomplete. Repair the file first.
 compare.toleranceMustBetween	exact	compare	tolerance must be between 0 and 255.
 compare.unsupportedPpmMaxvalExpected	pattern	compare	Unsupported PPM maxval {{maxval}} (expected 255)
 compress.ghostscriptFailed	pattern	compress,distill,image_export	Ghostscript failed: {{v0}}
@@ -219,7 +219,7 @@ flattener.pageNamesGraphicsState	pattern	flattener	Page {{page}} names a graphic
 flattener.pagePlacesFormXobject	pattern	flattener	Page {{page}} places a form XObject this engine cannot read, so whether it paints transparency is unknown.
 flattener.pagePlacesFormXobject2	pattern	flattener	Page {{page}} places a form XObject whose /BBox cannot be measured, so the area it covers is unknown.
 font_embed.descendantFontMissing	pattern	font_embed	{{display}}: its descendant font is missing
-font_embed.embedMissingFontsUnknown	pattern	font_embed	embed_missing_fonts: unknown font source(s) {{v0}} (it reads: {{v1}}).
+font_embed.embedMissingFontsUnknown	pattern	font_embed	embed_missing_fonts: font sources not recognized: {{v0}} (it reads: {{v1}}).
 font_embed.engineEmbedsGlyphIndexed	pattern	font_embed	{{display}}: this engine embeds a glyph-indexed CID font, and the document declares a {{v1}} font
 font_embed.installedFaceMatchesFallback	pattern	font_embed	{{display}}: no installed face matches it and no fallback fonts directory was given to substitute from
 font_embed.installedFaceMatchesFixup	pattern	font_embed	{{display}}: no installed face matches it, and this fixup embeds the face a document names or nothing at all
@@ -330,7 +330,7 @@ icc_profiles.colourProfileNamedInstalled	pattern	icc_profiles	No color profile n
 icc_profiles.colourProfilesInstalledThere	pattern	icc_profiles	No color profiles are installed in {{directory}}, so there is no destination profile to convert to.
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
 image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{dpi}}
-image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
+image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but expected output files are missing (missing: {{v0}}; first: {{v1}})
 image_export.outputPathDirectoryFile	pattern	create_pdf,extract_text,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
 image_redact.imageCannotPartlyRedacted	pattern	image_redact	This image cannot be partly redacted ({{reason}}). Mark the whole image to remove it.
@@ -403,7 +403,7 @@ mrc_codecs.jpegQualityMustGot	pattern	mrc_codecs	JPEG quality must be 1-100, got
 mrc_codecs.maskMustBitImage	pattern	mrc_codecs	a mask must be a 1-bit image (Pillow mode '1'), got mode {{v0}}
 mrc_codecs.maskVerificationCouldDecode	pattern	mrc_codecs	mask verification could not decode the stencil: {{detail}}
 mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification failed: the embedded {{v0}} stencil decodes to {{got}} ink coverage, the mask it came from has {{v2}}.
-mrc_codecs.oneMaskProfilePer	pattern	mrc_codecs	one mask profile per mask is required, got {{v0}} for {{v1}} mask(s)
+mrc_codecs.oneMaskProfilePer	pattern	mrc_codecs	one mask profile per mask is required (profiles: {{v0}}; masks: {{v1}})
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 object_inspector.deviceWroteRaster	exact	object_inspector	the device wrote no raster
@@ -650,7 +650,7 @@ redact.redactionCannotRemoveText	exact	redact	Redaction cannot remove text that 
 redact_document.documentStructureTooComplex	exact	redact_document	The document structure is too complex to redact safely.
 redact_document.termsMustListStrings	exact	redact_document	terms must be a list of strings
 redact_document.unknownResidueKind	pattern	redact_document	unknown residue kind: {{v0}}
-redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mark(s) in this document cannot be read (page(s) {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
+redact_marks.redactionMarkSDocument	pattern	redact_marks	Redaction marks in this document that cannot be read: {{count}} (pages: {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted — decrypt before repairing
 repair.pdfTooDamagedTier	exact	repair	The PDF is too damaged to repair. Try Rebuild, or Recover to salvage the pages that can still be read.
 reversion.pdfVersionCannotChanged	exact	reversion	The PDF version cannot be changed while preserving this document's signatures.
@@ -694,7 +694,7 @@ signatures.chooseOnePlacementFill	exact	signatures	Choose ONE placement: fill an
 signatures.chooseOneSignerSource	exact	signatures	Choose ONE signer source: a .pfx file, a PEM key + certificate, a PKCS#11 token, a certificate from the Windows certificate store, or a credential at a signing service.
 signatures.couldLoadSignerWrong	exact	signatures	Could not load the signer — wrong key passphrase, no certificate matching the key, or an unsupported/corrupt key or certificate file.
 signatures.couldLoadSignerWrong2	exact	signatures	Could not load the signer — wrong password, or an unsupported/corrupt .pfx.
-signatures.documentAlreadyCarriesSignature	pattern	signatures	This document already carries {{signature_count}} signature(s), the first in field "{{first_field}}". A certification signature must be the first signature in a document.
+signatures.documentAlreadyCarriesSignature	pattern	signatures	This document already carries signatures (count: {{signature_count}}; the first is in field "{{first_field}}"). A certification signature must be the first signature in a document.
 signatures.documentAlreadyCertifiedLevel	pattern	signatures	This document is already certified at level "{{existing_level}}". A document can carry at most one certification signature.
 signatures.documentCertifiedChangesAllowed	exact	signatures	This document is certified with no changes allowed, so it cannot be signed again. Save a copy and sign that instead.
 signatures.documentCouldSignedOwn	exact	signatures	This document could not be signed — its own signature policy forbids the change.
@@ -735,7 +735,7 @@ signatures.unknownFieldLockChoose	pattern	fieldmdp	Unknown field lock "{{lock}}"
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
 signatures.windowsCertificateStoreAvailable	exact	signatures	The Windows certificate store is not available on this system.
 slide_export.couldRenderPageSlide	pattern	slide_export	Could not render page {{page_number}} for a slide: {{detail}}
-slide_export.presentationWrittenSlideS	pattern	slide_export	the presentation was written with {{slides}} slide(s) for {{v1}} exported page(s), so it does not carry the document
+slide_export.presentationWrittenSlideS	pattern	slide_export	the presentation does not carry the document: slides written: {{slides}}; pages exported: {{v1}}
 slide_export.unknownSlideSizeChoose	pattern	slide_export	unknown slide size {{slide_size}} (choose page, 16:9 or 4:3)
 soffice.documentPasswordProtectedCannot	pattern	soffice	the document is password-protected and cannot be converted without its password: {{src}}
 soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{soffice_path}}

@@ -188,7 +188,7 @@ class TestUnreadableMarksRefuse:
         src = os.path.join(tmp_dir, "s.pdf")
         _pdf(src, pages=2)
         _with_annots(src, [None, lambda pdf: [_mark(pdf, rect)]])
-        with pytest.raises(ValueError, match=r"1 redaction mark\(s\).*page\(s\) 2"):
+        with pytest.raises(ValueError, match=r"cannot be read: 1 \(pages: 2\)"):
             list_redact_annotations(src)
 
     def test_missing_rect_refuses(self, tmp_dir):
@@ -213,7 +213,7 @@ class TestUnreadableMarksRefuse:
                          _mark(pdf, pikepdf.Array([10, 10, 40, 40]))],
             lambda pdf: [_mark(pdf, pikepdf.Array([1, 2, 3]))],
         ])
-        with pytest.raises(ValueError, match=r"2 redaction mark\(s\).*page\(s\) 1, 2"):
+        with pytest.raises(ValueError, match=r"cannot be read: 2 \(pages: 1, 2\)"):
             list_redact_annotations(src)
 
     def test_non_finite_rect_is_unreadable(self):

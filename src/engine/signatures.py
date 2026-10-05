@@ -1043,9 +1043,9 @@ def _certification_refusals(file: str, certify: bool, certify_level: str | None)
             signature_count = len(filled)
             first_field = filled[0]
             raise ValueError(
-                f"This document already carries {signature_count} signature(s), the first "
-                f'in field "{first_field}". A certification signature must be the first '
-                "signature in a document."
+                f"This document already carries signatures (count: {signature_count}; the "
+                f'first is in field "{first_field}"). A certification signature must be the '
+                "first signature in a document."
             )
     return existing
 

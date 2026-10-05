@@ -159,7 +159,7 @@ def _available_faces(sources, font_dir: str) -> tuple[list[dict], list[dict]]:
     unknown = [s for s in wanted if s not in SOURCES]
     if unknown:
         raise ValueError(
-            f"embed_missing_fonts: unknown font source(s) {', '.join(sorted(unknown))} "
+            f"embed_missing_fonts: font sources not recognized: {', '.join(sorted(unknown))} "
             f"(it reads: {', '.join(SOURCES)})."
         )
     usable: list[dict] = []

@@ -185,7 +185,7 @@ describe('guided actions — export/import as files', () => {
       badParam,
       JSON.stringify({ name: 'Bad2', steps: [{ op: 'compress', params: { gs_path: 'evil.exe' } }] }),
     );
-    expect(await importViaBridge(badParam)).toContain('unknown parameter(s) [gs_path]');
+    expect(await importViaBridge(badParam)).toContain('parameters not recognized: gs_path');
 
     const notJson = resolve(SCRATCH, 'not-json.json');
     writeFileSync(notJson, '{oops');
