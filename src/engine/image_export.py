@@ -180,15 +180,15 @@ def export_images(
         if single and os.path.getsize(str(staged)) == 0:
             missing = [str(output_path)]
             raise RuntimeError(
-                f"Ghostscript reported success but {len(missing)} expected output "
-                f"file(s) are missing (first: {missing[0]})"
+                f"Ghostscript reported success but expected output files are missing "
+                f"(missing: {len(missing)}; first: {missing[0]})"
             )
 
     missing = [str(p) for p in expected if not p.is_file()]
     if missing:
         raise RuntimeError(
-            f"Ghostscript reported success but {len(missing)} expected output "
-            f"file(s) are missing (first: {missing[0]})"
+            f"Ghostscript reported success but expected output files are missing "
+            f"(missing: {len(missing)}; first: {missing[0]})"
         )
     return {
         "outputs": [str(p) for p in expected],

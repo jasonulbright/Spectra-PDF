@@ -200,7 +200,7 @@ def _refuse_unreadable(pages: list[dict]) -> None:
     # message (and its catalog entries), never in the interpolation.
     location = ", ".join(where)
     raise ValueError(
-        f"{count} redaction mark(s) in this document cannot be read (page(s) "
+        f"Redaction marks in this document that cannot be read: {count} (pages: "
         f"{location}). A mark whose annotation or /Rect will not resolve is neither "
         "shown nor applied, so redacting now would leave marked content in place. "
         "Repair the document first."

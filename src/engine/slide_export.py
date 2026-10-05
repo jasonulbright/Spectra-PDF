@@ -338,8 +338,8 @@ def export_slides(
         slides = _count_slides(staged)
         if slides != len(wanted):
             raise RuntimeError(
-                f"the presentation was written with {slides} slide(s) for "
-                f"{len(wanted)} exported page(s), so it does not carry the document"
+                f"the presentation does not carry the document: slides written: {slides}; "
+                f"pages exported: {len(wanted)}"
             )
         if out_path.exists():
             try:

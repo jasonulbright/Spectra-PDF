@@ -677,9 +677,9 @@ def compare_visual(
     ):
         if rendered != structural:
             raise RuntimeError(
-                f"Page structure of {name} looks damaged: its page tree lists "
-                f"{structural} page(s) but Ghostscript could only render {rendered} — "
-                f"a comparison would be silently incomplete. Repair the file first."
+                f"Page structure of {name} looks damaged: pages in its page tree: "
+                f"{structural}; pages Ghostscript could render: {rendered}. "
+                f"A comparison would be silently incomplete. Repair the file first."
             )
 
     paired = min(count_a, count_b)

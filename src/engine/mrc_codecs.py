@@ -505,7 +505,8 @@ def encode_mask(
         raise ValueError(f"unknown mask codec: {codec} (expected one of {', '.join(MASK_CODECS)})")
     if profiles is not None and len(profiles) != len(masks):
         raise ValueError(
-            f"one mask profile per mask is required, got {len(profiles)} for {len(masks)} mask(s)"
+            "one mask profile per mask is required "
+            f"(profiles: {len(profiles)}; masks: {len(masks)})"
         )
     if codec == CCITT_G4:
         return [encode_mask_ccitt_g4(m) for m in masks], CCITT_G4

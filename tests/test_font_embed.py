@@ -204,7 +204,7 @@ class TestSources:
     def test_an_unknown_source_refuses_by_name(self, tmp_path):
         path = _document(str(tmp_path / "in.pdf"), "ArialMT",
                          [500] * len(CODES))
-        with pytest.raises(ValueError, match="unknown font source"):
+        with pytest.raises(ValueError, match="font sources not recognized: network"):
             embed_missing_fonts(path, str(tmp_path / "out.pdf"), sources=("network",))
 
 
