@@ -77,15 +77,15 @@ export function DocumentJsPanel(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      <div className="shrink-0 flex items-center gap-3">
-        <div className="text-sm text-neutral-400">
+      <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="min-w-0 text-sm text-neutral-400 [overflow-wrap:anywhere]">
           {tChrome('panel.docjs.heading')} <span className="text-neutral-200">{activeFile.name}</span>
         </div>
         <button
           data-testid="docjs-add"
           onClick={addScript}
           disabled={!editable}
-          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
+          className="whitespace-nowrap px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
         >
           {tChrome('panel.docjs.addScript')}
         </button>
@@ -93,7 +93,7 @@ export function DocumentJsPanel(): React.ReactElement {
           data-testid="docjs-save"
           onClick={() => void save()}
           disabled={!editable || !dirty || busy}
-          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
+          className="whitespace-nowrap px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
         >
           {tChrome('panel.docjs.saveScripts')}
         </button>
@@ -112,7 +112,7 @@ export function DocumentJsPanel(): React.ReactElement {
           {/* Script list */}
           <ul
             data-testid="docjs-list"
-            className="w-44 shrink-0 overflow-y-auto rounded border border-neutral-800 bg-neutral-900/50 p-1 flex flex-col gap-0.5"
+            className="w-44 min-w-[6rem] shrink overflow-y-auto rounded border border-neutral-800 bg-neutral-900/50 p-1 flex flex-col gap-0.5"
             tabIndex={0}
             role="region"
             aria-label={tChrome('panel.docjs.listAria')}
@@ -138,7 +138,7 @@ export function DocumentJsPanel(): React.ReactElement {
           {/* Editor for the selected script */}
           {sel && (
             <div className="flex-1 min-w-0 flex flex-col gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-neutral-400 shrink-0">{tChrome('panel.docjs.name')}</span>
                 <input
                   data-testid="docjs-name"
@@ -146,13 +146,13 @@ export function DocumentJsPanel(): React.ReactElement {
                   value={sel.name}
                   disabled={!editable}
                   onChange={(e) => updateSelected({ name: e.target.value })}
-                  className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                  className="min-w-[6rem] flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
                 />
                 <button
                   data-testid="docjs-delete"
                   onClick={removeSelected}
                   disabled={!editable}
-                  className="text-xs danger-action"
+                  className="whitespace-nowrap text-xs danger-action"
                 >
                   {tChrome('panel.docjs.delete')}
                 </button>
@@ -172,9 +172,9 @@ export function DocumentJsPanel(): React.ReactElement {
       )}
 
       {error && (
-        <div data-testid="docjs-error" className="shrink-0 text-xs text-red-400" aria-live="polite">
-          {error}
-          {draft && <button data-testid="docjs-reload" disabled={busy} onClick={() => void drafts.reload(draft, runCommitGate)}>
+        <div data-testid="docjs-error" className="shrink-0 flex flex-col items-start gap-1 text-xs text-red-400 [overflow-wrap:anywhere]" aria-live="polite">
+          <p>{error}</p>
+          {draft && <button data-testid="docjs-reload" className="bookmark-add-btn disabled:opacity-60" disabled={busy} onClick={() => void drafts.reload(draft, runCommitGate)}>
             {tChrome(draft.dirty ? 'panel.docjs.discardReload' : 'app.commit.retry')}
           </button>}
         </div>

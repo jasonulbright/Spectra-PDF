@@ -217,9 +217,9 @@ export function FormsPanel(): React.ReactElement {
       )}
 
       {draft && (conflict || draft.error || !editable && !draft.loading && !busy) && (
-        <div role="alert" data-testid="forms-revision-notice">
+        <div role="alert" data-testid="forms-revision-notice" className="flex flex-col items-start gap-1 text-xs [overflow-wrap:anywhere]">
           <p>{conflict ? tChrome('panel.forms.sourceChanged') : status || tChrome('app.history.changed')}</p>
-          <button data-testid="forms-reload" disabled={busy} onClick={() => void drafts.reload(draft, runCommitGate)}>
+          <button data-testid="forms-reload" className="bookmark-add-btn disabled:opacity-60" disabled={busy} onClick={() => void drafts.reload(draft, runCommitGate)}>
             {drafts.dirty(draft) ? tChrome('panel.forms.discardReload') : tChrome('app.commit.retry')}
           </button>
         </div>
@@ -368,12 +368,12 @@ function FieldRow({
 }): React.ReactElement {
   const testId = `form-field-${field.name}`;
   const label = (
-    <div className="flex items-center gap-2 mb-1">
-      <span className="text-sm text-neutral-300">{field.name}</span>
-      {field.required && <span className="text-[10px] text-amber-400 uppercase">{tChrome('panel.forms.required')}</span>}
-      {field.readOnly && <span className="text-[10px] text-neutral-500 uppercase">{tChrome('panel.forms.readOnly')}</span>}
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
+      <span className="min-w-0 text-sm text-neutral-300 [overflow-wrap:anywhere]">{field.name}</span>
+      {field.required && <span className="whitespace-nowrap text-[10px] text-amber-400 uppercase">{tChrome('panel.forms.required')}</span>}
+      {field.readOnly && <span className="whitespace-nowrap text-[10px] text-neutral-500 uppercase">{tChrome('panel.forms.readOnly')}</span>}
       {field.calculated && (
-        <span data-testid={`form-calculated-${field.name}`} className="text-[10px] text-sky-400 uppercase">
+        <span data-testid={`form-calculated-${field.name}`} className="whitespace-nowrap text-[10px] text-sky-400 uppercase">
           {tChrome('panel.forms.calculated')}
         </span>
       )}
@@ -381,13 +381,13 @@ function FieldRow({
         <span
           data-testid={`form-from-xfa-${field.name}`}
           title={tChrome('panel.forms.fromXfaTitle')}
-          className="text-[10px] text-emerald-400 uppercase"
+          className="whitespace-nowrap text-[10px] text-emerald-400 uppercase"
         >
           {tChrome('panel.forms.fromXfa')}
         </span>
       )}
       {(field.type === 'button' || field.type === 'signature') && (
-        <span className="text-[10px] text-neutral-500 uppercase">{field.type}</span>
+        <span className="whitespace-nowrap text-[10px] text-neutral-500 uppercase">{field.type}</span>
       )}
     </div>
   );

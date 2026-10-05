@@ -452,22 +452,6 @@ export function SecondaryToolbar({
           </button>
       </div>
 
-      {actions.length > 0 && (
-        <div className="secondary-toolbar-actions">
-          {actions.map((id) => (
-            <button
-              key={id}
-              type="button"
-              data-testid={`secondary-action-${id}`}
-              className="secondary-tool"
-              onClick={() => invokeCommand(id)}
-            >
-              {tCommandTitle(id, COMMANDS[id].title)}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Mode OPTIONS — they configure the armed mode, so they belong to the
           tool and move here from the floating cluster. */}
       {owner.id === 'comment' && tool === 'shape' && (
@@ -1225,6 +1209,24 @@ export function SecondaryToolbar({
               />
             );
           })}
+        </div>
+      )}
+
+      {/* Last in source order so a mode option that appears or changes width
+          (a busy hint, a notice) never moves it off the far end. */}
+      {actions.length > 0 && (
+        <div className="secondary-toolbar-actions">
+          {actions.map((id) => (
+            <button
+              key={id}
+              type="button"
+              data-testid={`secondary-action-${id}`}
+              className="secondary-tool"
+              onClick={() => invokeCommand(id)}
+            >
+              {tCommandTitle(id, COMMANDS[id].title)}
+            </button>
+          ))}
         </div>
       )}
     </div>

@@ -14,6 +14,7 @@ import {
   DocumentHealthSegment,
   type DocumentHealthSegmentProps,
 } from './DocumentHealthSegment';
+import { statusPageFieldWidth } from './status-page-width';
 
 // The docked status bar.
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
@@ -459,6 +460,7 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
             onBlur={props.pageBox.onBlur}
             onKeyDown={props.pageBox.onKeyDown}
             className="canvas-status-pageinput"
+            style={{ width: statusPageFieldWidth(props.pageBox.value, props.pageBox.total) }}
             aria-label={tChrome('chrome.status.currentPage')}
             title={
               props.pageBox.labelled

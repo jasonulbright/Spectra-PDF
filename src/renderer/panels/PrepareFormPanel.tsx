@@ -576,7 +576,7 @@ export function PrepareFormPanel(): React.ReactElement {
                     ×
                   </button>
                 </div>
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                   <select
                     className="bg-neutral-800 rounded px-1 py-0.5"
                     aria-label={tChrome('panel.prepareForm.kindAria')}
@@ -608,7 +608,7 @@ export function PrepareFormPanel(): React.ReactElement {
                     </label>
                   )}
                   {candidate.label && (
-                    <span className="text-neutral-500 truncate">
+                    <span className="min-w-0 text-neutral-500 [overflow-wrap:anywhere]">
                       {tChrome('panel.prepareForm.fromLabel', { label: candidate.label })}
                     </span>
                   )}

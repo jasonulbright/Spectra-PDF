@@ -45,7 +45,7 @@ export function PageRangeField({
   return (
     <div>
       <label className="block text-sm text-neutral-400 mb-1">{tChrome(label)}</label>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           data-testid={`${testIdPrefix}-pages`}
           aria-label={tChrome(ariaLabel)}
@@ -63,7 +63,7 @@ export function PageRangeField({
           onClick={useSelection}
           disabled={selected.length === 0}
           title={tChrome('panel.common.useSelectionTitle')}
-          className="px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-60"
+          className="whitespace-nowrap px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.common.useSelection')}
         </button>

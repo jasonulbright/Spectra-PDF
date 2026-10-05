@@ -81,15 +81,17 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
           aria-label={tChrome('dialog.opqueue.aria')}
         >
           {items.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 text-xs">
-              <span className={`status-dot w-1.5 h-1.5 rounded-full shrink-0 ${
+            <div key={item.id} className="flex items-start gap-3 text-xs">
+              <span className={`status-dot w-1.5 h-1.5 mt-1.5 rounded-full shrink-0 ${
                 item.status === 'running' ? 'bg-blue-500 animate-pulse' :
                 item.status === 'done' ? 'bg-emerald-500' : 'bg-red-500'
               }`} />
-              <span className="text-neutral-300">
+              <span className="min-w-0 text-neutral-300 [overflow-wrap:anywhere]">
                 {formatTime(item.startTime)} {formatQueueLabel(item.label)}
               </span>
-              <span className="text-neutral-500 truncate flex-1">
+              {/* Wraps rather than truncating: a failure's text is the only
+                  account of what went wrong, and an ellipsis hid its end. */}
+              <span className="min-w-0 flex-1 text-neutral-500 [overflow-wrap:anywhere]">
                 {/* Completion is the queue's OWN wording, keyed off the state
                     discriminant rather than off any text the hook wrote —
                     a failure's text belongs to the engine and passes through. */}
