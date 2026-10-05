@@ -959,9 +959,9 @@ export function GuidedActionsPanel(): React.ReactElement {
             <div
               key={a.id}
               data-testid={`action-item-${a.id}`}
-              className="flex items-center gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded"
+              className="flex flex-col gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded"
             >
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0" data-testid={`action-details-${a.id}`}>
                 <div className="text-sm text-neutral-200 truncate">{a.name}</div>
                 {gsBlockedMsg !== null && (
                   <div className="text-xs text-amber-300" data-testid={`action-gs-${a.id}`}>
@@ -972,108 +972,113 @@ export function GuidedActionsPanel(): React.ReactElement {
                   {a.steps.map((s) => tStepTitle(s.op, stepDefFor(s.op).title)).join(' → ')}
                 </div>
               </div>
-              <button
-                type="button"
-                data-testid={`action-run-${a.id}`}
-                disabled={!activeFile || running || openBlocked !== null || gsBlockedMsg !== null}
-                title={openBlocked ?? gsBlockedMsg ?? undefined}
-                onClick={() => void runAction(a)}
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
+              <div
+                className="flex min-w-0 flex-wrap items-center gap-1.5"
+                data-testid={`action-controls-${a.id}`}
               >
-                {tChrome('panel.ga.run')}
-              </button>
-              <button
-                type="button"
-                data-testid={`action-folder-${a.id}`}
-                disabled={running || gsBlockedMsg !== null}
-                title={gsBlockedMsg ?? tChrome('panel.ga.folderTitle')}
-                onClick={() => void runActionOnFolder(a)}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
-              >
-                {tChrome('panel.ga.folder')}
-              </button>
-              {confirmInPlace === a.id ? (
-                <>
-                  <span className="text-xs text-amber-400 self-center" data-testid={`action-inplace-warning-${a.id}`}>
-                    {tChrome('panel.ga.inPlaceWarning')}
-                  </span>
-                  <button
-                    type="button"
-                    data-testid={`action-inplace-confirm-${a.id}`}
-                    disabled={running}
-                    onClick={() => {
-                      setConfirmInPlace(null);
-                      void runActionInPlace(a);
-                    }}
-                    className="px-2 py-1 text-xs text-white bg-red-700/90 hover:bg-red-600 disabled:opacity-60 rounded"
-                  >
-                    {tChrome('panel.ga.replace')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmInPlace(null)}
-                    className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200"
-                  >
-                    {tChrome('panel.ga.keep')}
-                  </button>
-                </>
-              ) : (
                 <button
                   type="button"
-                  data-testid={`action-inplace-${a.id}`}
-                  disabled={running || inPlaceBlocked !== null || gsBlockedMsg !== null}
-                  title={inPlaceBlocked ?? gsBlockedMsg ?? tChrome('panel.ga.inPlaceTitle')}
-                  onClick={() => setConfirmInPlace(a.id)}
-                  className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
+                  data-testid={`action-run-${a.id}`}
+                  disabled={!activeFile || running || openBlocked !== null || gsBlockedMsg !== null}
+                  title={openBlocked ?? gsBlockedMsg ?? undefined}
+                  onClick={() => void runAction(a)}
+                  className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
                 >
-                  {tChrome('panel.ga.inPlace')}
+                  {tChrome('panel.ga.run')}
                 </button>
-              )}
-              <button
-                type="button"
-                data-testid={`action-edit-${a.id}`}
-                onClick={() => {
-                  setEditError(null);
-                  setView({ kind: 'edit', isNew: false, action: { ...a, steps: a.steps.map((s) => ({ ...s, params: { ...s.params } })) } });
-                }}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
-              >
-                {tChrome('panel.ga.edit')}
-              </button>
-              <button
-                type="button"
-                data-testid={`action-duplicate-${a.id}`}
-                onClick={() =>
-                  persist([
-                    ...actions,
-                    {
-                      id: crypto.randomUUID(),
-                      name: tChrome('panel.ga.copySuffix', { name: a.name }),
-                      steps: a.steps.map((s) => ({ ...s, params: { ...s.params } })),
-                    },
-                  ])
-                }
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
-              >
-                {tChrome('panel.ga.duplicate')}
-              </button>
-              <button
-                type="button"
-                data-testid={`action-export-${a.id}`}
-                title={tChrome('panel.ga.exportTitle')}
-                onClick={() => void exportAction(a)}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
-              >
-                {tChrome('panel.ga.export')}
-              </button>
-              <button
-                type="button"
-                data-testid={`action-delete-${a.id}`}
-                onClick={() => persist(actions.filter((x) => x.id !== a.id))}
-                className="text-xs danger-action is-quiet"
-              >
-                {tChrome('panel.ga.delete')}
-              </button>
+                <button
+                  type="button"
+                  data-testid={`action-folder-${a.id}`}
+                  disabled={running || gsBlockedMsg !== null}
+                  title={gsBlockedMsg ?? tChrome('panel.ga.folderTitle')}
+                  onClick={() => void runActionOnFolder(a)}
+                  className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
+                >
+                  {tChrome('panel.ga.folder')}
+                </button>
+                {confirmInPlace === a.id ? (
+                  <>
+                    <span className="basis-full text-xs text-amber-400" data-testid={`action-inplace-warning-${a.id}`}>
+                      {tChrome('panel.ga.inPlaceWarning')}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid={`action-inplace-confirm-${a.id}`}
+                      disabled={running}
+                      onClick={() => {
+                        setConfirmInPlace(null);
+                        void runActionInPlace(a);
+                      }}
+                      className="shrink-0 whitespace-nowrap px-2 py-1 text-xs text-white bg-red-700/90 hover:bg-red-600 disabled:opacity-60 rounded"
+                    >
+                      {tChrome('panel.ga.replace')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmInPlace(null)}
+                      className="shrink-0 whitespace-nowrap px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200"
+                    >
+                      {tChrome('panel.ga.keep')}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`action-inplace-${a.id}`}
+                    disabled={running || inPlaceBlocked !== null || gsBlockedMsg !== null}
+                    title={inPlaceBlocked ?? gsBlockedMsg ?? tChrome('panel.ga.inPlaceTitle')}
+                    onClick={() => setConfirmInPlace(a.id)}
+                    className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
+                  >
+                    {tChrome('panel.ga.inPlace')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid={`action-edit-${a.id}`}
+                  onClick={() => {
+                    setEditError(null);
+                    setView({ kind: 'edit', isNew: false, action: { ...a, steps: a.steps.map((s) => ({ ...s, params: { ...s.params } })) } });
+                  }}
+                  className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
+                >
+                  {tChrome('panel.ga.edit')}
+                </button>
+                <button
+                  type="button"
+                  data-testid={`action-duplicate-${a.id}`}
+                  onClick={() =>
+                    persist([
+                      ...actions,
+                      {
+                        id: crypto.randomUUID(),
+                        name: tChrome('panel.ga.copySuffix', { name: a.name }),
+                        steps: a.steps.map((s) => ({ ...s, params: { ...s.params } })),
+                      },
+                    ])
+                  }
+                  className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
+                >
+                  {tChrome('panel.ga.duplicate')}
+                </button>
+                <button
+                  type="button"
+                  data-testid={`action-export-${a.id}`}
+                  title={tChrome('panel.ga.exportTitle')}
+                  onClick={() => void exportAction(a)}
+                  className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded"
+                >
+                  {tChrome('panel.ga.export')}
+                </button>
+                <button
+                  type="button"
+                  data-testid={`action-delete-${a.id}`}
+                  onClick={() => persist(actions.filter((x) => x.id !== a.id))}
+                  className="shrink-0 whitespace-nowrap text-xs danger-action is-quiet"
+                >
+                  {tChrome('panel.ga.delete')}
+                </button>
+              </div>
             </div>
             );
           })}

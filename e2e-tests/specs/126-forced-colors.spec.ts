@@ -170,6 +170,52 @@ describe('OS forced colors', () => {
       expect(typeof accent).toBe('string');
     });
 
+    it('the label of a selected chrome control paints in HighlightText with no backplate', async () => {
+      // Under forced-color-adjust: auto a Canvas backplate is drawn behind
+      // every text run; in a dark palette HighlightText equals Canvas, so the
+      // label vanishes into a solid block. Every element that carries text in
+      // the selected control must opt out and resolve to HighlightText.
+      const highlight = await systemColor('Highlight');
+      const highlightText = await systemColor('HighlightText');
+      expect(highlightText).not.toBe(highlight);
+      const runs = await browser.execute(() => {
+        const host = document.querySelector('.tool-op.active');
+        if (!host) return null;
+        const out: { adjust: string; color: string; text: string }[] = [];
+        for (const el of [host, ...Array.from(host.querySelectorAll('*'))]) {
+          const own = Array.from(el.childNodes)
+            .filter((n) => n.nodeType === Node.TEXT_NODE)
+            .map((n) => (n.textContent ?? '').trim())
+            .join('');
+          if (!own) continue;
+          const cs = getComputedStyle(el);
+          out.push({ adjust: cs.getPropertyValue('forced-color-adjust'), color: cs.color, text: own });
+        }
+        return out;
+      });
+      expect(runs).not.toBeNull();
+      expect(runs!.length).toBeGreaterThan(0);
+      for (const run of runs!) {
+        expect(run.adjust).toBe('none');
+        expect(run.color).toBe(highlightText);
+        expect(run.color).not.toBe(highlight);
+      }
+    });
+
+    it('a selected preferences category keeps a readable label', async () => {
+      expect(await invokeAppCommand('edit.preferences')).toBe(true);
+      await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+      await $('[data-testid="prefs-cat-appearance"]').click();
+      await browser.pause(400);
+      const highlight = await systemColor('Highlight');
+      const highlightText = await systemColor('HighlightText');
+      expect(await computed('.prefs-cat.active', 'background-color')).toBe(highlight);
+      expect(await computed('.prefs-cat.active', 'color')).toBe(highlightText);
+      expect(await computed('.prefs-cat.active', 'forced-color-adjust')).toBe('none');
+      await $('[data-testid="prefs-close"]').click();
+      await browser.pause(300);
+    });
+
     it('controls carry a border again, and page overlays do not gain one', async () => {
       const chromeBorder = await computed('.tool-op', 'border-top-width');
       expect(parseFloat(chromeBorder ?? '0')).toBeGreaterThan(0);

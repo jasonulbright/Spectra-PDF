@@ -228,4 +228,49 @@ describe('guided actions', () => {
     const parsed = JSON.parse(out) as { text?: string };
     expect(parsed.text ?? '').toContain('DRAFT E2E');
   });
+
+  it('keeps all saved action cards readable in the narrow tool dock', async () => {
+    const actions = await storedActions();
+    expect(actions.map((action) => action.name).sort()).toEqual([
+      'Asked & Numbered',
+      'Lock',
+      'Mark & Strip',
+    ]);
+
+    const rows = await browser.execute(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="action-item-"]')).map((card) => {
+        const cardRect = card.getBoundingClientRect();
+        const details = card.querySelector<HTMLElement>('[data-testid^="action-details-"]');
+        const controls = card.querySelector<HTMLElement>('[data-testid^="action-controls-"]');
+        if (!details || !controls) return null;
+        const detailsRect = details.getBoundingClientRect();
+        const controlsRect = controls.getBoundingClientRect();
+        const buttons = Array.from(controls.querySelectorAll('button')).map((button) => {
+          const rect = button.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, width: rect.width };
+        });
+        return {
+          card: { left: cardRect.left, right: cardRect.right },
+          detailsBottom: detailsRect.bottom,
+          controls: { top: controlsRect.top, left: controlsRect.left, right: controlsRect.right },
+          buttons,
+        };
+      }),
+    );
+
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row).not.toBeNull();
+      if (!row) continue;
+      expect(row.detailsBottom).toBeLessThanOrEqual(row.controls.top + 1);
+      expect(row.controls.left).toBeGreaterThanOrEqual(row.card.left);
+      expect(row.controls.right).toBeLessThanOrEqual(row.card.right);
+      expect(row.buttons.length).toBeGreaterThan(0);
+      for (const button of row.buttons) {
+        expect(button.left).toBeGreaterThanOrEqual(row.card.left);
+        expect(button.right).toBeLessThanOrEqual(row.card.right);
+        expect(button.width).toBeGreaterThan(0);
+      }
+    }
+  });
 });

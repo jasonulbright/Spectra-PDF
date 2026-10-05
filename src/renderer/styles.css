@@ -4593,15 +4593,15 @@ input:not([type]) {
 [data-theme="high-contrast"] .tool-tile-title { color: #ffffff; }
 [data-theme="high-contrast"] .tool-op { color: #e6e6e6; }
 [data-theme="high-contrast"] .tool-op:hover { background: #0d0d0d; color: #ffffff; }
-[data-theme="high-contrast"] .tool-op.active { background: #0078d4; color: #000000; }
+[data-theme="high-contrast"] .tool-op.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 [data-theme="high-contrast"] .secondary-toolbar { background: #000000; border-bottom-color: #1a1a1a; }
 [data-theme="high-contrast"] .secondary-toolbar-title { color: #d0d0d0; border-inline-end-color: #1a1a1a; }
 [data-theme="high-contrast"] .secondary-tool { color: #e6e6e6; }
 [data-theme="high-contrast"] .secondary-tool:hover { background: #0d0d0d; color: #ffffff; }
-[data-theme="high-contrast"] .secondary-tool.active { background: #0078d4; color: #000000; }
+[data-theme="high-contrast"] .secondary-tool.active { background: var(--accent, #0078d4); border-color: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 [data-theme="high-contrast"] .prefs-cat { color: #e6e6e6; }
 [data-theme="high-contrast"] .prefs-cat:hover { background: #0d0d0d; color: #ffffff; }
-[data-theme="high-contrast"] .prefs-cat.active { background: #0078d4; color: #000000; }
+[data-theme="high-contrast"] .prefs-cat.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 [data-theme="high-contrast"] .text-selection-menu { border-color: #2e2e2e; background: #000000; }
 [data-theme="high-contrast"] .text-selection-menu button { color: #ffffff; }
 [data-theme="high-contrast"] .text-selection-menu button:hover { background: #0d0d0d; }
@@ -5174,15 +5174,35 @@ input:not([type]) {
   /* Selected and armed chrome signalled itself with an accent fill, which the
      palette flattens along with every other background. Highlight is the
      palette's own answer, and declaring it is also what keeps an arbitrary
-     system accent from being expected to carry the state. */
+     system accent from being expected to carry the state.
+     Under forced-color-adjust: auto the engine paints a Canvas-coloured
+     readability backplate behind every text run. HighlightText on that
+     backplate is the same colour as the backplate in the dark contrast
+     palettes, so the label became a solid block inside the Highlight fill.
+     The selected control therefore opts out of the adjustment and states
+     every colour itself in system keywords; the opt-out inherits, so the
+     descendants restate the label colour, and !important keeps the theme
+     rules that are no longer overridden by the palette from painting. */
   .tool-op.active,
   .secondary-tool.active,
   .prefs-cat.active,
   .nav-icon-btn.active,
   [aria-pressed="true"]:not(.page *):not(.annot-swatch),
   [aria-selected="true"]:not(.page *) {
-    background: Highlight;
-    color: HighlightText;
+    forced-color-adjust: none;
+    background: Highlight !important;
+    border-color: ButtonBorder !important;
+    color: HighlightText !important;
+  }
+  :is(
+    .tool-op.active,
+    .secondary-tool.active,
+    .prefs-cat.active,
+    .nav-icon-btn.active,
+    [aria-pressed="true"]:not(.page *):not(.annot-swatch),
+    [aria-selected="true"]:not(.page *)
+  ) :not(.page, .page *, .thumb-frame, .thumb-frame *, .annot-swatch, .color-swatch, .status-dot) {
+    color: HighlightText !important;
   }
 
   /* A hairline divider is a background on a one-pixel box; Canvas on Canvas
