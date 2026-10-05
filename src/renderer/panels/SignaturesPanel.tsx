@@ -841,7 +841,7 @@ export function SignaturesPanel(): React.ReactElement {
               placeholder={tChrome('panel.sig.tsaPlaceholder')}
               onChange={(e) => setTsaUrl(e.target.value)}
               title={tChrome('panel.sig.tsaPlaceholder')}
-              className="ltr-notation flex-1 min-w-[16rem] px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              className="ltr-notation flex-[1_1_16rem] min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <label className={`flex items-center gap-2 text-xs ${pades ? 'text-neutral-300' : 'text-neutral-600'}`}>

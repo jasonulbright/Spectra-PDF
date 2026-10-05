@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
@@ -36,6 +36,10 @@ import {
 /** The colour a symbol arms in when the tool has no colour set —
  * markup red, the same default a drawing shape takes. */
 const SYMBOL_STAMP_COLOR = '#e0393e';
+
+/** The inline size the actions group and the strip gap before it take, read by
+ * `.secondary-toolbar-opts` in styles.css. */
+const STRIP_ACTIONS_RESERVE = '--strip-actions-reserve';
 
 /** Read + downscale a picked raster into a library-sized PNG data URL (long
  * edge capped — stamps are page furniture, not photo archives, and the
@@ -345,6 +349,25 @@ export function SecondaryToolbar({
   const [showSymbols, setShowSymbols] = useState(false);
   const [newStampLabel, setNewStampLabel] = useState('');
   const [newStampColor, setNewStampColor] = useState(ANNOTATION_PALETTE[3]);
+  const [actionsEl, setActionsEl] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const strip = actionsEl?.parentElement;
+    if (!actionsEl || !strip) return;
+    const publish = (): void => {
+      // Rounded up: a reserve a fraction short of the group's laid-out width
+      // still wraps the group onto its own line.
+      const gap = parseFloat(getComputedStyle(strip).columnGap) || 0;
+      const reserve = Math.ceil(actionsEl.getBoundingClientRect().width + gap);
+      strip.style.setProperty(STRIP_ACTIONS_RESERVE, `${reserve}px`);
+    };
+    const resize = new ResizeObserver(publish);
+    resize.observe(actionsEl);
+    publish();
+    return () => {
+      resize.disconnect();
+      strip.style.removeProperty(STRIP_ACTIONS_RESERVE);
+    };
+  }, [actionsEl]);
   const persistStamps = (list: CustomStamp[]): void => {
     setCustomStamps(list);
     saveCustomStamps(list);
@@ -1215,7 +1238,7 @@ export function SecondaryToolbar({
       {/* Last in source order so a mode option that appears or changes width
           (a busy hint, a notice) never moves it off the far end. */}
       {actions.length > 0 && (
-        <div className="secondary-toolbar-actions">
+        <div ref={setActionsEl} className="secondary-toolbar-actions">
           {actions.map((id) => (
             <button
               key={id}

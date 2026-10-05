@@ -206,18 +206,43 @@ async function closeCaptureDialog(): Promise<void> {
 /** Click the middle of the first visible page in the document view. With a
  * signature armed this is the placement gesture and nothing else. */
 async function clickPage(xFrac = 0.5, yFrac = 0.35): Promise<void> {
-  const rect = (await browser.execute(() => {
-    const el = document.querySelector('[data-testid="document-view"] [data-page-id]');
-    if (!el) return null;
+  // A page taller than the document view continues below it, under the status
+  // bar and past the window edge. The target point is scrolled into the view
+  // first, so the press lands on the page and not on the chrome below it.
+  await browser.execute((yf: number) => {
+    const view = document.querySelector('[data-testid="document-view"]') as HTMLElement | null;
+    const el = view?.querySelector('[data-page-id]');
+    if (!view || !el) return;
+    const v = view.getBoundingClientRect();
     const b = el.getBoundingClientRect();
-    return { left: b.left, top: b.top, width: b.width, height: b.height };
-  })) as { left: number; top: number; width: number; height: number } | null;
+    const y = b.top + b.height * yf;
+    if (y < v.top + 24 || y > v.bottom - 24) view.scrollTop += y - (v.top + v.height / 2);
+  }, yFrac);
+  await browser.pause(150);
+  const rect = (await browser.execute(() => {
+    const view = document.querySelector('[data-testid="document-view"]');
+    const el = view?.querySelector('[data-page-id]');
+    if (!view || !el) return null;
+    const b = el.getBoundingClientRect();
+    const v = view.getBoundingClientRect();
+    return { left: b.left, top: b.top, width: b.width, height: b.height, viewTop: v.top, viewBottom: v.bottom };
+  })) as {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    viewTop: number;
+    viewBottom: number;
+  } | null;
   expect(rect).not.toBeNull();
+  const y = Math.round(rect!.top + rect!.height * yFrac);
+  expect(y).toBeGreaterThan(rect!.viewTop);
+  expect(y).toBeLessThan(rect!.viewBottom);
   await browser
     .action('pointer', { parameters: { pointerType: 'mouse' } })
     .move({
       x: Math.round(rect!.left + rect!.width * xFrac),
-      y: Math.round(rect!.top + rect!.height * yFrac),
+      y,
     })
     .down()
     .pause(40)

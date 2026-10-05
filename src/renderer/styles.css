@@ -4266,6 +4266,13 @@ input:not([type]) {
 /* Actions sit at the far end — "Close Tool" is an exit, not a peer of the
    modes, and putting it next to them invites a misclick mid-markup. */
 .secondary-toolbar-actions { margin-inline-start: auto; }
+/* An options group wider than the strip takes the whole line as a flex item,
+   so the actions after it wrapped onto a line of their own and the page moved
+   down by one more row. The cap keeps room for the actions on the options'
+   last line; the reserve is measured onto the strip by SecondaryToolbar. */
+.secondary-toolbar-opts {
+  max-inline-size: calc(100% - var(--strip-actions-reserve, 0px));
+}
 /* Every button in the strip carries the same box, armed or not. Only the
    active item used to get a pill, so the other eight were bare text: the strip
    read as a breadcrumb trail rather than a toolbar, and the gaps between
