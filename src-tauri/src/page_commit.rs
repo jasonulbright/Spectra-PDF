@@ -231,7 +231,7 @@ impl Transactions {
                 })
         }) {
             self.sealed.insert(key);
-            return rolled_back("another page commit still needs acknowledgement or recovery");
+            return rolled_back("another page commit still needs acknowledgment or recovery");
         }
         let mut tx = Transaction {
             entries,

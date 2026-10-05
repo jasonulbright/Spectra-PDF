@@ -189,7 +189,7 @@ def exact_pyhanko_names() -> None:
     def write_to_stream(self, stream, handler=None, container_ref=None):
         raw = self.encode("utf-8", "surrogateescape")
         if not raw.startswith(b"/"):
-            raise misc.PdfWriteError(f"Could not serialise name object {self!r}, must start with /")
+            raise misc.PdfWriteError(f"Could not serialize name object {self!r}, must start with /")
         stream.write(b"/" + b"".join(
             bytes((byte,)) if 0x21 <= byte <= 0x7E and byte != 0x23 and misc.is_regular_character(byte)
             else b"#%02X" % byte

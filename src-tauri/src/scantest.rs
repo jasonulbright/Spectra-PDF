@@ -92,7 +92,7 @@ pub struct ChecklistRow {
 pub const ROWS: &[ChecklistRow] = &[
     ChecklistRow {
         id: "1",
-        title: "Flatbed, colour, 300 dpi, Letter",
+        title: "Flatbed, color, 300 dpi, Letter",
         instruction: "Put a printed page — text, not a blank sheet — on the glass and close the lid.",
         needs: RowNeed::Flatbed,
         mode: RowMode::Prompted,
@@ -108,8 +108,8 @@ pub const ROWS: &[ChecklistRow] = &[
     },
     ChecklistRow {
         id: "3",
-        title: "Autodetect colour: a colour original, then a mono original",
-        instruction: "Have one COLOUR page and one BLACK-AND-WHITE page ready; you will be asked for each in turn.",
+        title: "Autodetect color: a color original, then a mono original",
+        instruction: "Have one COLOR page and one BLACK-AND-WHITE page ready; you will be asked for each in turn.",
         needs: RowNeed::Autodetect,
         mode: RowMode::Prompted,
         minutes: 5,
@@ -180,7 +180,7 @@ pub const ROWS: &[ChecklistRow] = &[
     },
     ChecklistRow {
         id: "12",
-        title: "Flatbed, colour, 600 dpi, A4",
+        title: "Flatbed, color, 600 dpi, A4",
         instruction: "Put a printed page on the glass; A4 if you have one.",
         needs: RowNeed::Flatbed,
         mode: RowMode::Prompted,
@@ -281,7 +281,7 @@ pub fn applies(need: RowNeed, caps: &ScannerCapabilities) -> Applicability {
             {
                 Applicability::Runnable
             } else {
-                lacking("automatic colour detection")
+                lacking("automatic color detection")
             }
         }
         // Nothing in the WIA report says how a device is attached, so this
@@ -1396,7 +1396,7 @@ pub fn list_rows() -> String {
                 RowNeed::Feeder => "a document feeder",
                 RowNeed::Duplex => "a two-sided feeder",
                 RowNeed::PageLimit => "a feeder + page count",
-                RowNeed::Autodetect => "automatic colour",
+                RowNeed::Autodetect => "automatic color",
                 RowNeed::Network => "a network scanner",
                 RowNeed::AnyDevice => "any scanner",
             },
@@ -2016,7 +2016,7 @@ fn run_row(
                 SourceOptionId::Feeder
             };
             let mut all = Vec::new();
-            for original in ["a COLOUR page", "a BLACK-AND-WHITE page"] {
+            for original in ["a COLOR page", "a BLACK-AND-WHITE page"] {
                 let Some(settings) =
                     settings_for(caps, id, ColorMode::Auto, 300, PaperSize::Auto, None)
                 else {
@@ -2040,7 +2040,7 @@ fn run_row(
             ask_confirm(
                 console,
                 record,
-                "Open both scans: did the mono original come back as a sensible mono/grey scan rather than a colour one?",
+                "Open both scans: did the mono original come back as a sensible mono/gray scan rather than a color one?",
             );
         }
         "4" => {

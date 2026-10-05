@@ -2,7 +2,7 @@
 
 Spectra PDF scans straight into a PDF, but it has only ever met one flatbed
 scanner. If yours has a **document feeder**, scans **both sides**, has an
-**auto-colour** setting, or connects over the **network**, you can test
+**auto-color** setting, or connects over the **network**, you can test
 something nobody has been able to — in about five minutes. A plain flatbed
 helps too.
 

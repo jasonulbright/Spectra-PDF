@@ -36,7 +36,7 @@ output is not.
 ## Building
 
 See the README's Quick Start and Build sections. `npm run prepackage` vendors
-every runtime the app needs — embedded Python, Ghostscript, the ICC colour
+every runtime the app needs — embedded Python, Ghostscript, the ICC color
 profiles, the edit fonts, LibreOffice, native Tesseract, and the OCR language
 models — and every one of them is required for a build to succeed. On Linux,
 install the distribution's `ghostscript` package to work on, or test, the

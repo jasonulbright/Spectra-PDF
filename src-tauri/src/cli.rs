@@ -129,7 +129,7 @@ pub enum CliCommand {
     DecryptCert(DecryptCertArgs),
     /// Convert a PDF to PDF/A archival format
     Pdfa(PdfaArgs),
-    /// Convert a PDF's colour to DeviceCMYK (ICC-managed)
+    /// Convert a PDF's color to DeviceCMYK (ICC-managed)
     ConvertCmyk(ConvertCmykArgs),
     /// Produce a PDF/X print master with an output intent
     ConvertPdfx(ConvertPdfxArgs),
@@ -333,8 +333,8 @@ pub enum CliCommand {
     /// Report the Ghostscript this command line resolves (JSON: available,
     /// path, version, reason, detail, source); exits 1 when none is usable
     GsStatus,
-    /// Report or record the answer to the bundled colour-profile licence
-    /// (JSON: container, assent, record). The licence text is the file
+    /// Report or record the answer to the bundled color-profile license
+    /// (JSON: container, assent, record). The license text is the file
     /// `Adobe-Color-Profile-License.txt` in the `icc` resource folder. An
     /// installed copy carries the installer's answer and refuses a new one
     IccAssent(IccAssentArgs),
@@ -420,10 +420,10 @@ pub struct VirtualPrinterArgs {
         .multiple(false)
 ))]
 pub struct IccAssentArgs {
-    /// Accept the colour-profile licence and record the answer
+    /// Accept the color-profile license and record the answer
     #[arg(long)]
     pub accept: bool,
-    /// Decline the colour-profile licence and record the answer
+    /// Decline the color-profile license and record the answer
     #[arg(long)]
     pub decline: bool,
     /// Report the recorded answer without changing it
@@ -631,7 +631,7 @@ pub struct CompressArgs {
     /// Keep every MRC filter inside PDF/A-1's set
     #[arg(long)]
     pub mrc_pdfa_safe: bool,
-    /// Recognise every MRC page and REVERT any whose text did not survive
+    /// Recognize every MRC page and REVERT any whose text did not survive
     /// (--quality mrc only)
     #[arg(long)]
     pub mrc_verify_text: bool,
@@ -935,7 +935,7 @@ pub struct RedactArgs {
     /// display-normalized, not rotation-adjusted): "x0,y0,x1,y1"
     #[arg(long)]
     pub rect: String,
-    /// Box fill colour as #rrggbb (the /IC key). Default black.
+    /// Box fill color as #rrggbb (the /IC key). Default black.
     #[arg(long, default_value = "#000000")]
     pub fill: String,
     /// Text drawn over the box (the /OverlayText key) — e.g. a FOIA exemption
@@ -945,7 +945,7 @@ pub struct RedactArgs {
     /// Tile the overlay text to fill the box (the /Repeat key)
     #[arg(long, default_value_t = false)]
     pub repeat_overlay: bool,
-    /// Overlay alignment (the /Q key): 0 left, 1 centred, 2 right
+    /// Overlay alignment (the /Q key): 0 left, 1 centered, 2 right
     #[arg(long, default_value_t = 0)]
     pub overlay_align: u8,
     /// Overlay font size in points; 0 fits the box
@@ -1038,7 +1038,7 @@ pub struct SearchRedactArgs {
     /// certification allowing no changes still refuses.
     #[arg(long, default_value_t = false)]
     pub include_signed: bool,
-    /// Box fill colour as #rrggbb (the /IC key). Default black.
+    /// Box fill color as #rrggbb (the /IC key). Default black.
     #[arg(long, default_value = "#000000")]
     pub fill: String,
     /// Text drawn over each box (the /OverlayText key) — e.g. an exemption code
@@ -1047,7 +1047,7 @@ pub struct SearchRedactArgs {
     /// Tile the overlay text to fill the box (the /Repeat key)
     #[arg(long, default_value_t = false)]
     pub repeat_overlay: bool,
-    /// Overlay alignment (the /Q key): 0 left, 1 centred, 2 right
+    /// Overlay alignment (the /Q key): 0 left, 1 centered, 2 right
     #[arg(long, default_value_t = 0)]
     pub overlay_align: u8,
     /// Overlay font size in points; 0 fits the box
@@ -1106,7 +1106,7 @@ pub struct WatermarkArgs {
         "middle-right", "bottom-left", "bottom-center", "bottom-right",
     ])]
     pub position: String,
-    /// Points inset from the page edge for the non-centred positions
+    /// Points inset from the page edge for the non-centered positions
     #[arg(long, default_value_t = 36.0)]
     pub margin: f64,
     /// Repeat the stamp across the whole page; --position is then ignored
@@ -1158,7 +1158,7 @@ pub struct OcrFileArgs {
     /// MRC preset (--mrc only): archival, balanced, smallest
     #[arg(long, default_value = "balanced")]
     pub mrc_preset: String,
-    /// OPT-IN (--mrc only): recognise each MRC page and revert any whose text
+    /// OPT-IN (--mrc only): recognize each MRC page and revert any whose text
     /// did not survive
     #[arg(long)]
     pub mrc_verify_text: bool,
@@ -2405,8 +2405,8 @@ pub struct DetectFieldsArgs {
     /// Pages to analyze, e.g. "1,3,5" or "all"
     #[arg(long, default_value = "all")]
     pub pages: String,
-    /// Scanned-page handling: auto (recognise a page with nothing readable on
-    /// it) | never (stay offline) | always (recognise every page)
+    /// Scanned-page handling: auto (recognize a page with nothing readable on
+    /// it) | never (stay offline) | always (recognize every page)
     #[arg(long, default_value = "auto")]
     pub scan: String,
     /// Recognition language for scanned pages; '+'-joined for several at once
@@ -2427,8 +2427,8 @@ pub struct PrepareFormsArgs {
     /// Pages to analyze, e.g. "1,3,5" or "all"
     #[arg(long, default_value = "all")]
     pub pages: String,
-    /// Scanned-page handling: auto (recognise a page with nothing readable on
-    /// it) | never (stay offline) | always (recognise every page)
+    /// Scanned-page handling: auto (recognize a page with nothing readable on
+    /// it) | never (stay offline) | always (recognize every page)
     #[arg(long, default_value = "auto")]
     pub scan: String,
     /// Recognition language for scanned pages; '+'-joined for several at once
@@ -2658,7 +2658,7 @@ pub struct BatchOcrArgs {
     /// MRC preset (--mrc only): archival, balanced, smallest
     #[arg(long, default_value = "balanced")]
     pub mrc_preset: String,
-    /// OPT-IN (--mrc only): recognise each MRC page and revert any whose text
+    /// OPT-IN (--mrc only): recognize each MRC page and revert any whose text
     /// did not survive
     #[arg(long)]
     pub mrc_verify_text: bool,
@@ -2750,7 +2750,7 @@ pub enum BatchOperation {
         /// Keep every MRC filter inside PDF/A-1's set
         #[arg(long)]
         mrc_pdfa_safe: bool,
-        /// Recognise every MRC page and REVERT any whose text did not survive
+        /// Recognize every MRC page and REVERT any whose text did not survive
         #[arg(long)]
         mrc_verify_text: bool,
         /// Recognition language for --mrc-verify-text
@@ -4017,7 +4017,7 @@ fn scan_settings(
             .iter()
             .any(|s| s.color_modes.contains(&mode));
         if !offered {
-            return Err(format!("This scanner does not offer the '{color}' colour mode."));
+            return Err(format!("This scanner does not offer the '{color}' color mode."));
         }
         settings.color_mode = Some(mode);
     }
@@ -4073,7 +4073,7 @@ fn csc_params(args: &SignArgs, client_secret: &str) -> serde_json::Value {
 fn parse_hex_rgb(value: &str) -> Result<Vec<f64>, String> {
     let hex = value.trim().trim_start_matches('#');
     if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("'{}' is not a colour — use #rrggbb", value));
+        return Err(format!("'{}' is not a color — use #rrggbb", value));
     }
     let component = |i: usize| {
         u8::from_str_radix(&hex[i..i + 2], 16).map(|v| f64::from(v) / 255.0)
@@ -7247,7 +7247,7 @@ mod tests {
         // colour, so it is refused too.
         let refusal = scan_settings(&caps, &scan_args(&["--color", "bw"]))
             .expect_err("black and white is not listed");
-        assert!(refusal.contains("colour mode"), "{refusal}");
+        assert!(refusal.contains("color mode"), "{refusal}");
         // And the vocabularies themselves are checked by name.
         assert!(scan_settings(&caps, &scan_args(&["--source", "film"])).is_err());
         assert!(scan_settings(&caps, &scan_args(&["--color", "sepia"])).is_err());

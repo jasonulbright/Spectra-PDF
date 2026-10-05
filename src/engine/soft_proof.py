@@ -614,7 +614,7 @@ def page_alternates(file: str, page: int) -> dict:
 #: without a CMM makes, and it is NAMED back to the caller like every other
 #: assumption here rather than taken silently.
 _GRAY_AS_RGB = "GRAY"
-_GRAY_ASSUMPTION = "sRGB grey"
+_GRAY_ASSUMPTION = "sRGB gray"
 
 
 def _source_profile(entry: dict):
