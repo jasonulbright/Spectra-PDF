@@ -77,7 +77,7 @@ function Get-GitHubToken {
     .SYNOPSIS
     The GitHub credential: GH_TOKEN, then GITHUB_TOKEN, then `gh auth token`;
     '' when none resolves. Resolved once per session. A value holding any
-    character outside [A-Za-z0-9_] counts as none: a header the request layer
+    character outside [A-Za-z0-9._~+/=-] counts as none: a header the request layer
     refuses is quoted in its error text.
     #>
     $cached = Get-Variable -Name GitHubTokenResolved -Scope Script -ValueOnly -ErrorAction SilentlyContinue
@@ -85,7 +85,7 @@ function Get-GitHubToken {
     $found = [string](Get-Variable -Name GitHubTokenKept -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
     if (-not $found) { $found = Get-GitHubTokenFromEnvironment }
     if (-not $found) { $found = Get-GitHubTokenFromGh }
-    if ($found -cnotmatch '^[A-Za-z0-9_]+$') { $found = '' }
+    if ($found -cnotmatch '^[A-Za-z0-9._~+/=-]+$') { $found = '' }
     Set-Variable -Name GitHubTokenResolved -Scope Script -Value ([string]$found)
     return [string]$found
 }
