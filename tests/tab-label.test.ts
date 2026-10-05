@@ -9,6 +9,13 @@ describe('splitTabLabel', () => {
     });
   });
 
+  it('keeps a trailing number with the extension', () => {
+    expect(splitTabLabel('quarterly-report-2024-3.pdf')).toEqual({
+      head: 'quarterly-report-2024',
+      tail: '-3.pdf',
+    });
+  });
+
   it('tells a series apart by the tail', () => {
     const tails = ['summary-report-1.pdf', 'summary-report-2.pdf'].map((n) => splitTabLabel(n).tail);
     expect(tails[0]).not.toBe(tails[1]);
@@ -18,10 +25,45 @@ describe('splitTabLabel', () => {
     expect(splitTabLabel('alpha.pdf')).toEqual({ head: 'alpha.pdf', tail: '' });
   });
 
-  it('loses no character and splits on code points', () => {
-    const name = '𝐀𝐁𝐂-report-final-2.pdf';
+  it('loses no character and counts astral letters as one each', () => {
+    const name = 'report-final-version-𝐀𝐁𝐂.pdf';
     const { head, tail } = splitTabLabel(name);
     expect(head + tail).toBe(name);
+    expect(tail).toBe('𝐁𝐂.pdf');
     expect(Array.from(tail)).toHaveLength(TAB_TAIL);
+  });
+
+  it('keeps a ZWJ emoji sequence whole', () => {
+    const family = '\u{1F469}‍\u{1F469}‍\u{1F467}‍\u{1F466}';
+    const name = `holiday-album-${family}.pdf`;
+    const { head, tail } = splitTabLabel(name);
+    expect(head + tail).toBe(name);
+    expect(head).toBe('holiday-album');
+    expect(tail).toBe(`-${family}.pdf`);
+  });
+
+  it('keeps a flag whole', () => {
+    const flag = '\u{1F1EF}\u{1F1F5}';
+    const name = `travel-diary-${flag}abcde`;
+    const { head, tail } = splitTabLabel(name);
+    expect(head + tail).toBe(name);
+    expect(tail).toBe(`${flag}abcde`);
+  });
+
+  it('keeps a combining mark with its base letter', () => {
+    const name = 'resume-final-café.pdf';
+    const { head, tail } = splitTabLabel(name);
+    expect(head).toBe('resume-final-ca');
+    expect(tail).toBe('fé.pdf');
+  });
+
+  it('does not split an Arabic name', () => {
+    const name = 'تقرير المبيعات السنوي النهائي.pdf';
+    expect(splitTabLabel(name)).toEqual({ head: name, tail: '' });
+  });
+
+  it('does not split a Devanagari name with combining marks', () => {
+    const name = 'वार्षिक रिपोर्ट अंतिम संस्करण.pdf';
+    expect(splitTabLabel(name)).toEqual({ head: name, tail: '' });
   });
 });

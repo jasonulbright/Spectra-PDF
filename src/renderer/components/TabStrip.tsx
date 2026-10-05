@@ -6,7 +6,7 @@ import type { FocusedTab } from '../state/types';
 import { invokeCommand } from '../commands/context';
 import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
-import { TAB_TAIL, splitTabLabel } from './tab-label';
+import { splitTabLabel } from './tab-label';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import {
@@ -59,21 +59,22 @@ const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
 
 /**
- * A tab label that truncates in the middle. The parts are inline boxes, not
- * flex items: a flex item is block-level, and the label's text as read by
- * `innerText` would then carry a line break inside the file name. The tail's
- * reserve is in `ch` with slack, because a proportional face sets letters
- * wider than the digit `ch` measures.
+ * A tab label that truncates in the middle. The parts are flex items, so the
+ * head gives up width only when the tab itself is short of room. A flex item
+ * is block-level: `innerText` of a split label carries a line break between
+ * head and tail, and `textContent` reads the name whole.
  */
 function TabName({ name }: { name: string }): React.ReactElement {
   const { head, tail } = splitTabLabel(name);
-  if (!tail) return <span className="truncate">{name}</span>;
+  if (!tail) {
+    return (
+      <span dir="auto" className="truncate">
+        {name}
+      </span>
+    );
+  }
   return (
-    <span
-      dir="auto"
-      className="tab-name"
-      style={{ '--tab-tail-reserve': `${Math.ceil(TAB_TAIL * 1.4)}ch` } as React.CSSProperties}
-    >
+    <span dir="auto" className="tab-name">
       <span className="tab-name-head">{head}</span>
       <span className="tab-name-tail">{tail}</span>
     </span>

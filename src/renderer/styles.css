@@ -5544,17 +5544,26 @@ input:not([type]) {
 }
 
 /* Middle-truncated document tab label (components/TabStrip.tsx `TabName`):
-   the head takes the ellipsis, the tail always shows. */
+   the head takes the ellipsis, the tail shows whole. A percentage width on an
+   inline head resolves against the label's own max-content width, so any
+   reserve wider than the tail clamps the head while the strip has room; as a
+   flex item the head shrinks only when the label does. The tail's cap keeps
+   part of the head visible in a tab at its minimum width. */
 .tab-name {
-  display: block;
-  min-width: 0;
+  display: flex;
+  min-inline-size: 0;
   overflow: hidden;
   white-space: nowrap;
 }
 .tab-name-head {
-  display: inline-block;
-  vertical-align: top;
-  max-width: calc(100% - var(--tab-tail-reserve, 12ch));
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-name-tail {
+  flex: none;
+  max-inline-size: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
