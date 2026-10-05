@@ -35,6 +35,7 @@ import { FolderRouteHint } from '../components/FolderRouteHint';
 import { consentStopped, useEncryptionConsent } from '../hooks/useEncryptionConsent';
 import { useOwnedDocumentRun } from '../hooks/useOwnedDocumentRun';
 import { runCommitGate } from '../lib/commit-gate';
+import { RangeInput } from '../components/RangeInput';
 
 const PRESET_DPI: Record<string, number> = { screen: 72, ebook: 150, printer: 300, prepress: 300 };
 
@@ -379,7 +380,7 @@ export function CompressPanel(): React.ReactElement {
       ) : (
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.compress.dpiLabel', { dpi })}</label>
-          <input type="range" aria-label={tChrome('panel.compress.dpiAria')} min={72} max={600} step={1} value={dpi}
+          <RangeInput aria-label={tChrome('panel.compress.dpiAria')} min={72} max={600} step={1} value={dpi}
             onChange={(e) => handleDpiChange(Number(e.target.value))}
             className="w-64 accent-blue-600" />
           <div className="flex justify-between w-64 text-xs text-neutral-600">

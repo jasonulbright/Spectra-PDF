@@ -23,6 +23,7 @@ import {
   type StampPosition,
 } from '../lib/stamp-appearance';
 import type { SignatureAsset } from '../lib/signature-assets';
+import { RangeInput } from './RangeInput';
 
 const FIELD_LABEL = {
   name: 'panel.stamp.fieldName',
@@ -230,8 +231,7 @@ export function StampAppearanceFields({
           ) : (
             <label className="flex items-center gap-1 text-xs text-neutral-400">
               {tChrome('panel.stamp.imageOpacity')}
-              <input
-                type="range"
+              <RangeInput
                 min={0}
                 max={100}
                 data-testid={`${idPrefix}-stamp-image-opacity`}

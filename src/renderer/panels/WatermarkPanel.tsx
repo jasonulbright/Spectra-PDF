@@ -17,6 +17,7 @@ import {
   type WatermarkSource,
   type WatermarkWriting,
 } from '../lib/watermark-writing';
+import { RangeInput } from '../components/RangeInput';
 
 // Muted set for stamp text — full-strength annotation colors read as marker
 // ink, not a watermark.
@@ -274,10 +275,9 @@ export function WatermarkPanel(): React.ReactElement {
       <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-x-6 gap-y-3 items-end">
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.opacity', { pct: Math.round(opacity * 100) })}</label>
-          <input
+          <RangeInput
             data-testid="watermark-opacity"
             aria-label={tChrome('panel.watermark.opacityAria')}
-            type="range"
             min={0.05}
             max={1}
             step={0.05}

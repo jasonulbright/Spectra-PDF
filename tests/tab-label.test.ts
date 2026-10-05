@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TAB_TAIL, splitTabLabel } from '../src/renderer/components/tab-label';
+import { TAB_SPLIT_MIN, TAB_TAIL, splitTabLabel, tabLabelLayout } from '../src/renderer/components/tab-label';
 
 describe('splitTabLabel', () => {
   it('keeps the distinguishing end of a long name in the tail', () => {
@@ -65,5 +65,33 @@ describe('splitTabLabel', () => {
   it('does not split a Devanagari name with combining marks', () => {
     const name = 'वार्षिक रिपोर्ट अंतिम संस्करण.pdf';
     expect(splitTabLabel(name)).toEqual({ head: name, tail: '' });
+  });
+});
+
+describe('tabLabelLayout', () => {
+  it('splits a long Latin name and keeps the tail whole', () => {
+    expect(tabLabelLayout('summary-1.pdf')).toEqual({ kind: 'split', head: 'summary', tail: '-1.pdf' });
+  });
+
+  it('never cuts a short name', () => {
+    expect(tabLabelLayout('report.pdf')).toEqual({ kind: 'whole', head: 'report.pdf', tail: '' });
+    expect(tabLabelLayout('abcdefgh.pdf')).toEqual({ kind: 'whole', head: 'abcdefgh.pdf', tail: '' });
+  });
+
+  it('clips a long shaped-script name at its end, unsplit', () => {
+    const arabic = 'تقرير المبيعات السنوي النهائي.pdf';
+    expect(tabLabelLayout(arabic)).toEqual({ kind: 'clip', head: arabic, tail: '' });
+    const devanagari = 'वार्षिक रिपोर्ट अंतिम संस्करण.pdf';
+    expect(tabLabelLayout(devanagari).kind).toBe('clip');
+  });
+
+  it('keeps a short shaped-script name whole', () => {
+    expect(tabLabelLayout('تقرير.pdf').kind).toBe('whole');
+  });
+
+  it('counts graphemes, not code units, for the whole threshold', () => {
+    const name = 'résumé-x.pdf'.normalize('NFD');
+    expect(Array.from(name).length).toBeGreaterThan(TAB_SPLIT_MIN);
+    expect(tabLabelLayout(name).kind).toBe('whole');
   });
 });

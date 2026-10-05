@@ -25,6 +25,7 @@ import {
   removeBackground,
   visibleBounds,
 } from '../lib/signature-image';
+import { RangeInput } from './RangeInput';
 
 // The personal-signature capture dialog: three doors onto one store.
 //
@@ -604,8 +605,7 @@ export function SignatureCaptureDialog({
               {stripBackground && (
                 <label className="flex items-center gap-2 mt-2 text-xs text-neutral-300">
                   <span className="shrink-0">{tChrome('dialog.signature.threshold')}</span>
-                  <input
-                    type="range"
+                  <RangeInput
                     min={60}
                     max={250}
                     value={threshold}
