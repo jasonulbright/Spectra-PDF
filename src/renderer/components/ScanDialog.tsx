@@ -47,6 +47,7 @@ import {
   type ScannerCapabilities,
   type ScannerDevice,
 } from '../lib/scan';
+import { RangeInput } from './RangeInput';
 
 // Scan: acquire pages from a WIA device, then hand them to machinery that
 // already exists — `create_pdf`'s DPI-honest image door for a new document,
@@ -814,8 +815,7 @@ export function ScanDialog({
                             <span className="w-20 text-neutral-400">
                               {tChrome('dialog.scan.brightness')}
                             </span>
-                            <input
-                              type="range"
+                            <RangeInput
                               data-testid="scan-brightness"
                               min={brightnessControl.min}
                               max={brightnessControl.max}
@@ -832,8 +832,7 @@ export function ScanDialog({
                             <span className="w-20 text-neutral-400">
                               {tChrome('dialog.scan.contrast')}
                             </span>
-                            <input
-                              type="range"
+                            <RangeInput
                               data-testid="scan-contrast"
                               min={contrastControl.min}
                               max={contrastControl.max}

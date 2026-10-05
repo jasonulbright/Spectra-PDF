@@ -25,6 +25,7 @@ import {
   unreadablePages,
   type FlattenCategory,
 } from '../lib/flattener';
+import { RangeInput } from '../components/RangeInput';
 
 const CATEGORY_KEY = {
   transparent: 'panel.flattener.categoryTransparent',
@@ -124,9 +125,8 @@ export function FlattenerPanel(): React.ReactElement {
         <label className="text-xs text-neutral-500" htmlFor="flattener-balance">
           {tChrome('panel.flattener.balance')}
         </label>
-        <input
+        <RangeInput
           id="flattener-balance"
-          type="range"
           data-testid="flattener-balance"
           min={0}
           max={100}

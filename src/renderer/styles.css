@@ -406,18 +406,66 @@ fieldset {
   min-inline-size: 0;
 }
 
-/* Range inputs keep the native track and thumb but take the theme's accent
-   and the theme's scheme. Without an author `color-scheme` the track is drawn
-   for the light scheme in every theme, and the engine picks the unfilled
-   track's shade by contrast against the accent, so the same slider showed a
-   default-blue thumb in the dark theme and a near-black track in the light
-   one. */
+/* Range inputs draw their own track and thumb from the theme tokens. The
+   native track picks its unfilled shade by contrast against the accent, so a
+   light accent draws a near-black track on the light theme whatever
+   `color-scheme` says. A drawn track has no native filled part:
+   `--range-fill` is the filled share, set by components/RangeInput.tsx. */
 input[type="range"] {
-  accent-color: var(--accent, #0078d4);
-  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  block-size: 16px;
+  background: transparent;
+  --range-accent: var(--accent, #0078d4);
 }
-[data-theme="light"] input[type="range"] {
-  color-scheme: light;
+input[type="range"]::-webkit-slider-runnable-track {
+  block-size: 4px;
+  border-radius: 2px;
+  background:
+    linear-gradient(var(--range-accent), var(--range-accent)) 0 0 / var(--range-fill, 0%) 100% no-repeat,
+    var(--control-border);
+}
+/* The element runs from the inline start, so the fill does too. */
+input[type="range"]:dir(rtl)::-webkit-slider-runnable-track {
+  background-position: 100% 0, 0 0;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  inline-size: 14px;
+  block-size: 14px;
+  margin-block-start: -5px;
+  border-radius: 50%;
+  border: none;
+  background: var(--range-accent);
+}
+input[type="range"]:focus-visible {
+  outline: none;
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--range-accent);
+  outline-offset: 2px;
+}
+input[type="range"]:disabled {
+  opacity: 0.5;
+}
+/* Forced colors drop a gradient background, which would leave the track
+   invisible; system colors keep the track, the fill and the thumb apart. */
+@media (forced-colors: active) {
+  input[type="range"]::-webkit-slider-runnable-track {
+    forced-color-adjust: none;
+    background:
+      linear-gradient(Highlight, Highlight) 0 0 / var(--range-fill, 0%) 100% no-repeat,
+      GrayText;
+  }
+  input[type="range"]:dir(rtl)::-webkit-slider-runnable-track {
+    background-position: 100% 0, 0 0;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    forced-color-adjust: none;
+    background: Highlight;
+    border: 1px solid CanvasText;
+  }
 }
 
 input[type="checkbox"],
@@ -2363,6 +2411,10 @@ input:not([type]) {
   font-size: 15px !important;
   line-height: 20px;
   padding-block: 3px;
+  /* A script face runs wider than the drawn and imported thumbnails' cap:
+     at that cap a typed name loses its last letters with no ellipsis. */
+  max-inline-size: 160px;
+  text-overflow: ellipsis;
 }
 
 /* Custom stamp library. */
@@ -5576,27 +5628,32 @@ input:not([type]) {
   inset-block-start: calc(var(--canvas-inset-block-start, 0px) + 1rem);
 }
 
-/* Middle-truncated document tab label (components/TabStrip.tsx `TabName`):
-   the head takes the ellipsis, the tail shows whole. A percentage width on an
-   inline head resolves against the label's own max-content width, so any
-   reserve wider than the tail clamps the head while the strip has room; as a
-   flex item the head shrinks only when the label does. The tail's cap keeps
-   part of the head visible in a tab at its minimum width. */
+/* The signature list (panels/SignaturesPanel.tsx) keeps a usable height when
+   the panel is short of room, but never more than its own cards: a fixed
+   minimum taller than one card leaves a blank band under it. Without
+   `calc-size()` the fixed minimum applies. */
+.signature-list {
+  min-block-size: 10rem;
+  min-block-size: calc-size(max-content, min(size, 10rem));
+}
+
+/* Document tab label (components/TabStrip.tsx `TabName`). The head takes the
+   one ellipsis; the tail always shows whole. A fixed minimum on the head's
+   track makes the label's min-content width that minimum plus the tail, which
+   is the tab's own minimum width (the tab keeps `min-width: auto`), so a tab
+   squeezed by many siblings reads "su…-1.pdf" and the lane scrolls past that.
+   A short name is never cut; a long name in a shaped script, which is never
+   split, keeps a few letters before its ellipsis. */
 .tab-name {
-  display: flex;
+  display: grid;
   min-inline-size: 0;
-  overflow: hidden;
   white-space: nowrap;
 }
+.tab-name-whole { grid-template-columns: auto; }
+.tab-name-split { grid-template-columns: minmax(2em, auto) auto; }
+.tab-name-clip { grid-template-columns: minmax(5em, auto); }
 .tab-name-head {
-  flex: 0 1 auto;
   min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tab-name-tail {
-  flex: none;
-  max-inline-size: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
 }

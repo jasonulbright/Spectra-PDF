@@ -582,11 +582,26 @@ export function SignerSourceFields({
               const marks: string[] = [];
               if (selected.hardwareBacked) marks.push(tChrome('dialog.signer.storeHardware'));
               if (selected.machineStore) marks.push(tChrome('dialog.signer.storeMachine'));
+              // A closed select cannot wrap, so at the dock's minimum width it
+              // shows the subject and little else; the whole row is repeated
+              // here as text that wraps.
               return (
-                <p className="text-[11px] text-neutral-500 -mt-1 break-all">
-                  {selected.thumbprint}
-                  {marks.length > 0 ? ` · ${marks.join(' · ')}` : ''}
-                </p>
+                <>
+                  <p
+                    data-testid={`${idPrefix}-store-cert-detail`}
+                    className="text-xs text-neutral-300 -mt-1 [overflow-wrap:anywhere]"
+                  >
+                    {tChrome('dialog.signer.storeRow', {
+                      subject: selected.subject,
+                      issuer: selected.issuer,
+                      date: tDate(selected.notAfter),
+                    })}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 -mt-1 [overflow-wrap:anywhere]">
+                    {selected.thumbprint}
+                    {marks.length > 0 ? ` · ${marks.join(' · ')}` : ''}
+                  </p>
+                </>
               );
             })()}
             <p className="text-[11px] text-neutral-500 -mt-1">

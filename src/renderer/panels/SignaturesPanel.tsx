@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
@@ -153,6 +153,7 @@ export function SignaturesPanel(): React.ReactElement {
   // USER configures — inherent to the capability, never a bundled service.
   const [pades, setPades] = useState(false);
   const [tsaUrl, setTsaUrl] = useState('');
+  const tsaHintId = useId();
   const [ltv, setLtv] = useState(false);
   // Certification. Offered only while the document carries no signature at
   // all: a certification signature must be the first signature in a document,
@@ -620,7 +621,7 @@ export function SignaturesPanel(): React.ReactElement {
             {tChromeCount('panel.sig.found', result.signature_count)}
           </div>
           <CertificationBanner result={result} />
-          <div className="flex-1 min-h-[10rem] overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
+          <div className="signature-list flex-1 overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
             {result.signatures.map((sig, i) => (
               <SignatureCard
                 key={sig.field ?? i}
@@ -838,11 +839,15 @@ export function SignaturesPanel(): React.ReactElement {
               data-testid="sign-tsa-url"
               type="text"
               value={tsaUrl}
-              placeholder={tChrome('panel.sig.tsaPlaceholder')}
+              aria-describedby={tsaHintId}
               onChange={(e) => setTsaUrl(e.target.value)}
-              title={tChrome('panel.sig.tsaPlaceholder')}
               className="ltr-notation flex-[1_1_16rem] min-w-0 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
+            {/* A wrapping hint, not a placeholder: a placeholder cannot wrap,
+                so at the dock's minimum width it shows only its first words. */}
+            <p id={tsaHintId} className="basis-full text-[11px] text-neutral-500 [overflow-wrap:anywhere]">
+              {tChrome('panel.sig.tsaPlaceholder')}
+            </p>
           </div>
           <label className={`flex items-center gap-2 text-xs ${pades ? 'text-neutral-300' : 'text-neutral-600'}`}>
             <input

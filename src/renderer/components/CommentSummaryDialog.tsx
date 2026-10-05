@@ -135,7 +135,7 @@ export function CommentSummaryDialog({
           <h3 className="text-sm font-semibold">{tChrome('panel.comments.summaryTitle')}</h3>
         </div>
         <div className="flex flex-col gap-4 px-5 py-4">
-          <p className="text-xs text-neutral-400 break-all">{file.name}</p>
+          <p className="text-xs text-neutral-400 [overflow-wrap:anywhere]">{file.name}</p>
 
           <div>
             <label className="block text-sm text-neutral-400 mb-1" htmlFor="comment-summary-mode">

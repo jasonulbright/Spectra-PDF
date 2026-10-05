@@ -54,3 +54,17 @@ export function splitTabLabel(name: string): { head: string; tail: string } {
     tail: units.slice(units.length - TAB_TAIL).join(''),
   };
 }
+
+/**
+ * How a tab label gives up width. `whole`: a short name, never cut. `split`:
+ * the head takes the one ellipsis and the tail always shows whole. `clip`: a
+ * long name that cannot be split (a shaped script) takes one ellipsis at its
+ * end.
+ */
+export type TabLabelKind = 'whole' | 'split' | 'clip';
+
+export function tabLabelLayout(name: string): { kind: TabLabelKind; head: string; tail: string } {
+  const { head, tail } = splitTabLabel(name);
+  if (tail) return { kind: 'split', head, tail };
+  return { kind: graphemes(name).length > TAB_SPLIT_MIN ? 'clip' : 'whole', head: name, tail: '' };
+}

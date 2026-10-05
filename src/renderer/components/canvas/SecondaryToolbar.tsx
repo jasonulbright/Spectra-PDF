@@ -32,6 +32,7 @@ import {
   tNumber,
   tToolTitle,
 } from '../../i18n';
+import { RangeInput } from '../RangeInput';
 
 /** The colour a symbol arms in when the tool has no colour set —
  * markup red, the same default a drawing shape takes. */
@@ -1289,8 +1290,7 @@ function OpacitySlider({
   return (
     <label className="secondary-toolbar-opacity" title={tChrome('canvas.edit.opacityTitle')}>
       {tChrome('canvas.edit.opacity')}
-      <input
-        type="range"
+      <RangeInput
         data-testid="edit-image-opacity"
         min={0}
         max={100}

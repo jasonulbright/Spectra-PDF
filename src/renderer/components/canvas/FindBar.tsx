@@ -99,12 +99,15 @@ export function FindBar({
     <div
       data-testid="find-bar"
       role="search"
-      className="absolute canvas-float-top end-4 z-30 flex items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
+      // Capped to the canvas less its margins, wrapping onto a second row:
+      // with the tool dock at its widest, one row of the bar is wider than
+      // the canvas and would reach past it over the side rail.
+      className="absolute canvas-float-top end-4 z-30 max-w-[calc(100%-2rem)] flex flex-wrap items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
     >
       <input
         ref={inputRef}
         data-testid="find-input"
-        className={`w-56 px-2 py-1 bg-neutral-900 border rounded text-sm focus:outline-none ${
+        className={`w-56 min-w-0 max-w-full px-2 py-1 bg-neutral-900 border rounded text-sm focus:outline-none ${
           result.error ? 'border-red-500 focus:border-red-500' : 'border-neutral-700 focus:border-blue-500'
         }`}
         type="text"

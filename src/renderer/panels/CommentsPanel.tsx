@@ -10,6 +10,7 @@ import { capabilityBlockText } from '../lib/document-permission-text';
 import { dialog } from '../lib/tauri-bridge';
 import { getCanvasServices, getCommandContext } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
+import { PathText } from '../components/PathText';
 import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
 import { CommentSummaryDialog } from '../components/CommentSummaryDialog';
 import { documentPermissions } from '../state/selectors';
@@ -658,16 +659,18 @@ export function CommentsPanel(): React.ReactElement {
       {status && <div className="text-xs text-neutral-400">{status}</div>}
       {report && (
         <div
-          className="flex flex-col gap-0.5 text-sm break-all"
+          className="flex flex-col gap-0.5 text-sm [overflow-wrap:anywhere]"
           data-testid="comment-summary-done"
           aria-live="polite"
         >
           <p>
-            {tChrome('panel.comments.summaryDone', {
-              sheets: tNumber(report.sheets),
-              written: tNumber(report.written),
-              output: report.output,
-            })}
+            <PathText
+              text={tChrome('panel.comments.summaryDone', {
+                sheets: tNumber(report.sheets),
+                written: tNumber(report.written),
+                output: report.output,
+              })}
+            />
           </p>
           {excluded && (
             <div className="flex flex-col gap-0.5" data-testid="comment-summary-excluded">

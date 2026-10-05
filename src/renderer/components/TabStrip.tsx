@@ -6,7 +6,7 @@ import type { FocusedTab } from '../state/types';
 import { invokeCommand } from '../commands/context';
 import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
-import { splitTabLabel } from './tab-label';
+import { tabLabelLayout } from './tab-label';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import {
@@ -49,34 +49,31 @@ interface TabStripProps {
 // does it shrink. The fixed 220px cap truncated "Quarterly Operations Re…"
 // with 1400px of empty strip beside it, and truncated the ACTIVE tab while a
 // shorter inactive sibling stayed whole — because the cap was never a function
-// of available width. `shrink` plus `min-w` makes the lane distribute the
-// pressure: full names when there is room, even compression when there is not,
-// and the overflow dropdown below once even that is exhausted.
+// of available width. `shrink` makes the lane distribute the pressure: full
+// names when there is room, even compression when there is not, and the
+// overflow dropdown below once even that is exhausted. The minimum width is
+// the content's own (`min-width: auto`): a fixed floor narrower than the label
+// cuts the tail too, and "summary-1.pdf" reads "s…-…".
 const tabBase =
   'group relative flex items-center gap-1.5 h-8 px-3 text-[13px] border-r border-neutral-800 ' +
-  'select-none cursor-default shrink min-w-[104px] max-w-[420px] whitespace-nowrap outline-none';
+  'select-none cursor-default shrink max-w-[420px] whitespace-nowrap outline-none';
 const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
 
 /**
- * A tab label that truncates in the middle. The parts are flex items, so the
- * head gives up width only when the tab itself is short of room. A flex item
- * is block-level: `innerText` of a split label carries a line break between
- * head and tail, and `textContent` reads the name whole.
+ * A tab label that truncates in the middle. The parts are grid items, so the
+ * head gives up width only when the tab itself is short of room, and the
+ * label's min-content width is the head's floor plus the whole tail: the tab
+ * cannot shrink past the point where the tail would be cut. A grid item is
+ * block-level: `innerText` of a split label carries a line break between head
+ * and tail, and `textContent` reads the name whole.
  */
 function TabName({ name }: { name: string }): React.ReactElement {
-  const { head, tail } = splitTabLabel(name);
-  if (!tail) {
-    return (
-      <span dir="auto" className="truncate">
-        {name}
-      </span>
-    );
-  }
+  const { kind, head, tail } = tabLabelLayout(name);
   return (
-    <span dir="auto" className="tab-name">
+    <span dir="auto" className={`tab-name tab-name-${kind}`}>
       <span className="tab-name-head">{head}</span>
-      <span className="tab-name-tail">{tail}</span>
+      {tail && <span className="tab-name-tail">{tail}</span>}
     </span>
   );
 }
