@@ -275,6 +275,7 @@ import { tChrome, tChromeCount, tNumber, currentLanguage, type UiKey } from '../
 import { writeFailureText } from '../../lib/save-failure';
 import { pointerScope } from '../../lib/pointer-scope';
 import { watchDevicePixelRatio } from '../../lib/device-pixel-ratio';
+import { useCanvasChromeInsets } from './useCanvasChromeInsets';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -6971,6 +6972,9 @@ export function WorkspaceCanvasView({
     drag.dropTarget,
   );
 
+  const [canvasHost, setCanvasHost] = useState<HTMLDivElement | null>(null);
+  useCanvasChromeInsets(canvasHost);
+
   const dirty = state.pageDirtyPaths.length > 0;
 
   // pdf.js refused the bytes the engine opened. In place, not a popup: the
@@ -7000,6 +7004,18 @@ export function WorkspaceCanvasView({
   // the one case it never renders, and the user is told "No documents open"
   // over a tab that plainly names a file.
   if (docs.length === 0) {
+    // A tab whose file is neither indexed nor refused is still loading: the
+    // board stays blank rather than telling the user nothing is open.
+    const indexing = tabFiles(state).some(
+      (f) => !isUnrenderable(renderHealth, f.path, f.buffer) && !pagesUnreadable(state, f, knownIndexes),
+    );
+    if (indexing) {
+      return (
+        <div className="canvas-view flex-1 flex flex-col" data-testid="canvas-indexing" aria-busy="true">
+          {unrenderableBanner}
+        </div>
+      );
+    }
     return (
       <div className="canvas-view flex-1 flex flex-col">
         {unrenderableBanner}
@@ -7025,6 +7041,7 @@ export function WorkspaceCanvasView({
 
   return (
     <div
+      ref={setCanvasHost}
       className={
         'canvas-view flex-1 flex flex-col relative overflow-hidden' +
         (drag.committing ? ' committing' : '') +
@@ -7678,6 +7695,7 @@ export function WorkspaceCanvasView({
         <FindBar
           query={find.query}
           result={find.result}
+          matchedQuery={find.matchedQuery}
           matchCount={find.matchPages.length}
           current={find.current}
           options={find.options}
@@ -7709,7 +7727,7 @@ export function WorkspaceCanvasView({
       {ocrApplyError && (
         <div
           data-testid="ocr-apply-error"
-          className="absolute top-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute top-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{ocrApplyError}</span>
           <button onClick={() => setOcrApplyError(null)} className="text-red-300 hover:text-red-100">×</button>
@@ -7718,7 +7736,7 @@ export function WorkspaceCanvasView({
       {formsError && (
         <div
           data-testid="forms-fill-error"
-          className="absolute top-28 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute top-28 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{formsError}</span>
           <button onClick={() => setFormsError(null)} className="text-red-300 hover:text-red-100">×</button>
@@ -7727,7 +7745,7 @@ export function WorkspaceCanvasView({
       {mergeNotice && (
         <div
           data-testid="merge-notice"
-          className="absolute top-40 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
+          className="absolute top-40 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-warning border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
         >
           <span className="flex-1">{mergeNotice}</span>
           <button onClick={() => setMergeNotice(null)} className="text-amber-300 hover:text-amber-100">×</button>
@@ -7741,10 +7759,10 @@ export function WorkspaceCanvasView({
           // fields together can outgrow the viewport, and a card anchored at
           // the bottom edge grows UPWARD past the top of the window, where
           // nothing can scroll it back.
-          // The cap is a percentage of the CANVAS AREA, not of the viewport:
-          // the area sits between the toolbars and the status bar, and a
-          // viewport-relative cap overshoots by however tall those are.
-          className="absolute bottom-4 start-4 z-30 w-80 max-h-[calc(100%-2rem)] overflow-y-auto rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          // The cap is the canvas view less the tool strip and the status bar
+          // (`.canvas-float-bottom`): the view's own height includes both, so
+          // a cap of the view alone covered the mode buttons.
+          className="absolute canvas-float-bottom start-4 z-30 w-80 overflow-y-auto rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {sigFieldTarget
@@ -7882,7 +7900,7 @@ export function WorkspaceCanvasView({
       {liveNewFieldPlacement && (
         <div
           data-testid="new-field-form"
-          className="absolute bottom-4 start-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          className="absolute canvas-float-bottom start-4 z-30 w-80 overflow-y-auto rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {tChrome('canvas.newfield.title')}
@@ -7891,7 +7909,7 @@ export function WorkspaceCanvasView({
             {tChrome('canvas.newfield.blurb')}
           </p>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">
+            <span className="text-xs text-neutral-400 w-24 shrink-0">
               {tChrome('canvas.newfield.name')}
             </span>
             <input
@@ -7903,7 +7921,7 @@ export function WorkspaceCanvasView({
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">
+            <span className="text-xs text-neutral-400 w-24 shrink-0">
               {tChrome('canvas.newfield.type')}
             </span>
             <select
@@ -7943,7 +7961,7 @@ export function WorkspaceCanvasView({
                 {tChrome('canvas.newfield.comb')}
               </label>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-neutral-400 w-20 shrink-0">
+                <span className="text-xs text-neutral-400 w-24 shrink-0">
                   {tChrome('canvas.newfield.maxLength')}
                 </span>
                 <input
@@ -7960,7 +7978,7 @@ export function WorkspaceCanvasView({
           {writesTextRun(nfType) && (
             <div className="flex items-center gap-2">
               <span
-                className="text-xs text-neutral-400 w-20 shrink-0"
+                className="text-xs text-neutral-400 w-24 shrink-0"
                 title={tChrome('canvas.newfield.writingModeTitle')}
               >
                 {tChrome('canvas.newfield.writingMode')}
@@ -7991,7 +8009,7 @@ export function WorkspaceCanvasView({
           {writesTextRun(nfType) && nfWriting === 'vertical' && (
             <div className="flex items-center gap-2">
               <span
-                className="text-xs text-neutral-400 w-20 shrink-0"
+                className="text-xs text-neutral-400 w-24 shrink-0"
                 title={tChrome('canvas.newfield.scriptTitle')}
               >
                 {tChrome('canvas.newfield.script')}
@@ -8030,7 +8048,7 @@ export function WorkspaceCanvasView({
           )}
           {(nfType === 'radio' || nfType === 'dropdown' || nfType === 'optionlist') && (
             <div className="flex items-start gap-2">
-              <span className="text-xs text-neutral-400 w-20 shrink-0 pt-1">
+              <span className="text-xs text-neutral-400 w-24 shrink-0 pt-1">
                 {tChrome('canvas.newfield.options')}
               </span>
               <textarea
@@ -8069,7 +8087,7 @@ export function WorkspaceCanvasView({
       {liveAddTextPlacement && (
         <div
           data-testid="add-text-form"
-          className="absolute bottom-4 start-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          className="absolute canvas-float-bottom start-4 z-30 w-80 overflow-y-auto rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {tChrome('canvas.addtext.title')}
@@ -8284,10 +8302,11 @@ export function WorkspaceCanvasView({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-16 shrink-0">
+          <div className="flex items-start gap-2">
+            <span className="text-xs text-neutral-400 w-16 shrink-0 py-1">
               {tChrome('canvas.addtext.size')}
             </span>
+            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
             <input
               data-testid="add-text-size"
               type="number"
@@ -8321,7 +8340,7 @@ export function WorkspaceCanvasView({
                   return next;
                 })
               }
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-blue-500 disabled:opacity-60"
+              className="whitespace-nowrap px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-blue-500 disabled:opacity-60"
             >
               <span
                 className="inline-block"
@@ -8464,6 +8483,7 @@ export function WorkspaceCanvasView({
               onChange={(e) => setAtColor(e.target.value)}
               className="h-6 w-8 bg-neutral-800 border border-neutral-700 rounded"
             />
+            </div>
           </div>
           {atFits === false && (
             <div data-testid="add-text-overflow" className="text-xs text-amber-400">
@@ -8493,10 +8513,10 @@ export function WorkspaceCanvasView({
       {signDone && (
         <div
           data-testid="canvas-sign-done"
-          className={`absolute bottom-4 start-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 rounded text-xs shadow-lg border ${
+          className={`absolute canvas-float-bottom start-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 rounded text-xs shadow-lg border ${
             signDone.ok
-              ? 'bg-green-600/15 border-green-600/40 text-green-200'
-              : 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+              ? 'canvas-toast is-ok border-green-600/40 text-green-200'
+              : 'canvas-toast is-warning border-amber-500/40 text-amber-200'
           }`}
         >
           <span className="flex-1">
@@ -8515,7 +8535,7 @@ export function WorkspaceCanvasView({
             <div
               data-testid="redact-marks-cleared"
               role="status"
-              className="flex items-start gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
+              className="flex items-start gap-2 px-3 py-2 canvas-toast is-warning border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
             >
               <span className="flex-1">
                 {tChromeCount('canvas.redact.marksCleared', markLedger.cleared - marksClearedSeen)}
@@ -8531,7 +8551,7 @@ export function WorkspaceCanvasView({
           {redactError && (
             <div
               data-testid="redact-error"
-              className="flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+              className="flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
             >
               <span className="flex-1">{redactError}</span>
               <button
@@ -8548,7 +8568,7 @@ export function WorkspaceCanvasView({
       {linkError && (
         <div
           data-testid="link-error"
-          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{linkError}</span>
           <button
@@ -8563,7 +8583,7 @@ export function WorkspaceCanvasView({
       {snapshotError && (
         <div
           data-testid="snapshot-error"
-          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">
             {tChrome('canvas.snapshot.failed', { message: snapshotError })}

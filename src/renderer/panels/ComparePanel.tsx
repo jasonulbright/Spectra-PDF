@@ -135,12 +135,12 @@ export function ComparePanel(): React.ReactElement {
       </div>
 
       {others.length === 0 ? (
-        <div className="shrink-0 flex items-center gap-3">
-          <span className="text-sm text-neutral-500">{tChrome('panel.compare.openSecond')}</span>
+        <div className="shrink-0 flex flex-wrap items-center gap-3">
+          <span className="min-w-0 text-sm text-neutral-500">{tChrome('panel.compare.openSecond')}</span>
           <button
             data-testid="compare-open-another"
             onClick={openNewFiles}
-            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium"
+            className="whitespace-nowrap px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium"
           >
             {tChrome('panel.compare.openAnotherPdf')}
           </button>
@@ -192,7 +192,7 @@ export function ComparePanel(): React.ReactElement {
             <button
               data-testid="compare-open-another"
               onClick={openNewFiles}
-              className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium"
+              className="whitespace-nowrap px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium"
               title={tChrome('panel.compare.openAnotherTitle')}
             >
               {tChrome('panel.compare.openAnother')}

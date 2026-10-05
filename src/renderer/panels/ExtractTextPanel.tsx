@@ -126,18 +126,18 @@ export function ExtractTextPanel({ initialRequest, onConsumeInitialRequest }: {
   return (
     <div className="flex flex-col gap-4 h-full min-h-0">
       <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span></div>
-      <div className="flex items-end gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.extractText.pagesLabel')}</label>
           <input data-testid="extract-text-pages" type="text" value={pageInput} onChange={(e) => changePages(e.target.value)}
             aria-label={tChrome('panel.extractText.pagesAria')}
             className="w-48 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500" />
         </div>
-        <button data-testid="extract-text-run" onClick={handleExtract} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
+        <button data-testid="extract-text-run" onClick={handleExtract} disabled={busy} className="whitespace-nowrap px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
           {busy ? tChrome('panel.extractText.extractingBtn') : tChrome('panel.extractText.extract')}
         </button>
-        {text && <button data-testid="extract-text-copy" onClick={handleCopy} className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium">{tChrome('panel.extractText.copy')}</button>}
-        <button onClick={handleSave} disabled={busy} data-testid="extract-text-save" className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm font-medium">{tChrome('panel.extractText.save')}</button>
+        {text && <button data-testid="extract-text-copy" onClick={handleCopy} className="whitespace-nowrap px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium">{tChrome('panel.extractText.copy')}</button>}
+        <button onClick={handleSave} disabled={busy} data-testid="extract-text-save" className="whitespace-nowrap px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm font-medium">{tChrome('panel.extractText.save')}</button>
       </div>
       {text && (
         <textarea data-testid="extract-text-result" readOnly value={text} className="flex-1 min-h-[200px] px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm font-mono text-neutral-300 resize-none focus:outline-none" />

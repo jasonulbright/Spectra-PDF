@@ -590,7 +590,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
             {report.results
               .filter((r) => r.status === 'skipped')
               .map((r) => (
-                <div key={r.rel} className="text-amber-400 truncate">
+                <div key={r.rel} className="text-amber-400 [overflow-wrap:anywhere]">
                   {tChrome('dialog.folderExport.fileSkipped', {
                     rel: r.rel,
                     reason: r.reason ?? '',
@@ -600,7 +600,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
             {report.results
               .filter((r) => r.status === 'exported')
               .map((r) => (
-                <div key={r.rel} className="truncate">
+                <div key={r.rel} className="[overflow-wrap:anywhere]">
                   {tChrome('dialog.folderExport.rowWritten', { rel: r.rel, out: r.out ?? '' })}
                 </div>
               ))}

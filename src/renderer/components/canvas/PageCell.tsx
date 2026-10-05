@@ -5084,7 +5084,7 @@ function PageCellImpl({
             data-testid="snap-type-badge"
             style={{
               left: `${Math.min(snapMarker.x * 100, 84)}%`,
-              top: `${Math.max(snapMarker.y * 100 - 4, 0)}%`,
+              top: `${Math.min(snapMarker.y * 100, 92)}%`,
             }}
           >
             {tChrome(SNAP_TYPE_KEY[snapMarker.type])}

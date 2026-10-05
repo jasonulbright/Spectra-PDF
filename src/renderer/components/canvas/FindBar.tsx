@@ -3,6 +3,7 @@ import { gsBlocked } from '../../lib/gs-capability';
 import { useGsCapability } from '../../hooks/useGsCapability';
 import { useTranslation } from 'react-i18next';
 import type { SearchResult } from '../../search/engine';
+import { findResultPending } from './find-pending';
 import type { SearchOptions } from '../../search/normalize';
 import { FindModeToggles } from '../../search/FindModeToggles';
 import { OCR_LANGUAGES } from '../../ocr/languages';
@@ -11,6 +12,9 @@ import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../../i18n';
 interface FindBarProps {
   query: string;
   result: SearchResult;
+  /** The query `result` was computed for; differs from `query` while a
+   * search is pending. */
+  matchedQuery: string;
   matchCount: number;
   current: number;
   options: SearchOptions;
@@ -37,8 +41,9 @@ interface FindBarProps {
   onClose: () => void;
 }
 
-function countLabel(query: string, result: SearchResult): string {
+function countLabel(query: string, matchedQuery: string, result: SearchResult): string {
   if (query.trim().length === 0) return '';
+  if (findResultPending(query, matchedQuery)) return '';
   if (result.error) {
     return tChrome(
       result.errorKind === 'timeout' ? 'canvas.find.patternTooSlow' : 'canvas.find.invalidPattern',
@@ -56,6 +61,7 @@ function countLabel(query: string, result: SearchResult): string {
 export function FindBar({
   query,
   result,
+  matchedQuery,
   matchCount,
   current,
   options,
@@ -93,7 +99,7 @@ export function FindBar({
     <div
       data-testid="find-bar"
       role="search"
-      className="absolute top-4 end-4 z-30 flex items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
+      className="absolute canvas-float-top end-4 z-30 flex items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
     >
       <input
         ref={inputRef}
@@ -126,7 +132,7 @@ export function FindBar({
         title={result.error ?? undefined}
         aria-live="polite"
       >
-        {countLabel(query, result)}
+        {countLabel(query, matchedQuery, result)}
       </span>
       {matchCount > 0 && (
         <>

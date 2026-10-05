@@ -1060,18 +1060,18 @@ export function PreflightPanel(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-neutral-400">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 text-sm text-neutral-400 [overflow-wrap:anywhere]">
           {tChrome('panel.common.workingOn')}{' '}
           <span className="text-neutral-200">{activeFile.name}</span>
         </div>
         <GsRequiredNotice capability={gs} testId="preflight-gs" />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             data-testid="preflight-recheck"
             onClick={() => void run(profileId)}
             disabled={busy}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
+            className="whitespace-nowrap px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.rerun')}
           </button>
@@ -1081,7 +1081,7 @@ export function PreflightPanel(): React.ReactElement {
             disabled={busy || !report || fixableChecks(
               categories.flatMap((c) => c.checks), carried,
             ).length === 0}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
+            className="whitespace-nowrap px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.fixAll')}
           </button>
@@ -1089,7 +1089,7 @@ export function PreflightPanel(): React.ReactElement {
             data-testid="preflight-export"
             onClick={() => void exportReport()}
             disabled={busy || !report}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
+            className="whitespace-nowrap px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.export')}
           </button>
@@ -1225,8 +1225,7 @@ export function PreflightPanel(): React.ReactElement {
                             onClick={() => setOpenCheck(isOpen ? null : check.id)}
                           >
                             <div className="text-sm text-neutral-200">
-                              {checkName(check.id)}{' '}
-                              <span className="text-[10px] text-neutral-500">{check.id}</span>
+                              {checkName(check.id)}
                             </div>
                             <div className="text-xs text-neutral-500">
                               {verdictLabel(check.status)}

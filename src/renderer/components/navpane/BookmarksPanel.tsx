@@ -275,9 +275,9 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   return (
     <div className="bookmarks-panel flex flex-col h-full min-h-0" data-testid="bookmarks-panel">
       {draft && (conflict || draft.error || draft.readOnly) && (
-        <div role="alert" data-testid="bookmarks-revision-notice">
+        <div role="alert" data-testid="bookmarks-revision-notice" className="flex flex-col items-start gap-1 px-2 py-1.5 text-xs [overflow-wrap:anywhere]">
           <p>{status}</p>
-          <button data-testid="bookmarks-reload" disabled={draft.busy || deriving} onClick={() => void drafts.reload(draft, runCommitGate)}>
+          <button data-testid="bookmarks-reload" className="bookmark-add-btn disabled:opacity-60" disabled={draft.busy || deriving} onClick={() => void drafts.reload(draft, runCommitGate)}>
             {draft.dirty ? tChrome('nav.bookmarks.discardReload') : tChrome('app.commit.retry')}
           </button>
         </div>

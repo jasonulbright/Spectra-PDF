@@ -290,8 +290,8 @@ export function OutputPreviewPanel(): React.ReactElement {
       {/* Plates, ink coverage and soft proofing are all one render device. */}
       <GsRequiredNotice capability={gs} testId="output-preview-gs" />
       <IccLicenceNotice state={icc} testId="output-preview-icc" />
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-neutral-400">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 text-sm text-neutral-400 [overflow-wrap:anywhere]">
           {tChrome('panel.common.workingOn')}{' '}
           <span className="text-neutral-200">{activeFile.name}</span>
         </div>
@@ -299,7 +299,7 @@ export function OutputPreviewPanel(): React.ReactElement {
           data-testid="output-preview-arm"
           aria-pressed={armed}
           onClick={() => setArmed(!armed)}
-          className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700"
+          className="whitespace-nowrap px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700"
         >
           {armed
             ? tChrome('panel.outputPreview.disarm')
@@ -347,7 +347,7 @@ export function OutputPreviewPanel(): React.ReactElement {
           <select
             data-testid="output-preview-press"
             aria-label={tChrome('panel.outputPreview.simulationPressAria')}
-            className="px-1 py-1 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            className="px-1 py-1 text-sm bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
             value={simulationPress}
             onChange={(e) => setSimulationPress(e.target.value)}
           >

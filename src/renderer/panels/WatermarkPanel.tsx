@@ -265,11 +265,13 @@ export function WatermarkPanel(): React.ReactElement {
           <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.watermark.pdfNote')}</p>
         </div>
       )}
-      {/* A shared 3-column grid, the same arithmetic the header/footer slots
-          use. Laid out as a wrapping flex row, each control started wherever
-          the label beside it ended, so four consecutive rows put their second
-          column at four different x-positions. */}
-      <div className="grid grid-cols-3 gap-x-6 gap-y-3 items-end">
+      {/* A shared grid of equal columns. Laid out as a wrapping flex row, each
+          control started wherever the label beside it ended, so four
+          consecutive rows put their second column at four different
+          x-positions. The column count follows the panel width: a fixed three
+          columns in the narrow dock pushed the slider into the next column and
+          cut the select values. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-x-6 gap-y-3 items-end">
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.opacity', { pct: Math.round(opacity * 100) })}</label>
           <input
@@ -281,7 +283,7 @@ export function WatermarkPanel(): React.ReactElement {
             step={0.05}
             value={opacity}
             onChange={(e) => setOpacity(Number(e.target.value))}
-            className="w-40"
+            className="w-full"
           />
         </div>
         <div>
@@ -300,7 +302,7 @@ export function WatermarkPanel(): React.ReactElement {
         {source === 'text' && (
           <div>
             <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.color')}</label>
-            <div className="flex items-center gap-1.5 py-1.5">
+            <div className="flex flex-wrap items-center gap-1.5 py-1.5">
               {STAMP_PALETTE.map((c) => (
                 <button
                   key={c}
@@ -375,7 +377,7 @@ export function WatermarkPanel(): React.ReactElement {
           />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-x-6 gap-y-3 items-end">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-x-6 gap-y-3 items-end">
         <div>
           <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-scale">{tChrome('panel.watermark.scale')}</label>
           <input
