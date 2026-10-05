@@ -3722,7 +3722,7 @@ class TestPerSpanFace:
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text here) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")
         p = _paras(src)[0]
-        with pytest.raises(ValueError, match="colour, a face, or a size"):
+        with pytest.raises(ValueError, match="color, a face, or a size"):
             _apply(src, out, p, p["text"], font_path=FONTS_DIR,
                    span_styles=[{"start": 0, "end": 4}])
 

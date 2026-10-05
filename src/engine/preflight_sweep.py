@@ -136,10 +136,10 @@ def run_preflight_sweep(
                 "replace. Run it in fix mode, or give a destination for the reports."
             )
         if dest:
-            raise ValueError("In-place mode takes no destination -- the originals are replaced.")
+            raise ValueError("In-place mode takes no destination — the originals are replaced.")
         if move_processed_root:
             raise ValueError(
-                "In-place mode cannot also move processed originals -- the processed "
+                "In-place mode cannot also move processed originals — the processed "
                 "file IS the original."
             )
         dest_path = source_path
@@ -149,7 +149,7 @@ def run_preflight_sweep(
         dest_path = Path(dest).resolve()
         if dest_conflicts_with_source(str(source_path), str(dest_path)):
             raise ValueError(
-                "The destination must be outside the source folder -- choose a "
+                "The destination must be outside the source folder — choose a "
                 "separate folder for the reports."
             )
     if move_processed_root:

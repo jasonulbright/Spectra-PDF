@@ -1363,7 +1363,7 @@ def properties_of(spec: dict) -> RedactionProperties:
     except (TypeError, ValueError):
         align = 0
     if align not in (0, 1, 2):
-        raise ValueError("align must be 0 (left), 1 (centred) or 2 (right)")
+        raise ValueError("align must be 0 (left), 1 (centered) or 2 (right)")
     try:
         size = float(spec.get("font_size") or 0.0)
     except (TypeError, ValueError):

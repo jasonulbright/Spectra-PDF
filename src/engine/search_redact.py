@@ -81,7 +81,7 @@ def search_and_redact(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and this edit invalidates its signatures "
-            "-- the run must state that signed documents are included before "
+            "— the run must state that signed documents are included before "
             "it will touch one"
         )
 

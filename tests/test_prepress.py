@@ -1179,7 +1179,7 @@ class TestDestinationProfileClass:
         grey = Path(tmp_dir) / "grey.icc"
         grey.write_bytes(bytes(data))
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
-        with pytest.raises(ValueError, match='describes "GRAY" colour'):
+        with pytest.raises(ValueError, match='describes "GRAY" color'):
             convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
                          dest_profile=str(grey), gs_path=gs_path, icc_dir=icc_dir)
 

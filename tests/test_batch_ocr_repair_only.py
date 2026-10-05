@@ -6,7 +6,7 @@ import re
 import pikepdf
 import pytest
 
-from engine.batch_ocr import batch_ocr
+from engine.batch_ocr import _classify_load_error, batch_ocr
 from engine.repair import repair
 
 
@@ -64,6 +64,8 @@ def test_mirror_run_repairs_copies_and_skips(tmp_path):
 
     assert by_rel["junk.pdf"]["status"] == "skipped"
     assert by_rel["junk.pdf"]["reason"].startswith("repair failed: ")
+    assert str(src) not in by_rel["junk.pdf"]["reason"]
+    assert "Tier" not in by_rel["junk.pdf"]["reason"]
     assert not (dest / "junk.pdf").exists()
 
     # Scratch files never survive into the mirror.
@@ -178,3 +180,11 @@ def test_in_place_repair_keeps_the_originals_dacl_entry_and_stream(tmp_path):
     assert r"BUILTIN\Users:(R)" in acl, acl
     with open(str(bad) + ":note", "rb") as stream:
         assert stream.read() == b"stream kept"
+
+
+def test_unreadable_classification_carries_no_path_or_library_text(tmp_path):
+    source = tmp_path / "rubbish.pdf"
+    source.write_bytes(b"not a pdf at all")
+    with pytest.raises(pikepdf.PdfError) as info:
+        pikepdf.open(source)
+    assert _classify_load_error(info.value) == "unreadable"

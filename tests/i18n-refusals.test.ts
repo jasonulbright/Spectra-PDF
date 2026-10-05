@@ -71,7 +71,7 @@ describe('renderer refusal messages', () => {
       name: 'x',
       steps: [{ op: 'compress', params: { gs_path: 'C:/gs.exe' } }],
     });
-    expect(() => parseActionFile(bad)).toThrow('Step 1 (compress): unknown parameter(s) [gs_path].');
+    expect(() => parseActionFile(bad)).toThrow('Step 1 (compress): parameters not recognized: gs_path.');
     const es = await inEs(() => {
       try {
         parseActionFile(bad);

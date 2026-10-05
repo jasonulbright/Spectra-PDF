@@ -89,7 +89,7 @@ _MAX_ALTERNATE_DEPTH = 4
 
 def refuse_unreadable_profile(detail: str) -> None:
     raise ValueError(
-        f"that file is not a colour profile this engine can read: {detail}"
+        f"that file is not a color profile this engine can read: {detail}"
     )
 
 
@@ -370,7 +370,7 @@ def resolve_profile(
     if refusal:
         return None, refusal
     if space != "CMYK":
-        return None, non_printing_profile_message(space or "colourless")
+        return None, non_printing_profile_message(space or "colorless")
 
     stored = materialize(raw)
     return (

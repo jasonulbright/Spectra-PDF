@@ -122,11 +122,11 @@ def _png_size_bytes(header: bytes) -> tuple[int, int]:
     avoids a decode of a 300-dpi page purely to learn its dimensions.
     """
     if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
-        raise RuntimeError("OCR rasteriser did not produce a PNG")
+        raise RuntimeError("OCR rasterizer did not produce a PNG")
     width = int.from_bytes(header[16:20], "big")
     height = int.from_bytes(header[20:24], "big")
     if width <= 0 or height <= 0:
-        raise RuntimeError("OCR rasteriser produced a zero-sized page image")
+        raise RuntimeError("OCR rasterizer produced a zero-sized page image")
     return width, height
 
 

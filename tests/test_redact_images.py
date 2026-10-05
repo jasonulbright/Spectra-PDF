@@ -2363,7 +2363,7 @@ class TestRefusals:
             },
         )
         out = os.path.join(tmp_dir, "out.pdf")
-        with pytest.raises(ValueError, match="colour space"):
+        with pytest.raises(ValueError, match="color space"):
             redact(file=src, output=out, regions=[{"page": 1, "rect": [10, 10, 30, 30]}])
 
     def test_a_named_colour_space_resolves_from_the_page_resources(self, tmp_dir):

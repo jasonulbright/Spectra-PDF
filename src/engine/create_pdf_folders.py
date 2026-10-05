@@ -167,7 +167,7 @@ def create_pdf_folders(
     dest_path = Path(dest).resolve()
     if dest_conflicts_with_source(str(root), str(dest_path)):
         raise ValueError(
-            "The destination must be outside the source folder -- choose a "
+            "The destination must be outside the source folder — choose a "
             "separate folder for the assembled documents."
         )
 

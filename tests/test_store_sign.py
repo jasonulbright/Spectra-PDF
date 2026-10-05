@@ -166,7 +166,7 @@ class TestStoreRefusals:
         original = wincert.StoreCertificate.sign_digest
         wincert.StoreCertificate.sign_digest = _cancel
         try:
-            with pytest.raises(ValueError, match="Signing was cancelled"):
+            with pytest.raises(ValueError, match="Signing was canceled"):
                 sign_pdf(sample_pdf, os.path.join(tmp_dir, "no.pdf"), store_cert=rsa_cert)
         finally:
             wincert.StoreCertificate.sign_digest = original

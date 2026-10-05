@@ -219,11 +219,11 @@ class TestProfileClass:
     def test_an_empty_directory_refuses_by_name(self, tmp_path):
         empty = tmp_path / "none"
         empty.mkdir()
-        with pytest.raises(RuntimeError, match="No colour profiles are installed"):
+        with pytest.raises(RuntimeError, match="No color profiles are installed"):
             icc_profiles.default_cmyk(str(empty))
 
     def test_a_name_that_is_neither_installed_nor_a_file_refuses(self, icc_dir):
-        with pytest.raises(ValueError, match="No colour profile named"):
+        with pytest.raises(ValueError, match="No color profile named"):
             icc_profiles.resolve("No Such Press v9", icc_dir)
 
 

@@ -3,6 +3,7 @@ import type { QueueItem } from '../components/OperationQueue';
 import { app } from '../lib/tauri-bridge';
 import { formattingLocale, tChrome, tChromeCount, tQueueOp } from '../i18n';
 import { rawEngineMessage } from '../lib/engine-messages';
+import { errorText } from '../lib/error-text';
 
 interface QueueContextValue {
   items: QueueItem[];
@@ -43,9 +44,6 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   compare_text: 'Compare',
   compare_visual: 'Compare (visual)',
   apply_ocr_layer: 'Apply OCR Text',
-  // The document REWRITE. Its read half (`analyze_scan`) is deliberately
-  // absent: it refetches on every setting change while the pane is open, and
-  // a queue entry per keystroke pause is noise, not a record.
   enhance_scan: 'Enhance Scans',
   set_page_boxes: 'Crop Pages',
   content_crop: 'Crop to Content',
@@ -87,6 +85,103 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   move_struct_node: 'Move Tag',
   delete_struct_node: 'Delete Tag',
   add_struct_node: 'New Tag',
+  grayscale: 'Convert to Grayscale',
+  convert_cmyk: 'Convert to CMYK',
+  convert_pdfx: 'Convert to PDF/X',
+  distill: 'Convert PostScript to PDF',
+  grant_accessibility_permission: 'Allow Accessibility Access',
+  encrypt_pubkey: 'Encrypt with Certificates',
+  decrypt_pubkey: 'Decrypt with Certificate',
+  unlock: 'Remove Protection',
+  sealed_plaintext: 'Decrypt for Editing',
+  sealed_reseal: 'Re-encrypt Document',
+  add_header_footer: 'Add Header & Footer',
+  set_page_labels: 'Set Page Labels',
+  set_page_tab_order: 'Set Tab Order',
+  set_pdf_version: 'Set PDF Version',
+  strip_metadata: 'Remove Metadata',
+  sanitize_pdf: 'Remove Hidden Information',
+  export_xfdf: 'Export Comments',
+  import_xfdf: 'Import Comments',
+  summarize_comments: 'Summarize Comments',
+  delete_all_annotations: 'Delete All Comments',
+  export_count_summary: 'Export Count Summary',
+  create_portfolio: 'Create Portfolio',
+  set_layer_visibility: 'Set Layer Visibility',
+  apply_preflight_fixups: 'Apply Preflight Fixes',
+  run_preflight_sweep: 'Preflight a Folder',
+  list_simulation_profiles: 'Read Simulation Profiles',
+  inspect_point: 'Read Ink Coverage',
+  alias_ink: 'Alias Ink',
+  compare_ink_transforms: 'Compare Ink Conversions',
+  spot_to_process: 'Convert Spot to Process',
+  list_printer_marks: 'Read Printer Marks',
+  add_printer_marks: 'Add Printer Marks',
+  remove_printer_marks: 'Remove Printer Marks',
+  list_hairlines: 'Find Hairlines',
+  fix_hairlines: 'Fix Hairlines',
+  list_transparency: 'Find Transparency',
+  list_outlines: 'Check Outline Conversion',
+  flatten_transparency: 'Flatten Transparency',
+  list_trap_presets: 'Read Trap Presets',
+  assign_trap_presets: 'Assign Trap Presets',
+  emit_trapping_setup: 'Write Trapping Setup',
+  export_postscript: 'Export PostScript',
+  set_table_headers: 'Set Table Headers',
+  detect_tables: 'Detect Tables',
+  list_named_destinations: 'Read Named Destinations',
+  add_links: 'Add Links',
+  set_link_url: 'Set Link Address',
+  set_link_target: 'Set Link Target',
+  set_link_appearance: 'Set Link Appearance',
+  set_link_rect: 'Move Link',
+  delete_link: 'Delete Link',
+  find_url_links: 'Find Web Addresses',
+  create_links_from_urls: 'Create Links from Web Addresses',
+  check: 'Check PDF Structure',
+  repair: 'Repair',
+  rebuild: 'Rebuild',
+  recover: 'Recover Pages',
+  preview_structure_outline: 'Preview Bookmarks',
+  outline_from_structure: 'Bookmarks from Structure',
+  autotag: 'Tag Document',
+  read_aloud_page: 'Read Page Aloud',
+  list_threads: 'Read Articles',
+  set_threads: 'Save Articles',
+  save_redaction_marks: 'Save Redaction Marks',
+  search_and_redact: 'Search & Redact',
+  remove_redaction_residue: 'Remove Redaction Leftovers',
+  fill_form_fields: 'Fill Form',
+  reset_form_fields: 'Reset Form',
+  export_form_data: 'Export Form Data',
+  import_form_data: 'Import Form Data',
+  set_widget_visibility: 'Set Field Visibility',
+  set_field_actions: 'Set Field Actions',
+  detect_form_fields: 'Detect Form Fields',
+  create_detected_fields: 'Create Form Fields',
+  prepare_form_fields: 'Prepare Form',
+  analyze_scan: 'Analyze Scans',
+  ocr_file: 'Recognize Text',
+  batch_ocr: 'Batch OCR',
+  remove_empty_folders: 'Remove Empty Folders',
+  run_action: 'Run Guided Action',
+  create_pdf_folders: 'Create PDFs from Folders',
+  split_plan: 'Plan Split',
+  list_page_images: 'Read Images',
+  extract_page_image: 'Export Image',
+  list_page_vectors: 'Read Graphics',
+  delete_page_vector: 'Delete Graphic',
+  transform_page_vector: 'Move Graphic',
+  restyle_page_vector: 'Restyle Graphic',
+  restyle_text_run: 'Restyle Text',
+  list_text_paragraphs: 'Read Paragraphs',
+  replace_paragraph_text: 'Edit Paragraph',
+  merge_paragraph_with_previous: 'Join Paragraphs',
+  add_text_box: 'Add Text',
+  check_spelling: 'Check Spelling',
+  printed_job: 'Prepare Print Job',
+  // Renderer-side, not an engine method: the queue entry of a web capture.
+  web_capture: 'Capture Web Page',
 };
 
 /** Methods that are internal lookups, not user-facing operations. */
@@ -252,6 +347,35 @@ const INTERNAL_METHODS = new Set([
   // gate, and routing it through would commit the user's pending page edits
   // on every ink checkbox.
   'composite_separations',
+  // Calls that name no document: profile and preset catalogs, signing
+  // credential listings, the stamp preview drawn on a blank page, the engine
+  // liveness probe. The commit gate has nothing to protect for them, and
+  // running it would flush pending page edits for opening a picker.
+  'ping',
+  'list_preflight_profiles',
+  'validate_preflight_profile',
+  'trap_preset_defaults',
+  'validate_trap_preset',
+  'ink_settings_defaults',
+  'supported_export_formats',
+  'list_pkcs11_certificates',
+  'list_csc_credentials',
+  'preview_stamp_appearance',
+  'print_preview_cleanup',
+  // Reads issued only through `callRaw` on paths outside the workspace or on
+  // scratch extracts (folder listings, cross-file search, OCR of a page
+  // raster, the print preview of already-committed bytes).
+  'list_source_folders',
+  'search_in_files',
+  'recognize',
+  'recognize_raster',
+  'print_preview',
+  // Lends an open document's credential to its staging copy; writes no
+  // document bytes.
+  'share_document',
+  // Runs INSIDE the page-tier commit through `callRaw`; a gated call would
+  // re-enter the commit it belongs to.
+  'transplant_incremental',
 ]);
 
 export function isTrackableMethod(method: string): boolean {
@@ -555,7 +679,7 @@ export function runTracked(
       // (an engine refusal keeps its original text in the
       // diagnostic sink, exactly as the label above passes `lng: 'en'`).
       const endTime = sinks.now();
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorText(err);
       sinks.put({ id, label, status: 'error', message, outcome: null, startTime, endTime });
       logLine('ERROR', rawEngineMessage(err), endTime);
       throw err;

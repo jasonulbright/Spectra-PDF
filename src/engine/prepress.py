@@ -83,7 +83,7 @@ def _require_cmyk_profile(label: str, profile) -> None:
     if profile.space != "CMYK":
         raise ValueError(
             f'The destination profile "{label}" describes "{profile.space}" '
-            "colour, not CMYK."
+            "color, not CMYK."
         )
 
 

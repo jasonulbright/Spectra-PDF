@@ -76,18 +76,18 @@ export const DIALOG_STRINGS = {
   // build obtains the same acceptance through the installer's licence page and
   // never shows this. The BODY is the licence text itself, read from the file
   // the profiles ship beside; nothing here paraphrases it.
-  'dialog.iccLicense.aria': 'Colour profile licence',
-  'dialog.iccLicense.title': 'Colour Profile Licence',
+  'dialog.iccLicense.aria': 'Color profile license',
+  'dialog.iccLicense.title': 'Color Profile License',
   'dialog.iccLicense.blurb':
-    'Spectra PDF includes a set of printing colour profiles that are licensed separately by their publisher. Read the licence below and choose whether to accept it.',
+    'Spectra PDF includes a set of printing color profiles that are licensed separately by their publisher. Read the license below and choose whether to accept it.',
   'dialog.iccLicense.consequence':
-    'Accepting enables colour conversion, PDF/X output intents and output preview. Declining leaves those three off and changes nothing else — you can accept later from any of them.',
+    'Accepting enables color conversion, PDF/X output intents and output preview. Declining leaves those three off and changes nothing else — you can accept later from any of them.',
   'dialog.iccLicense.accept': 'Accept',
   'dialog.iccLicense.decline': 'Decline',
-  'dialog.iccLicense.textLabel': 'Licence text',
-  'dialog.iccLicense.loading': 'Reading the licence…',
+  'dialog.iccLicense.textLabel': 'License text',
+  'dialog.iccLicense.loading': 'Reading the license…',
   'dialog.iccLicense.unreadable':
-    'The licence text could not be read from this copy of Spectra PDF, so it cannot be accepted. The colour profiles stay unavailable.',
+    'The license text could not be read from this copy of Spectra PDF, so it cannot be accepted. The color profiles stay unavailable.',
   'dialog.iccLicense.recordFailed':
     'The answer could not be saved: {{detail}}',
 
@@ -507,7 +507,7 @@ export const DIALOG_STRINGS = {
   'dialog.folderCreatePdf.sourcesImages': 'Pictures only',
   'dialog.folderCreatePdf.sourcesAll': 'Every kind Create PDF accepts',
   'dialog.folderCreatePdf.subfolders': 'Walk the whole tree, not just the folder chosen',
-  'dialog.folderCreatePdf.imageDpi': 'Resolution assumed for a picture storing none (dpi)',
+  'dialog.folderCreatePdf.imageDpi': 'Resolution for pictures with no stored resolution (dpi)',
   'dialog.folderCreatePdf.previewRow': '{{folder}} → {{output}} ({{files}})',
   'dialog.folderCreatePdf.empty':
     'No folder under here holds anything to assemble. Pictures only is the default — switch it to every accepted kind if this tree holds documents.',
@@ -560,7 +560,7 @@ export const DIALOG_STRINGS = {
   'dialog.webCapture.capture': 'Capture',
   'dialog.webCapture.capturing': 'Capturing…',
   'dialog.webCapture.cancelled':
-    'Capture cancelled — the capture window was closed. Nothing was added.',
+    'Capture canceled — the capture window was closed. Nothing was added.',
   'dialog.webCapture.redirectRefused':
     'The address redirected to {{host}}, a different site. Nothing was captured. To capture that site, enter its address.',
   'dialog.webCapture.truncated_one':
@@ -599,7 +599,7 @@ export const DIALOG_STRINGS = {
   // end into a temporary file that is then never opened. Said plainly rather
   // than implied by a button that looks like it stops the network.
   'dialog.openWeb.cancelled':
-    'The download was cancelled and nothing was opened. A transfer already under way finishes into a temporary file that is discarded.',
+    'The download was canceled and nothing was opened. A transfer already under way finishes into a temporary file that is discarded.',
   'dialog.createPdf.converting': 'Converting…',
   'dialog.createPdf.convert': 'Convert…',
   // One PDF per source, each saved beside its source with no save dialog.
@@ -1039,20 +1039,20 @@ export const DIALOG_STRINGS = {
   'dialog.formPrep.title': 'Prepare Forms in a Folder',
   'dialog.formPrep.pickSource': 'Choose the folder of forms',
   'dialog.formPrep.blurb':
-    'Every file is analysed where it sits — nothing is opened, and nothing is written until you choose what to create.',
+    'Every file is analyzed where it sits — nothing is opened, and nothing is written until you choose what to create.',
   'dialog.formPrep.inPlace': 'Add the fields to the originals in place (no destination folder)',
   'dialog.formPrep.inPlaceNote':
     'Every file you check is rewritten where it stands. There is no undo and no copy of the original.',
   'dialog.formPrep.inPlaceConfirm':
     'Add fields to the originals in the source folder? There is no undo.',
   'dialog.formPrep.scan': 'Scanned pages',
-  'dialog.formPrep.scanAuto': 'Recognise a page with nothing readable on it',
-  'dialog.formPrep.scanNever': 'Never recognise — stay offline',
-  'dialog.formPrep.scanAlways': 'Recognise every page',
+  'dialog.formPrep.scanAuto': 'Recognize a page with nothing readable on it',
+  'dialog.formPrep.scanNever': 'Never recognize — stay offline',
+  'dialog.formPrep.scanAlways': 'Recognize every page',
   'dialog.formPrep.includeSigned': 'Include signed documents',
   'dialog.formPrep.includeSignedNote':
     'Adding a field to a signed document breaks its signatures. Documents certified to allow no changes are refused whatever this says.',
-  'dialog.formPrep.detect': 'Analyse the folder',
+  'dialog.formPrep.detect': 'Analyze the folder',
   'dialog.formPrep.detectProgress': 'File {{index}} of {{count}}: {{rel}}',
   'dialog.formPrep.applyProgress': 'File {{index}} of {{count}}: {{rel}} — {{verb}}',
   'dialog.formPrep.verbPreparing': 'adding fields',
@@ -1293,10 +1293,10 @@ export const DIALOG_STRINGS = {
   'dialog.scan.noneTitle': 'No scanners found.',
   'dialog.scan.noneHint':
     'Check that the scanner is switched on and connected, then choose Refresh. A network scanner also has to be reachable from this computer.',
-  'dialog.scan.color': 'Colour',
+  'dialog.scan.color': 'Color',
   'dialog.scan.colorBlackAndWhite': 'Black and white',
-  'dialog.scan.colorGrayscale': 'Greyscale',
-  'dialog.scan.colorColor': 'Colour',
+  'dialog.scan.colorGrayscale': 'Grayscale',
+  'dialog.scan.colorColor': 'Color',
   'dialog.scan.colorAuto': 'Detect automatically',
   'dialog.scan.source': 'Source',
   'dialog.scan.sourceFlatbed': 'Flatbed',
@@ -1331,7 +1331,7 @@ export const DIALOG_STRINGS = {
   'dialog.scan.pageProgress': 'Page {{index}} — {{percent}}%',
   'dialog.scan.pageStarted': 'Page {{index}}…',
   'dialog.scan.sizeWarning':
-    'These pages already take {{size}} on disk. Scanning at a lower resolution, or in greyscale, produces much smaller files.',
+    'These pages already take {{size}} on disk. Scanning at a lower resolution, or in grayscale, produces much smaller files.',
   'dialog.scan.adjustedTitle': 'The scanner did not take every setting:',
   'dialog.scan.adjustedRow': '{{property}}: asked for {{requested}}, using {{actual}}',
   'dialog.scan.adjustedRefused': '{{property}}: {{requested}} was refused',

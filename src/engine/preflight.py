@@ -168,13 +168,13 @@ def walk_page_resources(
         try:
             cs = sh.get("/ColorSpace")
         except Exception as exc:
-            unreadable((COLORSPACE,), f"a shading's colour space will not read: {exc}")
+            unreadable((COLORSPACE,), f"a shading's color space will not read: {exc}")
             return
         if cs is not None:
             try:
                 on_colorspace(cs, "shading")
             except Exception as exc:
-                unreadable((COLORSPACE,), f"a shading's colour space will not read: {exc}")
+                unreadable((COLORSPACE,), f"a shading's color space will not read: {exc}")
 
     def visit_pattern(pat, depth, origin):
         if pat is None:
@@ -227,7 +227,7 @@ def walk_page_resources(
                 try:
                     on_colorspace(cs[key], origin)
                 except Exception as exc:
-                    unreadable((COLORSPACE,), f"a colour space will not read: {exc}")
+                    unreadable((COLORSPACE,), f"a color space will not read: {exc}")
         sh = res.get("/Shading")
         if sh is not None:
             for key in entries(sh, (COLORSPACE,), "/Shading"):
@@ -264,7 +264,7 @@ def walk_page_resources(
                             except Exception as exc:
                                 unreadable(
                                     (COLORSPACE,),
-                                    f"an image's colour space will not read: {exc}",
+                                    f"an image's color space will not read: {exc}",
                                 )
                     elif sub == "/Form":
                         grp = obj.get("/Group")
@@ -1719,7 +1719,7 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
                 try:
                     family = _family_of(cs)
                 except Exception as exc:
-                    note((COLORSPACE,), f"a colour space will not read: {exc}")
+                    note((COLORSPACE,), f"a color space will not read: {exc}")
                     return
                 if not family:
                     return
@@ -1936,7 +1936,7 @@ _ENGLISH = {
     "structurally_sound": ("Document is structurally sound",
                            "A damaged cross-reference table is a file a press may not open."),
     "output_intent": ("Output intent present",
-                      "The output intent names the printing condition the colour was prepared for."),
+                      "The output intent names the printing condition the color was prepared for."),
     "pdfx_claim": ("PDF/X version claim matches",
                    "A document claiming a standard is judged against that standard."),
     "trapped_declared": ("Trapping state is declared",
@@ -1953,12 +1953,12 @@ _ENGLISH = {
                          "Art must run past the trim, or a cutting tolerance shows white."),
     "page_count": ("Page count fits the job",
                    "A saddle-stitched job needs a page count its binding can fold."),
-    "colour_family": ("No forbidden colour family",
-                      "RGB on a press is converted by the RIP, to a colour nobody chose."),
+    "colour_family": ("No forbidden color family",
+                      "RGB on a press is converted by the RIP, to a color nobody chose."),
     "grayscale_only": ("Grayscale only",
-                       "A single-plate job must carry no colour a second plate would need."),
-    "device_independent_colour": ("No device-independent colour",
-                                  "Some standards require every colour to be device colour."),
+                       "A single-plate job must carry no color a second plate would need."),
+    "device_independent_colour": ("No device-independent color",
+                                  "Some standards require every color to be device color."),
     "spot_ink_count": ("Spot ink count is within the limit",
                        "Each spot ink is another plate, another wash-up and another cost."),
     "spot_ink_names": ("Spot inks are on the approved list",
@@ -1985,7 +1985,7 @@ _ENGLISH = {
                       "Pixels beyond what the screen resolves cost time and buy nothing."),
     "image_compression": ("Image compression is permitted",
                           "Some standards forbid a codec a RIP of their era cannot decode."),
-    "image_colour_space": ("Images are in a permitted colour space",
+    "image_colour_space": ("Images are in a permitted color space",
                            "An image in the wrong space is converted by the RIP, not by anyone."),
     "live_transparency": ("No live transparency",
                           "A RIP that cannot composite transparency flattens it, unpredictably."),

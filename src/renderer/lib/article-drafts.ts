@@ -3,6 +3,7 @@ import type { PerformOperation } from '../hooks/useOperations';
 import type { Article, DrawnBead } from './article-beads';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome } from '../i18n';
+import { errorText } from './error-text';
 
 export interface ArticleDraft {
   readonly path: string;
@@ -69,7 +70,7 @@ export function createArticleDrafts(readState: () => AppState) {
       d.articles = articles; d.buffer = buffer; d.loaded = true; d.selected = 0; d.bead = 0;
     } catch (e) {
       if (live(d) && d.loading === token && readState().files.get(d.path)?.buffer === buffer)
-        d.error = e instanceof Error ? e.message : String(e);
+        d.error = errorText(e);
     } finally {
       if (live(d) && d.loading === token) { d.loading = null; notify(); }
     }
@@ -111,7 +112,7 @@ export function createArticleDrafts(readState: () => AppState) {
       d.buffer = result.publication.buffer;
       d.dirty = d.articles !== submitted;
     } catch (e) {
-      if (live(d)) d.error = e instanceof Error ? e.message : String(e);
+      if (live(d)) d.error = errorText(e);
     } finally {
       if (live(d)) { d.busy = false; notify(); }
     }

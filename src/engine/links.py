@@ -485,9 +485,9 @@ def _color_array(raw) -> Array:
     try:
         values = [float(v) for v in raw]
     except (TypeError, ValueError):
-        raise ValueError("link colour must be three numbers from 0 to 1") from None
+        raise ValueError("link color must be three numbers from 0 to 1") from None
     if len(values) != 3 or any(v < 0 or v > 1 for v in values):
-        raise ValueError("link colour must be three numbers from 0 to 1")
+        raise ValueError("link color must be three numbers from 0 to 1")
     return Array(values)
 
 

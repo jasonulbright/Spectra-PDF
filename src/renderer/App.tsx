@@ -8,6 +8,7 @@ import { withFileLock } from './lib/engine-lock';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
+import { errorText, withoutFilePath } from './lib/error-text';
 import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
@@ -957,7 +958,7 @@ function AppContent(): React.ReactElement {
     } catch (err) {
       setCommitError(
         tChrome('app.commit.failedRetry', {
-          message: err instanceof Error ? err.message : String(err),
+          message: errorText(err),
         }),
       );
     }
@@ -1700,9 +1701,11 @@ function AppContent(): React.ReactElement {
           onPathOpenResult: (_openedPath, opened) => { didOpen = opened; },
         });
         if (didOpen) return { kind: 'opened' };
-        if (summary.kind === 'single') return { kind: 'refused', detail: summary.reason };
+        // The path is the download's temporary copy, which names nothing the
+        // user chose; the dialog already names the address.
+        if (summary.kind === 'single') return { kind: 'refused', detail: withoutFilePath(errorText(summary.reason), path) };
         if (summary.kind === 'batch' && summary.failures.length > 0) {
-          return { kind: 'refused', detail: summary.failures[0].reason };
+          return { kind: 'refused', detail: withoutFilePath(errorText(summary.failures[0].reason), path) };
         }
         return { kind: 'notOpened' };
       } catch (err) {
@@ -1712,7 +1715,7 @@ function AppContent(): React.ReactElement {
         if (didOpen) return { kind: 'opened' };
         return {
           kind: 'refused',
-          detail: err instanceof Error ? err.message : String(err),
+          detail: withoutFilePath(errorText(err), path),
         };
       }
     },
@@ -2748,7 +2751,7 @@ function AppContent(): React.ReactElement {
     } catch (err) {
       historyRetry.current = direction;
       setCommitError(tChrome('app.history.failed', {
-        message: err instanceof Error ? err.message : String(err),
+        message: errorText(err),
       }));
     }
   }, [readState, dispatch]);
@@ -2765,7 +2768,7 @@ function AppContent(): React.ReactElement {
     } catch (err) {
       setCommitError(
         tChrome('app.commit.failedAbort', {
-          message: err instanceof Error ? err.message : String(err),
+          message: errorText(err),
         }),
       );
       return false;

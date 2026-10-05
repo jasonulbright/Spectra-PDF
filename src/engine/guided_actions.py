@@ -491,7 +491,7 @@ def validate_steps(steps) -> list[dict]:
         allowed = _STEPS[op].params
         unknown = sorted(set(params) - allowed)
         if unknown:
-            raise ValueError(f"step {i + 1} ({op}): unknown parameter(s) {unknown}")
+            raise ValueError(f"step {i + 1} ({op}): parameters not recognized: {unknown}")
         params = dict(params)
         if op == "add_header_footer" and ("position" in params or "text" in params):
             if "placements" in params:
@@ -567,7 +567,7 @@ def validate_steps(steps) -> list[dict]:
             # kind of file, so a step after it would be handed something that
             # is no longer a PDF.
             raise ValueError(
-                f"{op} must be the last step -- it writes a different kind of "
+                f"{op} must be the last step — it writes a different kind of "
                 "file, and nothing can run on that"
             )
         if op in SOURCE_STEPS and i != 0:
@@ -813,10 +813,10 @@ def run_action(
         raise ValueError(f"Source folder not found: {source}")
     if in_place:
         if dest:
-            raise ValueError("In-place mode takes no destination -- the originals are replaced.")
+            raise ValueError("In-place mode takes no destination — the originals are replaced.")
         if move_processed_root:
             raise ValueError(
-                "In-place mode cannot also move processed originals -- the processed "
+                "In-place mode cannot also move processed originals — the processed "
                 "file IS the original."
             )
         dest_path = source_path
@@ -826,7 +826,7 @@ def run_action(
         dest_path = Path(dest).resolve()
         if dest_conflicts_with_source(str(source_path), str(dest_path)):
             raise ValueError(
-                "The destination must be outside the source folder -- choose a "
+                "The destination must be outside the source folder — choose a "
                 "separate folder for the processed copies."
             )
     if move_processed_root:
@@ -847,7 +847,7 @@ def run_action(
         # with a spreadsheet that is still called `report.pdf` is a destroyed
         # source under a misleading name, not an in-place edit.
         raise ValueError(
-            "In-place mode cannot end with an export -- the exported document is a "
+            "In-place mode cannot end with an export — the exported document is a "
             "new file, not a replacement for its source."
         )
     if creates and in_place:
@@ -855,7 +855,7 @@ def run_action(
         # a PDF that is still called `report.docx` is not an in-place edit,
         # it is a destroyed source with a misleading name.
         raise ValueError(
-            "In-place mode cannot start with a step that creates the document -- the "
+            "In-place mode cannot start with a step that creates the document — the "
             "converted document is a new file, not a replacement for its source."
         )
     grouping = groups_by_folder(clean_steps)
@@ -865,7 +865,7 @@ def run_action(
         # from the per-file move this option performs. Refused rather than
         # silently moving only part of what was consumed.
         raise ValueError(
-            "A one-PDF-per-folder run cannot move processed originals -- its "
+            "A one-PDF-per-folder run cannot move processed originals — its "
             "sources are whole folders, not single files."
         )
     tool_paths = {

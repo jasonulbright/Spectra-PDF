@@ -201,7 +201,7 @@ class _Unsupported(Exception):
 
 
 #: The row reason for such a page. A report field, not a refusal.
-UNSUPPORTED = "the page image is not greyscale or RGB"
+UNSUPPORTED = "the page image is not grayscale or RGB"
 
 
 def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:

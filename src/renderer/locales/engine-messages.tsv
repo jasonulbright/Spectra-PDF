@@ -18,11 +18,11 @@ accessibility_fixes.documentCertifiedAllowChanges2	exact	accessibility_fixes	thi
 accessibility_fixes.documentCertifiedAllowChanges3	exact	accessibility_fixes	this document is certified to allow no changes, so adding bookmarks would produce a file that reports as illegally modified
 accessibility_fixes.documentCertifiedAllowChanges4	exact	accessibility_fixes	this document is certified to allow no changes, so granting assistive technology access would produce a file that reports as illegally modified
 accessibility_fixes.documentCertifiedAllowChanges5	exact	accessibility_fixes	this document is certified to allow no changes, so tagging it would produce a file that reports as illegally modified
-accessibility_fixes.documentSignedAddingBookmarks	exact	accessibility_fixes	this document is signed and adding bookmarks invalidates its signatures -- the run must state that signed documents are included before it will touch one
-accessibility_fixes.documentSignedClearingSuspects	exact	accessibility_fixes	this document is signed and clearing the suspects flag invalidates its signatures -- the run must state that signed documents are included before it will touch one
-accessibility_fixes.documentSignedGrantingAssistive	exact	accessibility_fixes	this document is signed and granting assistive technology access invalidates its signatures -- the run must state that signed documents are included before it will touch one
-accessibility_fixes.documentSignedNamingAttached	exact	accessibility_fixes	this document is signed and naming its attached files invalidates its signatures -- the run must state that signed documents are included before it will touch one
-accessibility_fixes.documentSignedTaggingInvalidates	exact	accessibility_fixes	this document is signed and tagging it invalidates its signatures -- the run must state that signed documents are included before it will touch one
+accessibility_fixes.documentSignedAddingBookmarks	exact	accessibility_fixes	this document is signed and adding bookmarks invalidates its signatures — the run must state that signed documents are included before it will touch one
+accessibility_fixes.documentSignedClearingSuspects	exact	accessibility_fixes	this document is signed and clearing the suspects flag invalidates its signatures — the run must state that signed documents are included before it will touch one
+accessibility_fixes.documentSignedGrantingAssistive	exact	accessibility_fixes	this document is signed and granting assistive technology access invalidates its signatures — the run must state that signed documents are included before it will touch one
+accessibility_fixes.documentSignedNamingAttached	exact	accessibility_fixes	this document is signed and naming its attached files invalidates its signatures — the run must state that signed documents are included before it will touch one
+accessibility_fixes.documentSignedTaggingInvalidates	exact	accessibility_fixes	this document is signed and tagging it invalidates its signatures — the run must state that signed documents are included before it will touch one
 accessibility_fixes.thereNothingHereFix	exact	accessibility_fixes	There is nothing here for that fix to repair.
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform,widget_faces	The regenerated file's page count differs from the original; cannot reattach its form fields.
@@ -32,16 +32,16 @@ attachments.attachmentNamedAlreadyExists	pattern	attachments	an attachment named
 attachments.sourceFileFound	pattern	attachments,portfolio	source file not found: {{source}}
 autotag.documentAlreadyTaggedRefine	exact	autotag	This document is already tagged. Refine its tags in the Tags panel instead of re-tagging automatically.
 autotag.nothingTaggableFoundDocument	exact	autotag	Nothing taggable found — the document has no text blocks or images to build a structure from.
-batch_ocr.copiedCouldRemoveOriginal	pattern	batch_ocr	copied to {{target}} but could not remove the original {{src}}: {{exc}} -- the file now exists in BOTH places
+batch_ocr.copiedCouldRemoveOriginal	pattern	batch_ocr	copied to {{target}} but could not remove the original {{src}}: {{exc}} — the file now exists in BOTH places
 batch_ocr.destinationFolderRequiredUnless	exact	batch_ocr,guided_actions,preflight_sweep	A destination folder is required unless running in place.
-batch_ocr.destinationMustOutsideSource	exact	batch_ocr	The destination must be outside the source folder -- choose a separate folder for the searchable copies.
+batch_ocr.destinationMustOutsideSource	exact	batch_ocr	The destination must be outside the source folder — choose a separate folder for the searchable copies.
 batch_ocr.file	pattern	batch_ocr	not a file: {{src}}
 batch_ocr.folderMustOutsideDestination	pattern	batch_ocr	The {{label}} folder must be outside the destination folder.
 batch_ocr.folderMustOutsideSource	pattern	batch_ocr	The {{label}} folder must be outside the source folder.
-batch_ocr.moveAbortedShortCopy	pattern	batch_ocr	move aborted: short copy to {{target}} -- the original was left in place
-batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode cannot also move processed originals -- the processed file IS the original.
-batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode takes no destination -- the originals are replaced.
-batch_ocr.repairOnlyModeRuns	exact	batch_ocr	Repair-only mode runs no OCR -- MRC compression, scan enhancement and image files cannot be combined with it.
+batch_ocr.moveAbortedShortCopy	pattern	batch_ocr	move aborted: short copy to {{target}} — the original was left in place
+batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode cannot also move processed originals — the processed file IS the original.
+batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode takes no destination — the originals are replaced.
+batch_ocr.repairOnlyModeRuns	exact	batch_ocr	Repair-only mode runs no OCR — MRC compression, scan enhancement and image files cannot be combined with it.
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
 batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
 budget.subprocessOutputLimitCannot	exact	budget	a subprocess output limit cannot be negative
@@ -98,7 +98,7 @@ create_pdf.unknownPageSize	pattern	create_pdf	unknown page size {{page_size}} ({
 create_pdf.unknownUnsupportedRefuseSkip	pattern	create_pdf	unknown on_unsupported {{on_unsupported}} (refuse, skip)
 create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{exc}})
 create_pdf_folders.destinationFolderRequired	exact	create_pdf_folders	A destination folder is required.
-create_pdf_folders.destinationMustOutsideSource	exact	create_pdf_folders	The destination must be outside the source folder -- choose a separate folder for the assembled documents.
+create_pdf_folders.destinationMustOutsideSource	exact	create_pdf_folders	The destination must be outside the source folder — choose a separate folder for the assembled documents.
 create_pdf_folders.unknownSourceSet	pattern	create_pdf_folders	unknown source set {{sources}} ({{v1}})
 credentials.ghostscriptPasswordUnsupported	exact	credentials	This document's password cannot be handed to Ghostscript, so this operation cannot read the document. Open it with the owner password, or decrypt the document first.
 csc.credentialUsesExplicitAuthorization	exact	csc	This credential uses explicit authorization, which requires this application to collect a PIN or one-time password and send it to the signing service. This application does not collect or transmit authentication secrets. Use a credential authorized through the provider's own sign-in instead.
@@ -168,9 +168,9 @@ doc_properties.documentCertifiedAllowChanges3	exact	doc_properties	this document
 doc_properties.documentSAdvancedProperties	exact	doc_properties	The document's advanced properties cannot be read completely.
 doc_properties.documentSInitialView	exact	doc_properties	The document's initial view cannot be read completely.
 doc_properties.documentSOpenAction	exact	doc_properties	The document's opening action cannot be changed without losing behavior.
-doc_properties.documentSignedSettingDocument	exact	doc_properties	this document is signed and setting the document language invalidates its signatures -- the run must state that signed documents are included before it will touch one
-doc_properties.documentSignedSettingDocument2	exact	doc_properties	this document is signed and setting the document title invalidates its signatures -- the run must state that signed documents are included before it will touch one
-doc_properties.documentSignedSettingTab	exact	doc_properties	this document is signed and setting the tab order invalidates its signatures -- the run must state that signed documents are included before it will touch one
+doc_properties.documentSignedSettingDocument	exact	doc_properties	this document is signed and setting the document language invalidates its signatures — the run must state that signed documents are included before it will touch one
+doc_properties.documentSignedSettingDocument2	exact	doc_properties	this document is signed and setting the document title invalidates its signatures — the run must state that signed documents are included before it will touch one
+doc_properties.documentSignedSettingTab	exact	doc_properties	this document is signed and setting the tab order invalidates its signatures — the run must state that signed documents are included before it will touch one
 doc_properties.initialViewWindowOptions	exact	doc_properties	Initial-view window options must be booleans.
 doc_properties.nameLanguageExampleEn	exact	doc_properties	Name the language, for example en-GB.
 doc_properties.openPageOutRange	pattern	doc_properties	open_page {{page_number}} is out of range (1-{{total}})
@@ -245,12 +245,12 @@ form_authoring.documentCertifiedAllowChanges4	exact	form_authoring	this document
 form_authoring.documentCertifiedAllowChanges5	exact	form_authoring	this document is certified to allow no changes, so setting a field's writing mode would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges6	exact	form_authoring	this document is certified to allow no changes, so redrawing an option list would produce a file that reports as illegally modified
 form_authoring.documentFormFieldNamed	pattern	form_authoring	This document has no form field named "{{name}}".
-form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures -- the run must state that signed documents are included before it will touch one
-form_authoring.documentSignedRedrawingOption	exact	form_authoring	this document is signed and redrawing an option list invalidates its signatures -- the run must state that signed documents are included before it will touch one
-form_authoring.documentSignedSettingField	exact	form_authoring	this document is signed and setting a field lock invalidates its signatures -- the run must state that signed documents are included before it will touch one
-form_authoring.documentSignedSettingField2	exact	form_authoring	this document is signed and setting a field action invalidates its signatures -- the run must state that signed documents are included before it will touch one
-form_authoring.documentSignedSettingField3	exact	form_authoring	this document is signed and setting a field description invalidates its signatures -- the run must state that signed documents are included before it will touch one
-form_authoring.documentSignedSettingField4	exact	form_authoring	this document is signed and setting a field's writing mode invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures — the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedRedrawingOption	exact	form_authoring	this document is signed and redrawing an option list invalidates its signatures — the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField	exact	form_authoring	this document is signed and setting a field lock invalidates its signatures — the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField2	exact	form_authoring	this document is signed and setting a field action invalidates its signatures — the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField3	exact	form_authoring	this document is signed and setting a field description invalidates its signatures — the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField4	exact	form_authoring	this document is signed and setting a field's writing mode invalidates its signatures — the run must state that signed documents are included before it will touch one
 form_authoring.fieldWritesVerticallyVertical	exact	form_authoring	this field writes vertically and no vertical font is available to state its metrics
 form_authoring.formFieldSActions	pattern	form_authoring	this form field's actions cannot be set: {{text}}
 form_authoring.formFieldSignatureField	pattern	form_authoring	Form field "{{name}}" is not a signature field, and only a signature field can lock form fields.
@@ -297,14 +297,14 @@ gs_capability.ghostscriptRequiredOperationThere	pattern	gs_capability	Ghostscrip
 guided_actions.actionProducesDocumentOnce	exact	guided_actions	an action produces its document once — use create_pdf or create_pdf_folders, not both
 guided_actions.actionSteps	exact	guided_actions	the action has no steps
 guided_actions.createPdfMustFirst	pattern	guided_actions	{{op}} must be the first step — it produces the document the rest of the action works on
-guided_actions.destinationMustOutsideSource	exact	guided_actions	The destination must be outside the source folder -- choose a separate folder for the processed copies.
+guided_actions.destinationMustOutsideSource	exact	guided_actions	The destination must be outside the source folder — choose a separate folder for the processed copies.
 guided_actions.encryptMustLastStep	exact	guided_actions	encrypt must be the last step
 guided_actions.encryptSetOpenOwner	exact	guided_actions	encrypt: set an open or an owner password
 guided_actions.mrcCompressionMustCome	exact	guided_actions	MRC compression must come after OCR — OCR reads the page image, and MRC replaces it
-guided_actions.mustLastStepWrites	pattern	guided_actions	{{op}} must be the last step -- it writes a different kind of file, and nothing can run on that
-guided_actions.onePdfPerFolder	exact	guided_actions	A one-PDF-per-folder run cannot move processed originals -- its sources are whole folders, not single files.
-guided_actions.placeModeCannotEnd	exact	guided_actions	In-place mode cannot end with an export -- the exported document is a new file, not a replacement for its source.
-guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with a step that creates the document -- the converted document is a new file, not a replacement for its source.
+guided_actions.mustLastStepWrites	pattern	guided_actions	{{op}} must be the last step — it writes a different kind of file, and nothing can run on that
+guided_actions.onePdfPerFolder	exact	guided_actions	A one-PDF-per-folder run cannot move processed originals — its sources are whole folders, not single files.
+guided_actions.placeModeCannotEnd	exact	guided_actions	In-place mode cannot end with an export — the exported document is a new file, not a replacement for its source.
+guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with a step that creates the document — the converted document is a new file, not a replacement for its source.
 guided_actions.processedOriginalsFolderMust	exact	guided_actions,preflight_sweep	The processed-originals folder must be outside the destination folder.
 guided_actions.processedOriginalsFolderMust2	exact	guided_actions,preflight_sweep	The processed-originals folder must be outside the source folder.
 guided_actions.scanEnhancementMustCome	exact	guided_actions	scan enhancement must come before MRC compression — MRC replaces the page image with reconstructed layers, and enhancing those enhances a reconstruction
@@ -315,7 +315,7 @@ guided_actions.stepPositionTextGo	pattern	guided_actions	step {{v0}} ({{op}}): p
 guided_actions.stepSetTextImagePdf	pattern	guided_actions	step {{v0}} ({{op}}): set text, image or pdf_source, exactly one of them
 guided_actions.stepStepObject	pattern	guided_actions	step {{v0}} is not a step object
 guided_actions.stepUnknownOperation	pattern	guided_actions	step {{v0}}: unknown operation {{op}}
-guided_actions.stepUnknownParameterS	pattern	guided_actions	step {{v0}} ({{op}}): unknown parameter(s) {{unknown}}
+guided_actions.stepUnknownParameterS	pattern	guided_actions	step {{v0}} ({{op}}): parameters not recognized: {{unknown}}
 guided_actions.stepUsePlacementsPosition	pattern	guided_actions	step {{v0}} ({{op}}): use placements or position/text, not both
 hairlines.formHairlineDrawnCould	exact	hairlines	The form a hairline is drawn in could not be found.
 hairlines.hairlineThresholdMustGreater	exact	hairlines	The hairline threshold must be greater than zero.
@@ -325,9 +325,9 @@ headers.fontSizeMust	pattern	headers	font_size must be >= {{_MIN_FONT_SIZE}}
 headers.leastOnePlacementRequired	exact	headers	at least one placement is required
 headers.positionMustOneGot	pattern	headers	position must be one of {{_POSITIONS}}, got {{pos}}
 headers.textContainsCharactersOutside	exact	headers	text contains characters outside Latin-1 and no fallback font is available
-icc_profiles.bundledColourProfilesLicensed	exact	icc_profiles	The bundled colour profiles are licensed separately and that licence has not been accepted on this computer, so no bundled profile can be opened. Accept the colour-profile licence to enable colour conversion, output intents and output preview, or name your own profile file instead.
-icc_profiles.colourProfileNamedInstalled	pattern	icc_profiles	No colour profile named "{{name}}" is installed, and it is not a profile file this engine can open.
-icc_profiles.colourProfilesInstalledThere	pattern	icc_profiles	No colour profiles are installed in {{directory}}, so there is no destination profile to convert to.
+icc_profiles.bundledColourProfilesLicensed	exact	icc_profiles	The bundled color profiles are licensed separately and that license has not been accepted on this computer, so no bundled profile can be opened. Accept the color-profile license to enable color conversion, output intents and output preview, or name your own profile file instead.
+icc_profiles.colourProfileNamedInstalled	pattern	icc_profiles	No color profile named "{{name}}" is installed, and it is not a profile file this engine can open.
+icc_profiles.colourProfilesInstalledThere	pattern	icc_profiles	No color profiles are installed in {{directory}}, so there is no destination profile to convert to.
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
 image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{dpi}}
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
@@ -342,12 +342,12 @@ incremental.objectGraphTooDeep	exact	incremental	Object graph too deep to materi
 incremental.pageSignedOriginalStructural	pattern	incremental	Page {{v0}} of the signed original has no structural match in the edited file, which also adds unmatched pages — a rewritten page cannot be told apart from a delete plus an insert, so that edit cannot be appended without invalidating
 incremental.refusingOverwriteSignedOriginal	exact	incremental	Refusing to overwrite the signed original in place
 incremental.unsupportedObjectTypeTransplant	pattern	incremental	Unsupported object type for transplant: {{v0}}
-ink_manager.describeDifferentColoursAliasing	pattern	ink_manager	"{{source}}" and "{{target}}" describe different colours; aliasing them will change the document's appearance.
-ink_manager.inkDeclaresAlternateColour	pattern	ink_manager	Ink "{{name}}" declares no alternate colour space.
+ink_manager.describeDifferentColoursAliasing	pattern	ink_manager	"{{source}}" and "{{target}}" describe different colors; aliasing them will change the document's appearance.
+ink_manager.inkDeclaresAlternateColour	pattern	ink_manager	Ink "{{name}}" declares no alternate color space.
 ink_manager.inkUsedDocument	pattern	ink_manager	Ink "{{name}}" is not used in this document.
 ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a pattern this tool cannot rewrite.
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
-ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
+ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot color.
 inplace.fileCouldReplacedBecause	exact	inplace	The file could not be replaced because another program is using it. Close it there and try again.
 inplace.fileMoreThanOne	exact	inplace	This file has more than one name on disk (hard links). Saving over it would leave the other names with the old content. Save it as a new file.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
@@ -361,7 +361,7 @@ links.documentDestinationNamed	pattern	links	this document has no destination na
 links.linkBorderStyleMust	exact	links	link border style must be solid, dashed or underline
 links.linkBorderWidthMust	exact	links	link border width must be a number
 links.linkBorderWidthMust2	exact	links	link border width must not be negative
-links.linkColourMustThree	exact	links	link colour must be three numbers from 0 to 1
+links.linkColourMustThree	exact	links	link color must be three numbers from 0 to 1
 links.linkDashPatternMust	exact	links	link dash pattern must be numbers
 links.linkFileNeedsPath	exact	links	a link to a file needs a path
 links.linkFileNeedsWhole	exact	links	a link to a file needs a whole page number
@@ -508,7 +508,7 @@ pdf_save.documentSEncryptionCannot5	exact	pdf_save	This document's encryption ca
 pdf_save.documentSEncryptionCannot6	exact	pdf_save	This document's encryption cannot be kept through this operation: its encryption version, cipher and key length are a combination that cannot be written back exactly, and a rewritten copy would change the strength of its protection. Decrypt the document first if you want an unprotected copy.
 pdf_version.pdfVersionCannotDetermined	exact	pdf_version	The PDF version cannot be determined.
 pdf_version.versionDeclarationsCannotPreserved	exact	pdf_version	The version declarations cannot be preserved completely.
-pdfa.bundledSrgbColourProfile	pattern	pdfa	The bundled sRGB colour profile is missing ({{candidate}}), so no PDF/A output intent can be written.
+pdfa.bundledSrgbColourProfile	pattern	pdfa	The bundled sRGB color profile is missing ({{candidate}}), so no PDF/A output intent can be written.
 pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did not produce {{requested}}: the output declares {{declared}}.
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
 pdfa.outputCarriesPdfOutput	pattern	pdfa	The output carries no PDF/A output intent, so {{requested}} was not produced.
@@ -519,7 +519,7 @@ portfolio.memberNamed	pattern	portfolio	no member named {{name}}
 portfolio.memberSourceFound	pattern	portfolio	member source not found: {{s}}
 portfolio.portfolioNeedsLeastOne	exact	portfolio	a portfolio needs at least one member file
 portfolio.portfolioOutputCannotOne	exact	portfolio	the portfolio output cannot be one of its own members
-preflight_fixups.aliasSpotNeedsInk	exact	preflight_fixups	alias_spot needs the ink to move and the ink it joins — an alias is a decision about which plate a colour prints on, and no machine may make it.
+preflight_fixups.aliasSpotNeedsInk	exact	preflight_fixups	alias_spot needs the ink to move and the ink it joins — an alias is a decision about which plate a color prints on, and no machine may make it.
 preflight_fixups.downsampleImagesNeedsResolution	exact	preflight_fixups	downsample_images needs the resolution to downsample to.
 preflight_fixups.growBleedBox	pattern	preflight_fixups	grow_bleed_box: {{v0}}
 preflight_fixups.growBleedBoxNeeds	exact	preflight_fixups	grow_bleed_box needs the bleed margin to grow to.
@@ -559,10 +559,10 @@ preflight_profiles.preflightProfileValidJson	pattern	preflight_profiles	The pref
 preflight_profiles.preflightProfileWhichMust	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} is {{value}}, which must be {{bound}}.
 preflight_profiles.therePreflightProfileCalled	pattern	preflight_profiles	There is no preflight profile called '{{pid}}' (this app ships: {{v1}}).
 preflight_sweep.checkWritesNothingThere	exact	preflight_sweep	A check writes nothing, so there is nothing for in-place mode to replace. Run it in fix mode, or give a destination for the reports.
-preflight_sweep.destinationMustOutsideSource	exact	preflight_sweep	The destination must be outside the source folder -- choose a separate folder for the reports.
+preflight_sweep.destinationMustOutsideSource	exact	preflight_sweep	The destination must be outside the source folder — choose a separate folder for the reports.
 preflight_sweep.preflightProfileCarriesFixups	pattern	preflight_sweep	The preflight profile '{{v0}}' carries no fixups, so a fix run over this folder would repair nothing. Choose a profile that carries some, or run the sweep as a check.
 preflight_sweep.preflightSweepRunsMode	pattern	preflight_sweep	A preflight sweep runs in {{v0}} mode, not {{mode}}.
-prepress.destinationProfileDescribesColour	pattern	prepress	The destination profile "{{label}}" describes "{{v1}}" colour, not CMYK.
+prepress.destinationProfileDescribesColour	pattern	prepress	The destination profile "{{label}}" describes "{{v1}}" color, not CMYK.
 prepress.destinationProfileProfileWhich	pattern	prepress	The destination profile "{{label}}" is a "{{v1}}" profile, which does not describe an output condition.
 prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conversion failed: {{v0}}
 prepress.ghostscriptPdfXConversion	pattern	prepress	Ghostscript PDF/X conversion failed: {{v0}}
@@ -608,7 +608,7 @@ printer.unknownExpectedOne	pattern	printer	Unknown {{name}} {{value}} (expected 
 printer.unknownPaperId	pattern	cups_print,printer	Unknown paper id {{paper}}
 printer.unknownPrinter	pattern	cups_print,printer	Unknown printer: '{{printer}}'
 printer_marks.addingPrinterMarksWould	pattern	printer_marks	Adding printer marks would make page {{index}} larger than the 14400-point page limit.
-printer_marks.colourBarCannotFit	pattern	printer_marks	The colour bar cannot fit its {{needed}} patches along the top edge of page {{page_number}}.
+printer_marks.colourBarCannotFit	pattern	printer_marks	The color bar cannot fit its {{needed}} patches along the top edge of page {{page_number}}.
 printer_marks.markOffsetMustZero	exact	printer_marks	Mark offset must be zero or more and mark length must be positive.
 printer_marks.markStyleMustOne	pattern	printer_marks	Mark style must be one of {{styles}}.
 printer_marks.markWeightMustOne	pattern	printer_marks	Mark weight must be one of {{weights}}.
@@ -633,16 +633,16 @@ recognize.ocrEngineAvailableTesseract	pattern	recognize	The OCR engine is not av
 recognize.ocrFailedPage	pattern	recognize	OCR failed on page {{page}}: {{detail}}
 recognize.ocrFailedPageImage	pattern	recognize	OCR failed on the page image: {{detail}}
 recognize.ocrProducedWordBoxes	pattern	recognize	OCR produced no word boxes: tessdata/configs/tsv is missing from the vendored Tesseract. Re-run {{script}}.
-recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasteriser did not produce a PNG
-recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasteriser produced a zero-sized page image
+recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasterizer did not produce a PNG
+recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasterizer produced a zero-sized page image
 recognize.pageMustBased	exact	recognize	page must be 1-based
 recognize.recognitionInputReadableImage	exact	recognize	Recognition input is not a readable image
 recognize.recognitionLanguageInstalled	pattern	recognize	Recognition language is not installed: {{code}}
 recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run {{script}}.
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
-recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted -- decrypt before recovery
-redact.alignMustLeftCentred	exact	redact	align must be 0 (left), 1 (centred) or 2 (right)
+recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted — decrypt before recovery
+redact.alignMustLeftCentred	exact	redact	align must be 0 (left), 1 (centered) or 2 (right)
 redact.fontSizeMustNegative	exact	redact	font size must not be negative
 redact.overlayTextNeedsEmbedded	exact	redact	this overlay text needs an embedded font and no font directory was given
 redact.pageContainsMalformedDrawing	exact	redact	The page contains a malformed drawing path. Redaction was not applied.
@@ -651,8 +651,8 @@ redact_document.documentStructureTooComplex	exact	redact_document	The document s
 redact_document.termsMustListStrings	exact	redact_document	terms must be a list of strings
 redact_document.unknownResidueKind	pattern	redact_document	unknown residue kind: {{v0}}
 redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mark(s) in this document cannot be read (page(s) {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
-repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
-repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).
+repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted — decrypt before repairing
+repair.pdfTooDamagedTier	exact	repair	The PDF is too damaged to repair. Try Rebuild, or Recover to salvage the pages that can still be read.
 reversion.pdfVersionCannotChanged	exact	reversion	The PDF version cannot be changed while preserving this document's signatures.
 reversion.pdfVersionCannotChanged2	exact	reversion	The PDF version cannot be changed without verifying this document's conformance declarations.
 reversion.pdfVersionCannotLowered	exact	reversion	The PDF version cannot be lowered because compatibility with the requested version cannot be verified.
@@ -670,19 +670,19 @@ sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. T
 sanitize_content.sanitizeCannotRemoveText	exact	sanitize_content	Sanitize cannot remove text that defines a clipping path because doing so could change visible page content.
 sealed_edit.editLeavesDocumentPages	exact	sealed_edit	the edit leaves the document with no pages, so it was not written
 search_redact.documentCertifiedAllowChanges	exact	search_redact	this document is certified to allow no changes, so redacting it would produce a file that reports as illegally modified
-search_redact.documentSignedEditInvalidates	exact	search_redact	this document is signed and this edit invalidates its signatures -- the run must state that signed documents are included before it will touch one
+search_redact.documentSignedEditInvalidates	exact	search_redact	this document is signed and this edit invalidates its signatures — the run must state that signed documents are included before it will touch one
 search_redact.searchCouldCompiled	pattern	search_redact	the search could not be compiled: {{v0}}
 search_redact.unknownRedactionProperty	pattern	search_redact	unknown redaction property: {{v0}}
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
 search_regions.pagesMustListPage	exact	enhance_scan,form_detect,headers,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
-separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
+separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colors into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
 separations.moreThanOneInk	pattern	separations	More than one ink in this document is shown as "{{text}}", so the name cannot say which one is meant.
 separations.pageDocument	pattern	flattener,object_inspector,outlines,separations	Page {{number}} is not in this document.
-separations.pageUsesColourSpace	pattern	separations	Page {{page}} uses a colour space this engine cannot read, so the inks on it cannot all be established: {{detail}}
-separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colours; separation preview supports {{limit}}.
+separations.pageUsesColourSpace	pattern	separations	Page {{page}} uses a color space this engine cannot read, so the inks on it cannot all be established: {{detail}}
+separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colors; separation preview supports {{limit}}.
 separations.separationOutputDidMatch	exact	separations	Separation output did not match the document's inks — the preview cannot be trusted.
 separations.separationPlatesPageLonger	exact	separations	The separation plates for this page are no longer available.
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
@@ -723,7 +723,7 @@ signatures.signerFilePfxFound	exact	signatures	Signer file (.pfx) not found.
 signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a .pfx file, a PEM key + certificate, a PKCS#11 token, a certificate from the Windows certificate store, or a credential at a signing service.
 signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
-signatures.signingCancelledWindowsGiven	exact	signatures	Signing was cancelled — Windows was not given permission to use the key.
+signatures.signingCancelledWindowsGiven	exact	signatures	Signing was canceled — Windows was not given permission to use the key.
 signatures.signingCertificateExpiredCannot	pattern	signatures	The signing certificate expired on {{not_after}}, so it cannot sign.
 signatures.signingCertificateSChain	exact	signatures	The signing certificate's chain could not be built to a trusted root: an issuing certificate is missing from the signer and could not be retrieved. Add the intermediate certificate or its root.
 signatures.signingCertificateSChain2	exact	signatures	The signing certificate's chain did not validate, so validation information for long-term validation could not be embedded.
@@ -744,7 +744,7 @@ soffice.libreofficeProducedPdfCannot	pattern	soffice	LibreOffice produced a PDF 
 soffice.libreofficeReportedSuccessPdf	exact	soffice	LibreOffice reported success but the PDF it wrote has no pages
 soft_proof.colorantConvertsWhichSpace	pattern	soft_proof	the colorant {{name}} converts to {{alternate}}, which is not a space this proof can describe
 soft_proof.documentSOutputIntent	pattern	soft_proof	this document's output intent names {{identifier}} but embeds no profile, so there is nothing to proof against
-soft_proof.fileColourProfileEngine	pattern	soft_proof	that file is not a colour profile this engine can read: {{detail}}
+soft_proof.fileColourProfileEngine	pattern	soft_proof	that file is not a color profile this engine can read: {{detail}}
 soft_proof.processPlateShowingThere	exact	soft_proof	no process plate is showing, so there is nothing for the press profile to describe
 soft_proof.profileDescribesDevicePrinting	pattern	soft_proof	that profile describes a {{space}} device, not a printing press
 spelling.dictionaryAffFileDic	exact	spelling	A dictionary is an .aff file and a .dic file.
@@ -835,7 +835,7 @@ system_fonts.fontFileFound	pattern	system_fonts	font file not found: {{path}}
 system_fonts.usableFontFile	pattern	system_fonts	not a usable font file: {{v0}}
 table_export.pagesRegionsCannotBoth	exact	table_export	pages and regions cannot both be given: a reviewed table set names its own pages
 table_export.tableAcceptedThereNothing	exact	table_export	no table was accepted, so there is nothing to write to a spreadsheet
-table_export.tableFoundPageS	pattern	table_export	no table was found on the {{v0}} page(s) analyzed, so there is nothing to write to a spreadsheet
+table_export.tableFoundPageS	pattern	table_export	no table was found on the pages analyzed ({{v0}}), so there is nothing to write to a spreadsheet
 table_export.tablePageArea	pattern	table_export	the table on page {{page_no}} has no area
 table_export.tablePageColumnBoundary	pattern	table_export	the table on page {{page_no}} has {{count}} column boundary; a table needs at least two
 table_export.tablePageCoversText	pattern	table_export	the table on page {{page_no}} covers no text
@@ -846,7 +846,7 @@ tag_content.annotationPageAlreadyStructure	pattern	tag_content	annotation {{inde
 tag_content.annotationPageAnnotations	pattern	tag_content	annotation {{index}} is not on page {{page_no}} (it has {{v2}} annotations)
 tag_content.annotationPageReadable	pattern	tag_content	annotation {{index}} on page {{page_no}} is not readable.
 tag_content.documentCertifiedAllowChanges	exact	tag_content	this document is certified to allow no changes, so tagging page content would produce a file that reports as illegally modified
-tag_content.documentSignedTaggingPage	exact	tag_content	this document is signed and tagging page content invalidates its signatures -- the run must state that signed documents are included before it will touch one
+tag_content.documentSignedTaggingPage	exact	tag_content	this document is signed and tagging page content invalidates its signatures — the run must state that signed documents are included before it will touch one
 tag_content.documentUntaggedThereStructure	exact	tag_content	This document is untagged, so there is no structure tree to bind content into. Tag it first.
 tag_content.eachTargetNamesRun	exact	tag_content	Each target names a "run" or an "annot".
 tag_content.nameLeastOneRun	exact	tag_content	Name at least one run or annotation to tag.
@@ -881,7 +881,7 @@ text_authoring.textAdd	exact	text_authoring	no text to add
 text_authoring.textSetsColumnsLeft	exact	text_authoring	this text sets columns left to right — use vertical-lr
 text_authoring.textSetsColumnsRight	exact	text_authoring	this text sets columns right to left — use vertical-rl
 text_authoring.writingModeMustHorizontal	pattern	text_authoring,watermark	writing_mode must be horizontal, vertical, vertical-rl or vertical-lr (got {{writing_mode}})
-text_export.documentTextLayerThere	exact	text_export	this document has no text layer, so there is nothing to export as text -- run OCR on it first to add one
+text_export.documentTextLayerThere	exact	text_export	this document has no text layer, so there is nothing to export as text — run OCR on it first to add one
 text_export.unknownTextLayoutChoose	pattern	text_export	unknown text layout {{layout}} (choose reading or layout)
 text_match.unknownPatternBuiltPatterns	pattern	text_match	unknown pattern {{pattern_id}} — the built-in patterns are: {{known}}
 text_paragraphs.boxLeftMustFinite	exact	text_paragraphs	box left must be a finite number
@@ -923,8 +923,8 @@ text_paragraphs.previousParagraphMerge	exact	text_paragraphs	no previous paragra
 text_paragraphs.requestedBoxNarrowerThan	exact	text_paragraphs	the requested box is narrower than the first-line indent
 text_paragraphs.restyleMergedParagraphAfter	exact	text_paragraphs	restyle the merged paragraph after merging — a face change cannot ride a merge of right-to-left text
 text_paragraphs.spanStyle	pattern	text_paragraphs	span style {{exc}}
-text_paragraphs.spanStyleColourMust	exact	text_paragraphs	span style colour must be [r, g, b]
-text_paragraphs.spanStyleMustSet	exact	text_paragraphs	span style must set a colour, a face, or a size
+text_paragraphs.spanStyleColourMust	exact	text_paragraphs	span style color must be [r, g, b]
+text_paragraphs.spanStyleMustSet	exact	text_paragraphs	span style must set a color, a face, or a size
 text_paragraphs.spanStyleNeedsInteger	exact	text_paragraphs	span style needs integer start/end
 text_paragraphs.spanStyleRangeOut	exact	text_paragraphs	span style range out of bounds
 text_paragraphs.spanStyleSizeMust	exact	text_paragraphs	span style size must be a number

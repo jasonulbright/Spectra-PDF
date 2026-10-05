@@ -64,7 +64,7 @@ class TestValidateSteps:
     def test_refuses_unknown_ops_and_params(self):
         with pytest.raises(ValueError, match="unknown operation"):
             validate_steps([{"op": "rm_rf", "params": {}}])
-        with pytest.raises(ValueError, match="unknown parameter"):
+        with pytest.raises(ValueError, match="parameters not recognized"):
             validate_steps([{"op": "compress", "params": {"gs_path": "evil.exe"}}])
         with pytest.raises(ValueError, match="no steps"):
             validate_steps([])
@@ -389,7 +389,7 @@ class TestCreatePdfStep:
             [{"op": "create_pdf", "params": {"page_size": "letter", "margin_pt": 12}}]
         )
         assert clean[0]["params"] == {"page_size": "letter", "margin_pt": 12}
-        with pytest.raises(ValueError, match="unknown parameter"):
+        with pytest.raises(ValueError, match="parameters not recognized"):
             validate_steps([{"op": "create_pdf", "params": {"soffice_path": "evil.exe"}}])
 
     def test_a_creating_run_walks_more_than_pdfs(self, tree, tmp_path):
@@ -646,7 +646,7 @@ class TestOptimizeStep:
             assert pikepdf.Name.Info not in pdf.trailer
 
     def test_refuses_a_parameter_optimize_does_not_take(self):
-        with pytest.raises(ValueError, match="unknown parameter"):
+        with pytest.raises(ValueError, match="parameters not recognized"):
             validate_steps([{"op": "optimize", "params": {"quality": "screen"}}])
 
 

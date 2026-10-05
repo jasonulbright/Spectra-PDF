@@ -293,7 +293,7 @@ def _image_refusal(xobj) -> str | None:
         return "the page image is already 1-bit"
     cs = xobj.get("/ColorSpace")
     if cs is not None and isinstance(cs, pikepdf.Array) and len(cs) and token_text(cs[0]) == "/Indexed":
-        return "the page image uses an indexed colour space"
+        return "the page image uses an indexed color space"
     return None
 
 

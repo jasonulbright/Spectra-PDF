@@ -74,10 +74,10 @@ _DEVICE_OPERATORS = {1: ("g", "G"), 3: ("rg", "RG"), 4: ("k", "K")}
 # Why composing a tint transform onto a shading's function would not describe
 # the shading's colour. Reported verbatim; they are report text, not refusals.
 SHADING_PLANAR = "the shading maps a point in the plane, not one parametric value"
-SHADING_BACKGROUND = "the shading states a background colour in the colorant's own space"
+SHADING_BACKGROUND = "the shading states a background color in the colorant's own space"
 SHADING_UNREADABLE = "the shading's type or domain cannot be read"
 SHADING_NO_TRANSFORM = "the colorant's tint transform cannot be read"
-SHADING_NO_ALTERNATE = "the alternate colour space has no component count"
+SHADING_NO_ALTERNATE = "the alternate color space has no component count"
 SHADING_NO_COMPOSE = "the shading's function cannot be composed with the tint transform"
 
 
@@ -469,13 +469,13 @@ def alias_ink(
     if source_raw == target_raw:
         raise ValueError(f'Ink "{source}" is not used in this document.')
     if ink_kind(source) == "process" and ink_kind(target) != "process":
-        raise ValueError("Process inks cannot be aliased to a spot colour.")
+        raise ValueError("Process inks cannot be aliased to a spot color.")
 
     comparison = compare_tint_transforms(
         file, {"key": source_raw.hex()}, {"key": target_raw.hex()})
     if not comparison["match"] and not accept_target_transform:
         raise ValueError(
-            f'"{source}" and "{target}" describe different colours; '
+            f'"{source}" and "{target}" describe different colors; '
             "aliasing them will change the document's appearance."
         )
 
@@ -924,7 +924,7 @@ def spot_to_process(
             space = _first_space_named(pdf, raw)
             if space is not None and space[2] is None:
                 name = name_label(raw)
-                raise ValueError(f'Ink "{name}" declares no alternate colour space.')
+                raise ValueError(f'Ink "{name}" declares no alternate color space.')
 
         for owner in _content_owners(pdf):
             resources = owner.get("/Resources")
@@ -945,17 +945,17 @@ def spot_to_process(
                 alt = cs[2]
                 if alt is None:
                     raise ValueError(
-                        f'Ink "{name}" declares no alternate colour space.'
+                        f'Ink "{name}" declares no alternate color space.'
                     )
                 tint = build_function(cs[3])
                 if tint is None:
                     raise ValueError(
-                        f'Ink "{name}" declares no alternate colour space.'
+                        f'Ink "{name}" declares no alternate color space.'
                     )
                 _, out_components = _alternate_operand(alt)
                 if out_components is None:
                     raise ValueError(
-                        f'Ink "{name}" declares no alternate colour space.'
+                        f'Ink "{name}" declares no alternate color space.'
                     )
                 carried.update(set(names) - wanted)
                 targets[name_bytes(key)] = (cs, tint, alt, name)

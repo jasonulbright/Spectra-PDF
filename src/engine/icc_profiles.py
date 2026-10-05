@@ -94,16 +94,16 @@ OUTPUT_CLASSES = frozenset({"prtr", "mntr", "scnr", "spac"})
 
 def refuse_unknown_profile(name: str) -> None:
     raise ValueError(
-        f'No colour profile named "{name}" is installed, and it is not a '
+        f'No color profile named "{name}" is installed, and it is not a '
         "profile file this engine can open."
     )
 
 
 def refuse_unaccepted_profiles() -> None:
     raise RuntimeError(
-        "The bundled colour profiles are licensed separately and that licence "
+        "The bundled color profiles are licensed separately and that license "
         "has not been accepted on this computer, so no bundled profile can be "
-        "opened. Accept the colour-profile licence to enable colour "
+        "opened. Accept the color-profile license to enable color "
         "conversion, output intents and output preview, or name your own "
         "profile file instead."
     )
@@ -111,7 +111,7 @@ def refuse_unaccepted_profiles() -> None:
 
 def refuse_no_profiles(directory: str) -> None:
     raise RuntimeError(
-        f"No colour profiles are installed in {directory}, so there is no "
+        f"No color profiles are installed in {directory}, so there is no "
         "destination profile to convert to."
     )
 

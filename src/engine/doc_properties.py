@@ -759,7 +759,7 @@ def set_document_language(
     if gate == "warn":
         raise RuntimeError(
             "this document is signed and setting the document language invalidates its "
-            "signatures -- the run must state that signed documents are included before "
+            "signatures — the run must state that signed documents are included before "
             "it will touch one"
         )
 
@@ -808,7 +808,7 @@ def set_document_title(
     if gate == "warn":
         raise RuntimeError(
             "this document is signed and setting the document title invalidates its "
-            "signatures -- the run must state that signed documents are included before "
+            "signatures — the run must state that signed documents are included before "
             "it will touch one"
         )
 
@@ -854,7 +854,7 @@ def set_page_tab_order(
     if gate == "warn":
         raise RuntimeError(
             "this document is signed and setting the tab order invalidates its "
-            "signatures -- the run must state that signed documents are included before "
+            "signatures — the run must state that signed documents are included before "
             "it will touch one"
         )
 

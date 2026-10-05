@@ -615,7 +615,7 @@ class TestImageNamesThatAreNotUtf8:
 
     @pytest.mark.parametrize("rect, reason", [
         ([120, 510, 150, 540], "an unsupported filter /Fl#FCte"),
-        ([120, 310, 150, 340], "an unsupported colour space /Ind#FCexed"),
+        ([120, 310, 150, 340], "an unsupported color space /Ind#FCexed"),
     ])
     def test_a_partial_redaction_refuses_the_image_by_name(self, tmp_dir, rect, reason):
         from engine.redact import redact
@@ -2789,7 +2789,7 @@ class TestMoreReadersPastNamesThatAreNotUtf8:
         ])
         result = mrc_compress(src, os.path.join(tmp_dir, "o.pdf"), gs_path=gs_path)
         [page] = result["pages"]
-        assert page.get("reason") != "the page image uses an indexed colour space"
+        assert page.get("reason") != "the page image uses an indexed color space"
 
     def test_a_thin_border_of_an_annotation_of_such_a_subtype_is_listed(self, tmp_dir):
         from engine.hairlines import list_hairlines

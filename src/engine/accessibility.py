@@ -4538,7 +4538,7 @@ _ENGLISH = {
     ),
     "list_semantics": (
         "Lists are tagged as lists",
-        "Labelled paragraphs, and one list tagged as two, each need a person to look.",
+        "Labeled paragraphs, and one list tagged as two, each need a person to look.",
     ),
     "heading_tag_mixing": (
         "One heading convention, not two",
@@ -4569,7 +4569,7 @@ _ENGLISH = {
         "Bookmarks are how a long document is navigated without reading it through.",
     ),
     "contrast": (
-        "Text has sufficient colour contrast",
+        "Text has sufficient color contrast",
         "Text must stand out from what is painted under it, at the published ratio.",
     ),
     "tagged_content": (

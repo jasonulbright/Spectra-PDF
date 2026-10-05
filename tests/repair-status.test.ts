@@ -13,6 +13,6 @@ describe('repairStatus', () => {
   it('reports the repaired issues when there were some', () => {
     const text = repairStatus({ ...base, issues_found: ['xref rebuilt', 'stream length'] });
     expect(text).toContain('Repaired');
-    expect(text).toContain('2 issue(s)');
+    expect(text).toContain('Issues addressed: 2.');
   });
 });

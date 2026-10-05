@@ -294,7 +294,7 @@ export const WORKBENCH_STRINGS = {
   'app.signedEdit.certifiedWarnAnnotate':
     'This document is certified, and only filling in its forms, signing it and commenting on it are allowed. This change goes further than that and will break the certification. Continue?',
   'app.signedEdit.certifiedWarnUnknown':
-    'This document is certified, but it states what may change in it in a way this version does not recognise. This change may break the certification. Continue?',
+    'This document is certified, but it states what may change in it in a way this version does not recognize. This change may break the certification. Continue?',
   'app.signedEdit.lockedTitle': 'Form fields are locked',
   'app.signedEdit.lockedRefused':
     'A signature on this document locks these form fields against further change: {{fields}}. Filling them would produce a file that reports as altered. Save a copy and fill that instead — the copy is no longer the signed document.',
@@ -411,13 +411,13 @@ export const WORKBENCH_STRINGS = {
   'app.preserve.certifiedAnnotate':
     'the document is certified to allow only form filling, signing and commenting',
   'app.preserve.certifiedUnknown':
-    'the document is certified in a way this version does not recognise',
+    'the document is certified in a way this version does not recognize',
   'app.preserve.unrecognized': '{{detail}}',
 
   // Exit was called off because a window did not answer. Fail-closed by
   // design: nothing closed, and the session record went back to following
   // the windows that are still standing.
-  'app.exit.abortedTitle': 'Exit cancelled',
+  'app.exit.abortedTitle': 'Exit canceled',
   'app.exit.aborted':
     'A window did not respond to the request to close, so nothing was closed. Try again, or close that window yourself first.',
 

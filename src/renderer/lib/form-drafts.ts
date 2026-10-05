@@ -5,6 +5,7 @@ import { readFormFields, type FormFieldValue, type FormReadResult } from './form
 import { resolveFillTargets } from './form-overlay';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome, tChromeCount } from '../i18n';
+import { errorText } from './error-text';
 
 type Values = Record<string, FormFieldValue>;
 export interface FormDraft {
@@ -74,7 +75,7 @@ export function createFormDrafts(readState: () => AppState) {
       for (const [name, value] of Object.entries(pending)) {
         if (!sameFormValue(value, form.fields.find(f => f.name === name)?.value)) d.pending[name] = value;
       }
-    } catch (e) { if (accepts()) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (accepts()) d.error = errorText(e); }
     finally { if (live(d) && d.loading === token) { d.loading = null; notify(); } }
   };
   const cancelLoad = (d: FormDraft) => { if (live(d) && d.loading) { d.loading = null; notify(); } };
@@ -98,7 +99,7 @@ export function createFormDrafts(readState: () => AppState) {
       if (!live(d) || d.values !== values || d.options !== options) return;
       d.form = null; d.buffer = null; d.needsRead = true; d.pending = empty(); d.values = empty();
       d.options = { flatten: false }; d.loading = null; d.blocked = false; d.error = ''; d.status = '';
-    } catch (e) { if (live(d)) d.error = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   const save = async (d: FormDraft, fill: FillFormValues) => {
@@ -121,7 +122,7 @@ export function createFormDrafts(readState: () => AppState) {
       if (d.options === options) d.options = { flatten: false };
       d.buffer = result.publication.buffer; d.needsRead = true;
       d.status = options.flatten ? tChrome('panel.forms.filledFlattened') : tChromeCount('panel.forms.filled', Object.keys(pending).length);
-    } catch (e) { if (live(d)) { d.error = e instanceof Error ? e.message : String(e); d.status = ''; } }
+    } catch (e) { if (live(d)) { d.error = errorText(e); d.status = ''; } }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   return { get, reconcile, dirty, conflict, editable, load, cancelLoad, setValue, setFlatten, reload, save,

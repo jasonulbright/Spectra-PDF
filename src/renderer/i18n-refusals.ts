@@ -68,7 +68,7 @@ export const REFUSAL_STRINGS = {
   'refusal.actionFile.placementsShape':
     'Step {{index}} ({{op}}): placements must be a list of {position, text}.',
   'refusal.actionFile.unknownParams':
-    'Step {{index}} ({{op}}): unknown parameter(s) [{{params}}].',
+    'Step {{index}} ({{op}}): parameters not recognized: {{params}}.',
   'refusal.actionFile.paramType':
     "Step {{index}} ({{op}}): parameter '{{param}}' must be text or a number.",
   'refusal.actionFile.invalidValue':
@@ -178,7 +178,7 @@ export const REFUSAL_STRINGS = {
   'refusal.scan.accessDenied':
     'This account is not allowed to use the scanner. Ask an administrator to grant scanner access.',
   'refusal.scan.busy': 'A scan is already running on this scanner.',
-  'refusal.scan.cancelledAtDevice': 'The scan was cancelled at the scanner.',
+  'refusal.scan.cancelledAtDevice': 'The scan was canceled at the scanner.',
   'refusal.scan.coverOpen': 'Close the scanner cover.',
   'refusal.emptyFolders.rootNotAbsolute':
     'Empty folders were not removed: the source folder is not a full path.',

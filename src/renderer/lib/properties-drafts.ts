@@ -8,6 +8,7 @@ import { localizeEngineMessage } from './engine-messages';
 import { DEFAULT_INITIAL_VIEW, initialViewChanges, VIEWER_ONLY_OPTIONS, type InitialView } from './initial-view';
 import { DEFAULT_ADVANCED, advancedChanges, type AdvancedProperties } from './doc-advanced';
 import { parseAdvancedReply, parseInitialViewReply, PropertiesReplyError } from './properties-reply-parsers';
+import { errorText } from './error-text';
 
 export interface PropertyMetadata { title: string; author: string; subject: string; keywords: string }
 export interface PropertyGroup<T extends object> {
@@ -103,14 +104,14 @@ export function createPropertiesDrafts(readState: () => AppState,
           if (owns()) accept(g, parse(raw));
         } catch (e) { if (owns()) {
           g.fresh = false;
-          g.error = e instanceof PropertiesReplyError ? incomplete().message : e instanceof Error ? e.message : String(e);
+          g.error = e instanceof PropertiesReplyError ? incomplete().message : errorText(e);
         } }
         if (owns()) notify();
       };
       await read(d.metadata, 'get_metadata', parsePropertyMetadata);
       await read(d.view, 'get_initial_view', parseInitialViewReply);
       await read(d.advanced, 'get_advanced_properties', parseAdvancedReply);
-    } catch (e) { if (live(d) && d.loading === token) d.status = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d) && d.loading === token) d.status = errorText(e); }
     finally { if (live(d) && d.loading === token) { d.loading = null; notify(); } }
   };
   const cancelLoad = (d: PropertiesDraft) => { if (live(d) && d.loading) { d.loading = null; notify(); } };
@@ -141,7 +142,7 @@ export function createPropertiesDrafts(readState: () => AppState,
       else d.advanced.baseline = submitted as AdvancedProperties;
       d.buffer = published.buffer; invalidateFacts(d);
       d.status = tChrome('dialog.props.saved');
-    } catch (e) { if (live(d)) d.status = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.status = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
     if (at(d)) await load(d, call, async () => {});
   };
@@ -173,7 +174,7 @@ export function createPropertiesDrafts(readState: () => AppState,
           || (reply as { output?: unknown }).output !== output) throw incomplete();
       // This is a separate output, not an edit to the open document/draft.
       if (live(d)) d.status = tChrome(strip ? 'dialog.props.stripped' : 'dialog.props.saved');
-    } catch (e) { if (live(d)) d.status = e instanceof Error ? e.message : String(e); }
+    } catch (e) { if (live(d)) d.status = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
   const reload = (d: PropertiesDraft) => {

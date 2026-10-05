@@ -1051,7 +1051,7 @@ def add_form_fields(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and adding form fields invalidates its "
-            "signatures -- the run must state that signed documents are "
+            "signatures — the run must state that signed documents are "
             "included before it will touch one"
         )
 
@@ -1124,7 +1124,7 @@ def author_vertical_field_font(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and setting a field's writing mode invalidates "
-            "its signatures -- the run must state that signed documents are "
+            "its signatures — the run must state that signed documents are "
             "included before it will touch one"
         )
 
@@ -1235,7 +1235,7 @@ def author_choice_appearance(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and redrawing an option list invalidates its "
-            "signatures -- the run must state that signed documents are "
+            "signatures — the run must state that signed documents are "
             "included before it will touch one"
         )
 
@@ -1394,7 +1394,7 @@ def set_field_lock(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and setting a field lock invalidates its "
-            "signatures -- the run must state that signed documents are "
+            "signatures — the run must state that signed documents are "
             "included before it will touch one"
         )
 
@@ -1463,7 +1463,7 @@ def set_field_description(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and setting a field description invalidates its "
-            "signatures -- the run must state that signed documents are "
+            "signatures — the run must state that signed documents are "
             "included before it will touch one"
         )
 
@@ -1539,7 +1539,7 @@ def set_field_actions(
     if decision["kind"] == "warn" and not allow_signed:
         raise RuntimeError(
             "this document is signed and setting a field action invalidates its "
-            "signatures -- the run must state that signed documents are "
+            "signatures — the run must state that signed documents are "
             "included before it will touch one"
         )
 

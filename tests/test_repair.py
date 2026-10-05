@@ -89,6 +89,18 @@ class TestRepair:
         with pytest.raises(FileNotFoundError):
             repair(file="/nonexistent/file.pdf", output=out)
 
+    def test_repair_refusal_names_no_path_and_no_library_text(self, not_a_pdf, tmp_dir):
+        out = os.path.join(tmp_dir, "out.pdf")
+        with pytest.raises(RuntimeError) as info:
+            repair(file=not_a_pdf, output=out)
+        message = str(info.value)
+        assert message == (
+            "The PDF is too damaged to repair. Try Rebuild, or Recover to "
+            "salvage the pages that can still be read."
+        )
+        assert info.value.__cause__ is not None
+        assert "not_a_pdf" not in message and "Tier" not in message
+
     def test_repair_in_place(self, tmp_pdf):
         """Repair with output == input (overwrite)."""
         result = repair(file=tmp_pdf, output=tmp_pdf)

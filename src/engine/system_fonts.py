@@ -89,7 +89,7 @@ def embedding_refusal(fs_type: int) -> str | None:
     foundry has said no to embedding at all, and the two cases where it has
     said yes only in a shape this engine does not produce."""
     if fs_type & _FS_RESTRICTED:
-        return "the font's licence does not permit embedding"
+        return "the font's license does not permit embedding"
     if fs_type & _FS_BITMAP_ONLY:
         return "the font permits embedding bitmaps only"
     if fs_type & _FS_NO_SUBSET:
