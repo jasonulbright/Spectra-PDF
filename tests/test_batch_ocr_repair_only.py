@@ -182,6 +182,21 @@ def test_in_place_repair_keeps_the_originals_dacl_entry_and_stream(tmp_path):
         assert stream.read() == b"stream kept"
 
 
+def test_unreadable_row_keeps_the_library_cause_apart_from_the_reason(tmp_path):
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "junk.pdf").write_bytes(b"not a pdf at all")
+    with pytest.raises(pikepdf.PdfError) as info:
+        pikepdf.open(src / "junk.pdf")
+    report = batch_ocr(str(src), str(tmp_path / "out"), log_dir=str(tmp_path / "logs"))
+    row = next(r for r in report["results"] if r["rel"] == "junk.pdf")
+    assert row["status"] == "skipped"
+    assert row["reason"] == "unreadable"
+    assert row["detail"] == str(info.value)
+    log = open(report["logPath"], encoding="utf-8").read()
+    assert f"junk.pdf — unreadable ({row['detail']})" in log
+
+
 def test_unreadable_classification_carries_no_path_or_library_text(tmp_path):
     source = tmp_path / "rubbish.pdf"
     source.write_bytes(b"not a pdf at all")
