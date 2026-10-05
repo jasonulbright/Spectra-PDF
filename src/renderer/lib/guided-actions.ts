@@ -488,9 +488,9 @@ export const STEP_CATALOG: readonly StepDef[] = [
         label: 'Scanned pages',
         kind: 'select',
         options: [
-          { value: 'auto', label: 'Recognise a page with nothing readable on it' },
-          { value: 'never', label: 'Never recognise — stay offline' },
-          { value: 'always', label: 'Recognise every page' },
+          { value: 'auto', label: 'Recognize a page with nothing readable on it' },
+          { value: 'never', label: 'Never recognize — stay offline' },
+          { value: 'always', label: 'Recognize every page' },
         ],
         defaultValue: 'auto',
       },
@@ -670,7 +670,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         label: 'Whiten the background',
         kind: 'select',
         options: [
-          { value: 'yes', label: 'Whiten a greyed background' },
+          { value: 'yes', label: 'Whiten a grayed background' },
           { value: 'no', label: 'Leave the background' },
         ],
         defaultValue: 'yes',
@@ -932,10 +932,10 @@ export const STEP_CATALOG: readonly StepDef[] = [
       { key: 'dpi', label: 'Resolution (dpi)', kind: 'number', defaultValue: 150, min: 18, max: 1200, step: 1 },
       {
         key: 'gray',
-        label: 'Colour',
+        label: 'Color',
         kind: 'select',
         options: [
-          { value: 'no', label: 'Colour' },
+          { value: 'no', label: 'Color' },
           { value: 'yes', label: 'Grayscale' },
         ],
         defaultValue: 'no',

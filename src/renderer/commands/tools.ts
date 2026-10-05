@@ -279,7 +279,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // Colour conversion moved here out of Optimize: converting a document to
     // CMYK is a press decision, not a file-size one, and it belongs beside
     // the tools that inspect the separations it produces.
-    description: 'Preview separations and ink coverage, manage inks, check print readiness, and convert colour.',
+    description: 'Preview separations and ink coverage, manage inks, check print readiness, and convert color.',
     ops: ['outputpreview', 'inkmanager', 'printermarks', 'hairlines', 'flattener',
       'trappresets', 'preflight', 'convert_cmyk'],
   },
