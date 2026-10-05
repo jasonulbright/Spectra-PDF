@@ -951,7 +951,7 @@ class TestSoftProofRefusals:
         tables, assumed, refusal = soft_proof.spot_tables(
             ["Grey Spot"], alternates, _bundled_path(DEFAULT_PRESS))
         assert refusal == ""
-        assert assumed == ["sRGB grey"]
+        assert assumed == ["sRGB gray"]
         ramp = tables["Grey Spot"]
         assert ramp.shape == (256, 4)
         # Tint 0 is paper and full tint is the darkest the press can lay down,

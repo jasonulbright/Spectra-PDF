@@ -406,7 +406,7 @@ pub fn root_decision() -> Result<&'static RootDecision, String> {
         );
         if let RootDecision::Fallback(root) = &decision {
             eprintln!(
-                "{} cannot be written; settings, records and the colour-profile answer are kept \
+                "{} cannot be written; settings, records and the color-profile answer are kept \
                  in the per-user folders instead.",
                 root.display()
             );
@@ -566,7 +566,7 @@ pub fn record_icc_assent_for(
 ) -> Result<(), String> {
     if container == Container::Installed {
         return Err(
-            "This copy was installed, so its colour-profile licence acceptance was recorded \
+            "This copy was installed, so its color-profile license acceptance was recorded \
              by the installer and cannot be changed here."
                 .to_string(),
         );
@@ -575,7 +575,7 @@ pub fn record_icc_assent_for(
         let root = beside.parent().map(Path::to_path_buf).unwrap_or_default();
         return write_answer_in(&root, accepted).map(|_| ()).map_err(|_| {
             format!(
-                "The colour-profile answer is recorded in {}, which cannot be written, so it \
+                "The color-profile answer is recorded in {}, which cannot be written, so it \
                  cannot be changed here.",
                 beside.display()
             )
@@ -1000,7 +1000,7 @@ pub fn read_icc_license(icc_dir: &Path) -> Result<String, String> {
     read_utf8_limited(&path, MAX_ICC_LICENSE_BYTES)
         .map_err(|e| {
             format!(
-                "Cannot read the colour-profile licence at {}: {}",
+                "Cannot read the color-profile license at {}: {}",
                 path.display(),
                 e
             )

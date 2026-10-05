@@ -20,7 +20,7 @@ Please include, as far as you can:
   bug is the most useful thing you can send,
 - whether the issue needs user interaction (opening a file) or not.
 
-You will get an acknowledgement within about a week. This is a
+You will get an acknowledgment within about a week. This is a
 single-maintainer project, so please be patient with fix timelines; a fix will
 ship in the next release, and the advisory will credit you unless you'd rather
 it didn't.

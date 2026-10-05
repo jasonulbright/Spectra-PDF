@@ -583,7 +583,7 @@ pub async fn pick_icc_file(
         .dialog()
         .file()
         .set_parent(&window)
-        .add_filter("ICC colour profile", &["icc", "icm"])
+        .add_filter("ICC color profile", &["icc", "icm"])
         .add_filter("All files", &["*"])
         .blocking_pick_file();
     match result {
