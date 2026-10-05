@@ -162,6 +162,11 @@ describe('shortcutForCommand', () => {
     expect(shortcutForCommand('window.nextTab')).toBe('Ctrl+Tab');
   });
 
+  it('writes a function key in capitals, as the key cap reads', () => {
+    expect(shortcutForCommand('view.presentation')).toBe('F5');
+    expect(shortcutForCommand('view.toolsPane')).toBe('Shift+F4');
+  });
+
   it('returns null for an unbound command', () => {
     expect(shortcutForCommand('help.about')).toBeNull();
     expect(shortcutForCommand('tools.panel.compress' as CommandId)).toBeNull();

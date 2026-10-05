@@ -8,7 +8,7 @@ import { getSettings } from '../lib/app-settings';
 import { gsPathIfAvailable } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from './GsRequiredNotice';
-import { tChrome, tChromeCount } from '../i18n';
+import { formattingLocale, tChrome, tChromeCount } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerFolderPreflight } from '../testHarness';
 import {
   DEFAULT_PROFILE_ID,
@@ -52,6 +52,14 @@ import { claimOutputRoots, writtenRoots } from '../lib/output-root-claim';
 //
 // Check mode writes nothing to any source. Fix mode writes to a MIRROR, or —
 // only when the run says so — replaces the originals it processed.
+
+/** The repairs a file received, by their localized names in the locale's own list
+ * pattern. A sweep reports fixup ids, which are engine identifiers. */
+export function appliedFixupNames(ids: readonly string[], lng?: string): string {
+  const names = ids.map((id) =>
+    tChrome(`panel.preflight.fixup.${id}` as Parameters<typeof tChrome>[0], undefined, lng));
+  return new Intl.ListFormat(formattingLocale(lng), { style: 'long', type: 'conjunction' }).format(names);
+}
 
 type Phase = 'setup' | 'running' | 'done';
 
@@ -608,7 +616,7 @@ export function FolderPreflightDialog({
                   })}
                   {(r.applied?.length ?? 0) > 0 &&
                     tChrome('dialog.preflightSweep.rowFixed', {
-                      fixups: (r.applied ?? []).join(', '),
+                      fixups: appliedFixupNames(r.applied ?? []),
                     })}
                 </div>
               ))}

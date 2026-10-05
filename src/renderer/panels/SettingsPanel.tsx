@@ -392,7 +392,9 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   useTranslation();
   const [category, setCategory] = useState<PrefCategory>(initialCategory);
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [status, setStatus] = useState('');
+  // The KEY, translated at render: a stored string would keep the language
+  // that was current when it was set, after the Language select changes it.
+  const [status, setStatus] = useState<PanelKey | null>(null);
   const [startWithWindows, setStartWithWindows] = useState(false);
   const forcedColors = useForcedColors();
 
@@ -411,7 +413,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       return next;
     });
     if (key === 'theme') applyTheme(value as string);
-    setStatus(tChrome('panel.settings.saved'));
+    setStatus('panel.settings.saved');
   }, []);
 
   return (
@@ -764,7 +766,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             const next = !startWithWindows;
             setStartWithWindows(next);
             app.setStartupEnabled(next, next ? settings.startMinimized : false).catch(() => {});
-            setStatus(tChrome('panel.settings.saved'));
+            setStatus('panel.settings.saved');
           }}
           className="rounded bg-neutral-800 border-neutral-700"
         />
@@ -857,8 +859,8 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             className="text-xs px-2 py-1 rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
             onClick={() => {
               app.openThirdPartyLicenses('THIRD-PARTY-LICENSES.md')
-                .then(() => setStatus(tChrome('panel.settings.openedLicenses')))
-                .catch(() => setStatus(tChrome('panel.settings.openLicensesFailed')));
+                .then(() => setStatus('panel.settings.openedLicenses'))
+                .catch(() => setStatus('panel.settings.openLicensesFailed'));
             }}
           >
             {tChrome('panel.settings.openLicenses')}
@@ -868,8 +870,8 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             className="text-xs px-2 py-1 rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800"
             onClick={() => {
               app.openThirdPartyLicenses('THIRD-PARTY-LICENSES-RUST.html')
-                .then(() => setStatus(tChrome('panel.settings.openedRust')))
-                .catch(() => setStatus(tChrome('panel.settings.openLicensesFailed')));
+                .then(() => setStatus('panel.settings.openedRust'))
+                .catch(() => setStatus('panel.settings.openLicensesFailed'));
             }}
           >
             {tChrome('panel.settings.rustNotices')}
@@ -879,7 +881,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       </>
       )}
 
-      <StatusBar message={status} />
+      <StatusBar message={status ? tChrome(status) : ''} />
       </div>
     </div>
   );
