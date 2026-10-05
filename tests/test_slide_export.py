@@ -198,7 +198,7 @@ def test_a_deck_with_no_slides_is_refused_and_nothing_survives(tmp_dir, gs_path,
     src = _write(os.path.join(tmp_dir, "s.pdf"), [_text_page(1), _text_page(2)])
     out = os.path.join(tmp_dir, "s.pptx")
     monkeypatch.setattr(se, "_count_slides", lambda _package: 0)
-    with pytest.raises(RuntimeError, match="0 slide"):
+    with pytest.raises(RuntimeError, match="slides written: 0"):
         export_document(src, out, "pptx", gs_path=gs_path)
     assert not os.path.exists(out)
 
