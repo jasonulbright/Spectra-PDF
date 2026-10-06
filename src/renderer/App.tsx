@@ -3,8 +3,8 @@ import { AppStateProvider, useAppState, useAppDispatch, useReadAppState, useSubs
 import { restoreHistory } from './lib/disk-history';
 import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
-import { hasWorkspacePublication, serializeWorkspacePublication } from './lib/workspace-publication';
-import { withFileLock } from './lib/engine-lock';
+import { hasWorkspacePublication } from './lib/workspace-publication';
+import { runPageCommit } from './lib/page-commit-run';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
@@ -875,67 +875,59 @@ function AppContent(): React.ReactElement {
     if (inflightCommit.current) return inflightCommit.current.then(() => commitRef.current());
     if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()
         && workspaceSettled(readState())) return Promise.resolve();
-    const run = serializeWorkspacePublication(async () => {
+    const run = (async () => {
       try {
-        await recoverPendingPageCommit();
         // A plan read from superseded documents writes superseded pages; the
         // pending reindex also replays the edits this commit is about to take.
-        // A file may publish while we wait for the lock. Re-plan the gate
-        // against the settled revision; callers fence their own edit intent.
-        let outcome: { signatureRefusals: PreserveRefusal[] } | null = null;
-        for (let attempt = 0; attempt < 3 && outcome === null; attempt++) {
-          await awaitSettledWorkspace(readState, subscribeState);
-          const expected = readState();
-          outcome = await withFileLock(Array.from(expected.files.values(), f => f.workingPath), async () => {
-            const state = readState();
-            if (state.files !== expected.files || state.pageDirtyPaths !== expected.pageDirtyPaths
-                || state.pageUndoStack !== expected.pageUndoStack || state.pageRedoStack !== expected.pageRedoStack) {
-              return null;
-            }
-            if (!state.pageDirtyPaths.length) return { signatureRefusals: [] };
-            return commitPageEdits({
-              workspace: state.workspace,
-              files: state.files,
-              dirtyPaths: state.pageDirtyPaths,
-              tier: {
-                planned: { pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack },
-                current: readState,
-              },
-              dispatch,
-              transaction: pageCommit,
-              writeBuffer: file.writeBuffer,
-              remove: file.remove,
-              // callRaw, deliberately — this runs INSIDE the commit, so
-              // the gated `call` would re-enter commitPageEdits (loud throw).
-              // The gate's guarantee ("engine reads bytes matching what the
-              // user sees") holds by construction here: we ARE the commit,
-              // reading the working copy plus the temp this very run staged.
-              // The engine's OUTCOME travels, not a boolean: `applied: false`
-              // covers an unsigned file and a refused append equally, and the
-              // reason is the only thing that separates the standing behaviour
-              // from a signature the user just lost.
-              preserveSignatures: async (workingPath, stagedPath) => {
-                const r = (await callRaw('transplant_incremental', {
-                  original: workingPath,
-                  modified: stagedPath,
-                  output: stagedPath,
-                })) as unknown as PreserveOutcome;
-                return r; // the commit boundary validates the actual wire types
-              },
-              readBack: batch.readFileBuffer,
-              // A user-opened file's build and landing (lib/sealed-edit.ts);
-              // callRaw for the same re-entry reason as above.
-              sealed: callRaw,
-            });
-          });
-        }
+        // The plan is made from the settled revision, inside the lane, with
+        // every dirty working path locked; callers fence their own edit intent.
+        const outcome = await runPageCommit<{ signatureRefusals: PreserveRefusal[] }>({
+          read: readState,
+          recover: recoverPendingPageCommit,
+          settle: () => awaitSettledWorkspace(readState, subscribeState),
+          clean: { signatureRefusals: [] },
+          commit: state => commitPageEdits({
+            workspace: state.workspace,
+            files: state.files,
+            dirtyPaths: state.pageDirtyPaths,
+            tier: {
+              planned: { pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack },
+              current: readState,
+            },
+            dispatch,
+            transaction: pageCommit,
+            writeBuffer: file.writeBuffer,
+            remove: file.remove,
+            // callRaw, deliberately — this runs INSIDE the commit, so
+            // the gated `call` would re-enter commitPageEdits (loud throw).
+            // The gate's guarantee ("engine reads bytes matching what the
+            // user sees") holds by construction here: we ARE the commit,
+            // reading the working copy plus the temp this very run staged.
+            // The engine's OUTCOME travels, not a boolean: `applied: false`
+            // covers an unsigned file and a refused append equally, and the
+            // reason is the only thing that separates the standing behaviour
+            // from a signature the user just lost.
+            preserveSignatures: async (workingPath, stagedPath) => {
+              const r = (await callRaw('transplant_incremental', {
+                original: workingPath,
+                modified: stagedPath,
+                output: stagedPath,
+              })) as unknown as PreserveOutcome;
+              return r; // the commit boundary validates the actual wire types
+            },
+            readBack: batch.readFileBuffer,
+            // A user-opened file's build and landing (lib/sealed-edit.ts);
+            // callRaw for the same re-entry reason as above.
+            sealed: callRaw,
+          }),
+        });
         if (!outcome) throw new Error(tChrome('app.history.changed'));
         setCommitError(null);
-        reportPreserveRefusals(outcome.signatureRefusals);
+        reportPreserveRefusals(outcome.value.signatureRefusals);
       } finally {
         inflightCommit.current = null;
       }
-    });
+    })();
     inflightCommit.current = run;
     return run;
   }, [

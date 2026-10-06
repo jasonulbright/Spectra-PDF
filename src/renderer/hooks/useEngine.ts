@@ -259,11 +259,11 @@ export function useEngine() {
         // The gate runs OUTSIDE the lock, deliberately — it writes files
         // itself, so gating from inside would have this operation wait on a
         // commit that is waiting on this operation. Once the gate is clear,
-        // the call serializes against any other operation naming the same
-        // file: two whole-file rewrites of one path each write a temp and
-        // rename, so without this the later rename silently wins and the
-        // earlier operation's work is gone with no error anywhere.
-        return (await withFileLock(lockKeysFor(params), () => {
+        // the call takes the per-method locks of its paths: a path it writes
+        // exclusively, a path it only reads shared. Two whole-file rewrites
+        // of one path each write a temp and rename, so without the exclusive
+        // lock the later rename silently wins and the earlier work is lost.
+        return (await withFileLock(lockKeysFor(method, params), () => {
           options?.assertCurrent?.();
           return track(method, params, async () => {
             options?.assertCurrent?.();
@@ -275,9 +275,10 @@ export function useEngine() {
       }
     }
     // Read-only is not handle-free: qpdf can hold the working file while an
-    // index is built. Serialize these readers with Undo/Save/publication too,
-    // without running the commit gate or creating an operation-queue entry.
-    return withFileLock(lockKeysFor(params), () => {
+    // index is built. These readers hold their paths shared, so they run
+    // together and still exclude Undo/Save/publication, without running the
+    // commit gate or creating an operation-queue entry.
+    return withFileLock(lockKeysFor(method, params), () => {
       options?.assertCurrent?.();
       return rawCall(method, params);
     });

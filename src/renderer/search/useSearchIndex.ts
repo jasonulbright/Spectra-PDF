@@ -47,16 +47,16 @@ export function useSearchIndex(
   // recognizer, shared with the CLI and every scheduled run. Behind a ref so
   // the engine is constructed once while still calling the current bridge.
   //
-  // `callRaw`, not `call`: the retired WASM recognizer rasterised the in-memory
-  // buffer and ran no commit gate, and the working copy's bytes equal that
-  // buffer until a commit. Gating here would side-effect-commit the user's
-  // pending page edits during a BACKGROUND index.
-  const { callRaw } = useEngine();
+  // `recognize` is an internal method: `call` runs no commit gate for it, which
+  // would side-effect-commit the user's pending page edits during a BACKGROUND
+  // index, and takes only a shared lock on the working copy, so a publication
+  // of that copy waits for the read and the read waits for the publication.
+  const { call } = useEngine();
   const recognizeRef = useRef<
     (path: string, pageIndex: number, lang: string) => Promise<{ text: string; words: OcrWord[] }>
   >(null!);
   recognizeRef.current = (path, pageIndex, lang) =>
-    recognizePage(callRaw, path, pageIndex, lang);
+    recognizePage(call, path, pageIndex, lang);
 
   const engineRef = useRef<SearchEngine | null>(null);
   if (!engineRef.current) {

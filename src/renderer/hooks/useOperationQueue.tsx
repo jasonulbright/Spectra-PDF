@@ -374,9 +374,10 @@ const INTERNAL_METHODS = new Set([
   // on every ink checkbox.
   'composite_separations',
   ...DOCUMENTLESS_METHODS,
-  // Reads issued only through `callRaw` on paths outside the workspace or on
-  // scratch extracts (folder listings, cross-file search, OCR of a page
-  // raster, the print preview of already-committed bytes).
+  // Reads of paths outside the workspace or of scratch extracts (folder
+  // listings, cross-file search, OCR of a page raster), and background or
+  // preview reads of a working copy whose caller gated on its own terms (OCR
+  // for find, the print preview of bytes gated when the dialog opened).
   'list_source_folders',
   'search_in_files',
   'recognize',
