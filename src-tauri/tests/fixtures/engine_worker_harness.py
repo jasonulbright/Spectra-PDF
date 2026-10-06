@@ -1,10 +1,18 @@
-"""The real engine with two extra methods, for tests/engine_workers.rs.
+"""The real engine with extra methods, for tests/engine_workers.rs.
 
-argv[1] is the directory that holds the `engine` package. `test_sleep` runs
-for the requested seconds unless cancelled; `test_pid` answers the process
-id; `test_identity` writes a self-signed certificate and its PKCS#12 bundle
+argv[1] is the directory that holds the `engine` package; arguments after it
+(the process role and window) are ignored. `test_sleep` runs for the
+requested seconds unless cancelled; `test_pid` answers the process id;
+`test_identity` writes a self-signed certificate and its PKCS#12 bundle
 (password "test-pass") into a folder. Nothing in the shipped engine
-registers any of them."""
+registers any of them.
+
+`distill` (a job method) and `create_pdf_folders` (a run method) are
+replaced by one gated handler: it waits until the file named by `gate`
+exists, or returns early when its request is cancelled, and answers its
+process id, whether it was cancelled, and the log of every request this
+process served before it as `[method, succeeded]` pairs. The harness
+registers last, so these replace the shipped handlers."""
 
 import os
 import sys
@@ -16,6 +24,8 @@ sys.path.insert(0, sys.argv[1])
 from engine import ipc  # noqa: E402
 
 _run = ipc.JsonRpcServer.run
+_handle = ipc.JsonRpcServer._handle
+_served: list = []
 
 
 def _sleep(seconds: float) -> dict:
@@ -24,6 +34,18 @@ def _sleep(seconds: float) -> dict:
         ipc.raise_if_cancelled()
         time.sleep(0.02)
     return {"slept": seconds}
+
+
+def _gated(gate: str, **_ignored) -> dict:
+    while True:
+        if ipc.cancelled():
+            cancelled = True
+            break
+        if os.path.exists(gate):
+            cancelled = False
+            break
+        time.sleep(0.02)
+    return {"pid": os.getpid(), "cancelled": cancelled, "log": list(_served)}
 
 
 def _identity(folder: str) -> dict:
@@ -66,14 +88,24 @@ def _identity(folder: str) -> dict:
     return {"cert": cert_path, "pfx": pfx_path}
 
 
+def _logged_handle(self, request):
+    response = _handle(self, request)
+    method = request.get("method") if isinstance(request, dict) else None
+    _served.append([method, response is None or "error" not in response])
+    return response
+
+
 def _run_with_test_methods(self, *args, **kwargs):
     self.register("test_sleep", _sleep)
     self.register("test_pid", os.getpid)
     self.register("test_identity", _identity)
+    self.register("distill", _gated)
+    self.register("create_pdf_folders", _gated)
     return _run(self, *args, **kwargs)
 
 
 ipc.JsonRpcServer.run = _run_with_test_methods
+ipc.JsonRpcServer._handle = _logged_handle
 
 from engine.__main__ import main  # noqa: E402
 

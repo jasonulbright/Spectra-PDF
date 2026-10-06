@@ -285,6 +285,14 @@ impl WorkerChild {
         self.job.kill()
     }
 
+    /// Close the worker's stdin and keep only its binding, which kills its
+    /// group when dropped.
+    pub fn into_job(self) -> ProcessJob {
+        let WorkerChild { stdin, job, .. } = self;
+        drop(stdin);
+        job
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
     }

@@ -1,8 +1,9 @@
 //! The HEALTH worker: a second Python sidecar that only ever inspects.
 //!
-//! The interactive sidecar is one strictly serial process with no cancel, so
-//! anything handed to it runs to completion and everything queued behind it
-//! waits. A health inspection is unbounded work over a document nobody asked
+//! Each interactive engine process serves one request at a time and stops a
+//! request only at that handler's own safe points, so a request handed to it
+//! can run long and everything queued behind it in that process waits. A
+//! health inspection is unbounded work over a document nobody asked
 //! about — a hostile file can make one page's resource graph cost minutes —
 //! and a bound negotiated inside the Python process cannot cover the part of
 //! the cost that happens before Python gets a chance to check it (the open and
@@ -488,6 +489,7 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
         .shell()
         .command(&python_path)
         .args(crate::engine::python_args(&script_path))
+        .args(crate::engine::role_args("health", None))
         .envs(
             crate::engine::python_env()
                 .into_iter()
@@ -499,18 +501,17 @@ async fn start_locked<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
         .spawn()
         .map_err(|e| format!("Failed to start health worker: {}", e))?;
     // The memory ceiling is set before exec, so no allocation precedes it.
-    // `RLIMIT_DATA` counts every private mapping, and OpenBLAS maps a buffer
-    // per worker thread when numpy loads: with one thread per core the
-    // import alone exceeds the ceiling and the worker dies before its first
-    // answer. One BLAS thread keeps the import inside it.
+    // `RLIMIT_DATA` counts every private mapping, so the import fits under it
+    // only with the one BLAS thread `python_env` sets.
     #[cfg(target_os = "linux")]
     let (mut rx, child) = crate::process_job::spawn_worker(
         &python_path,
-        &crate::engine::python_args(&script_path),
-        crate::engine::python_env()
-            .into_iter()
-            .chain([("OPENBLAS_NUM_THREADS".to_string(), "1".to_string())])
-            .collect(),
+        &[
+            crate::engine::python_args(&script_path),
+            crate::engine::role_args("health", None),
+        ]
+        .concat(),
+        crate::engine::python_env(),
         crate::process_job::Binding {
             lease_channel: false,
             memory_limit: Some(HEALTH_MEMORY_LIMIT as u64),
