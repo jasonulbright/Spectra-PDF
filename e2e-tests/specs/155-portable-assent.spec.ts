@@ -17,6 +17,7 @@ import {
   waitForDisplayedSelector,
   waitForHarness,
 } from '../support/harness.js';
+import { onlyEngineProcess, processAlive } from '../support/engine-processes.js';
 
 // The PORTABLE container: the colour-profile licence presented in-app,
 // and the app's data living beside the executable on Windows (in the per-user
@@ -59,6 +60,17 @@ const PREPRESS_NOTICE = '[data-testid="prepress-icc"]';
 const OUTPUT_PREVIEW_NOTICE = '[data-testid="output-preview-icc"]';
 
 let SCRATCH = '';
+
+/** The cheapest call the job process serves: `print_preview_cleanup` of a
+ * folder that is not a preview removes nothing. */
+async function jobCall(id: number): Promise<string> {
+  return await browser.executeAsync<string, [number]>(function (requestId, done) {
+    (window as any).__SPECTRA_TEST__
+      .engineRequestWithId('print_preview_cleanup', { directory: 'C:\\not-a-preview' }, requestId)
+      .then(() => done('ok'))
+      .catch((e: unknown) => done(String(e)));
+  }, id);
+}
 
 function roamingListing(): string[] {
   try {
@@ -183,6 +195,11 @@ describe('the portable container: colour-profile assent and data beside the app'
   });
 
   it('Review re-opens the licence, and accepting lights the surfaces up with no restart', async () => {
+    // The window's job process read the answer at its spawn too: the
+    // recorded answer replaces it, and the next job call starts a new one.
+    expect(await jobCall(5151)).toBe('ok');
+    const jobBefore = onlyEngineProcess('job', 'main');
+
     await openPrepress();
     await waitForDisplayedSelector(REVIEW, { timeout: 20_000 });
     await $(REVIEW).click();
@@ -190,6 +207,13 @@ describe('the portable container: colour-profile assent and data beside the app'
     await browser.waitUntil(async () => $(ACCEPT).isEnabled(), { timeout: 30_000 });
     await $(ACCEPT).click();
     await waitForDisplayedSelector(DIALOG, { reverse: true, timeout: 30_000 });
+
+    await browser.waitUntil(async () => !processAlive(jobBefore), {
+      timeout: 30_000,
+      timeoutMsg: 'the assent restart left the job process running',
+    });
+    expect(await jobCall(5152)).toBe('ok');
+    expect(onlyEngineProcess('job', 'main')).not.toBe(jobBefore);
 
     // Same session, same window, nothing reloaded — the claim that makes a
     // recorded decline liveable rather than a launch-time trap.
