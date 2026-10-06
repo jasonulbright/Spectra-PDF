@@ -21,7 +21,6 @@ from gs is not proof of a well-formed PDF.
 """
 
 import os
-import tempfile
 from pathlib import Path
 
 import pikepdf
@@ -29,7 +28,7 @@ from engine.credentials import open_pdf
 
 from engine import budget
 from engine.acroform import adopt_orphan_widget_fields
-from engine.inplace import finish_staged, staged_write_if
+from engine.inplace import finish_staged, scratch_path, staged_write_if
 from engine.pdf_save import save_pdf
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
@@ -173,8 +172,11 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
     gs_input = input_path
     stripped_tmp: str | None = None
     if payload_start:
-        fd, stripped_tmp = tempfile.mkstemp(suffix=".ps", dir=str(output_path.parent))
-        with os.fdopen(fd, "wb") as dst, open(input_path, "rb") as src:
+        # A stage-pattern name carries this process's id, so a copy a kill
+        # leaves behind is removed by the next staged write into the folder
+        # and skipped by every folder walker.
+        stripped_tmp = str(scratch_path(output_path.parent, "pjl"))
+        with open(stripped_tmp, "xb") as dst, open(input_path, "rb") as src:
             src.seek(payload_start)
             while True:
                 chunk = src.read(1 << 20)
@@ -219,10 +221,7 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
                 if pages > 0:
                     adopted = adopt_orphan_widget_fields(pdf)
                     if adopted:
-                        fd, adopted_tmp = tempfile.mkstemp(
-                            suffix=".pdf", dir=str(output_path.parent)
-                        )
-                        os.close(fd)
+                        adopted_tmp = str(scratch_path(output_path.parent, "adopt"))
                         save_pdf(pdf, adopted_tmp)
             # The replace happens after the reading handle closes — Windows
             # refuses to replace a file the process still holds open.

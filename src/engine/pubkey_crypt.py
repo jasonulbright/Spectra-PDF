@@ -292,13 +292,15 @@ def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
     restrict_to_owner(os.path.dirname(os.path.abspath(path)))
     with staged_write(Path(_sealed_original(path))) as staged:
         shutil.copyfile(path, staged)
-    register_recipient(path, permissions, flags.as_sint32() if flags is not None else -1, handler)
+    p = flags.as_sint32() if flags is not None else -1
+    register_recipient(path, permissions, p, handler)
     writer = copy_into_new_writer(reader)
     _staged_write(writer, Path(path))
     return {
         "encrypted": True,
         "opener": "recipient",
         "permissions": permissions,
+        "p": p,
         "recipient": _recipient_identity(credential),
     }
 
@@ -315,13 +317,13 @@ def pubkey_reattach(path: str, source: str = "", pfx: str = "", password: str = 
     reader, result, credential = _authenticate(source, pfx, password)
     flags = result.permission_flags
     permissions = recipient_permissions(flags)
-    register_recipient(
-        path, permissions, flags.as_sint32() if flags is not None else -1, reader.security_handler
-    )
+    p = flags.as_sint32() if flags is not None else -1
+    register_recipient(path, permissions, p, reader.security_handler)
     return {
         "encrypted": True,
         "opener": "recipient",
         "permissions": permissions,
+        "p": p,
         "recipient": _recipient_identity(credential),
     }
 

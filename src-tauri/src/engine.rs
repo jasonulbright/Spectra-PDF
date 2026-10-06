@@ -32,7 +32,8 @@ pub enum ProcessClass {
 ///
 /// Rule for a new method: `Job` when the renderer issues it per page, per
 /// document, per preview or per query and one call runs an external program
-/// or scales with every page; `Run` when one call covers a folder or one
+/// (Ghostscript, Tesseract, LibreOffice) or reads a list of files; `Run`
+/// when one call covers a folder or one
 /// indivisible external run the user starts as a separate action; `Window`
 /// otherwise. Methods that share process state take one class:
 /// `split_plan`/`split`, `list_csc_credentials`/`sign_pdf`,
@@ -91,7 +92,7 @@ pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("list_comments", ProcessClass::Window),
     ("summarize_comments", ProcessClass::Window),
     ("delete_all_annotations", ProcessClass::Window),
-    ("preflight", ProcessClass::Window),
+    ("preflight", ProcessClass::Job),
     ("list_preflight_profiles", ProcessClass::Window),
     ("validate_preflight_profile", ProcessClass::Window),
     ("apply_preflight_fixups", ProcessClass::Job),
@@ -548,10 +549,12 @@ type Secret = zeroize::Zeroizing<String>;
 #[derive(Clone, PartialEq, Eq)]
 enum Registration {
     /// `open_document` with the user password of a still-encrypted copy.
-    Password { path: String, password: Secret },
+    /// `grants` is what the open answered (`permissions`, `revision`, `p`),
+    /// which another process is given without opening the file.
+    Password { path: String, password: Secret, grants: Option<serde_json::Value> },
     /// `open_pubkey_document` or `pubkey_reattach`: the certificate that
     /// authenticates to the recipient lists again.
-    Recipient { path: String, pfx: String, password: Secret },
+    Recipient { path: String, pfx: String, password: Secret, grants: Option<serde_json::Value> },
     /// `share_document`: a byte copy that opens with `path`'s credential.
     Alias { path: String, alias: String },
     /// `close_document`: applied when answered, whatever the answer.
@@ -605,6 +608,17 @@ fn opener_of(result: Option<&serde_json::Value>) -> Option<&str> {
     result.and_then(|r| r.get("opener")).and_then(|o| o.as_str())
 }
 
+/// The grants an open answered, as a held credential carries them.
+fn grants_of(result: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+    let result = result?;
+    let permissions = result.get("permissions").filter(|p| p.is_object())?;
+    Some(serde_json::json!({
+        "permissions": permissions,
+        "revision": result.get("revision").cloned().unwrap_or(serde_json::Value::Null),
+        "p": result.get("p").cloned().unwrap_or(serde_json::Value::Null),
+    }))
+}
+
 impl CredentialLedger {
     /// The registration `request` makes when it succeeds, if any.
     fn registration_of(request: &serde_json::Value) -> Option<Registration> {
@@ -613,12 +627,13 @@ impl CredentialLedger {
         let path = param_str(params, "path")?;
         match method {
             "open_document" | "open_document_attempt" => {
-                Some(Registration::Password { path, password: param_secret(params, "password") })
+                Some(Registration::Password { path, password: param_secret(params, "password"), grants: None })
             }
             "open_pubkey_document" | "pubkey_reattach" => Some(Registration::Recipient {
                 path,
                 pfx: param_str(params, "pfx")?,
                 password: param_secret(params, "password"),
+                grants: None,
             }),
             "share_document" => Some(Registration::Alias { path, alias: param_str(params, "alias")? }),
             "close_document" => Some(Registration::Close { path }),
@@ -645,7 +660,7 @@ impl CredentialLedger {
                 self.close(&path);
                 return true;
             }
-            Registration::Password { path, password } => {
+            Registration::Password { path, password, .. } => {
                 let Some(result) = result else { return false };
                 // `open_document_attempt` wraps the reply; a wrong password
                 // leaves the record as it was.
@@ -656,13 +671,13 @@ impl CredentialLedger {
                 };
                 self.forget_opener(&path);
                 if opener_of(document) == Some("user") {
-                    self.hold(Registration::Password { path, password });
+                    self.hold(Registration::Password { path, password, grants: grants_of(document) });
                 }
             }
-            Registration::Recipient { path, pfx, password } => {
+            Registration::Recipient { path, pfx, password, .. } => {
                 if opener_of(result) == Some("recipient") {
                     self.forget_opener(&path);
-                    self.hold(Registration::Recipient { path, pfx, password });
+                    self.hold(Registration::Recipient { path, pfx, password, grants: grants_of(result) });
                 }
             }
             Registration::Alias { path, alias } => {
@@ -755,7 +770,7 @@ impl CredentialLedger {
         let ordered: Vec<Registration> = openers.chain(aliases).map(|(_, held)| held.clone()).collect();
         let mut frames = Vec::new();
         for (n, held) in ordered.into_iter().enumerate() {
-            let Some((method, params)) = held.frame() else { continue };
+            let Some((method, params)) = held.replay_frame() else { continue };
             let id = replay_id(generation, n as u64);
             frames.push(credential_frame(&id, method, params));
             self.replaying.insert(id, held);
@@ -765,16 +780,44 @@ impl CredentialLedger {
 }
 
 impl Registration {
-    /// The read-only frame that gives a process this record: an opener's own
-    /// open, never the window's original call. `None` for a close.
-    fn frame(&self) -> Option<(&'static str, serde_json::Value)> {
+    /// The frame that gives a replacement window process this record: it
+    /// opens the document again, as the window's own open did. `None` for a
+    /// close.
+    fn replay_frame(&self) -> Option<(&'static str, serde_json::Value)> {
         Some(match self {
-            Registration::Password { path, password } => {
+            Registration::Password { path, password, .. } => {
                 ("open_document", serde_json::json!({ "path": path, "password": password.as_str() }))
             }
-            Registration::Recipient { path, pfx, password } => (
+            Registration::Recipient { path, pfx, password, .. } => (
                 "pubkey_reattach",
                 serde_json::json!({ "path": path, "source": "", "pfx": pfx, "password": password.as_str() }),
+            ),
+            Registration::Alias { path, alias } => ("share_document", serde_json::json!({ "path": path, "alias": alias })),
+            Registration::Close { .. } => return None,
+        })
+    }
+
+    /// The frame that gives a job or run process this record. An opener is
+    /// registered from the grants the window's open answered (`open_document`
+    /// with `held`), so the process neither opens nor writes the working copy,
+    /// its sealed original or its folder marker: another request of the
+    /// window may be replacing those files under renderer locks this frame
+    /// does not take. `None` for a close, and for an opener whose open
+    /// answered no grants.
+    fn held_frame(&self) -> Option<(&'static str, serde_json::Value)> {
+        let held = |opener: &str, grants: &serde_json::Value| {
+            let mut held = grants.clone();
+            held["opener"] = serde_json::Value::from(opener);
+            held
+        };
+        Some(match self {
+            Registration::Password { path, password, grants } => (
+                "open_document",
+                serde_json::json!({ "path": path, "password": password.as_str(), "held": held("user", grants.as_ref()?) }),
+            ),
+            Registration::Recipient { path, grants, .. } => (
+                "open_document",
+                serde_json::json!({ "path": path, "password": "", "held": held("recipient", grants.as_ref()?) }),
             ),
             Registration::Alias { path, alias } => ("share_document", serde_json::json!({ "path": path, "alias": alias })),
             Registration::Close { .. } => return None,
@@ -809,10 +852,9 @@ pub(crate) struct Given {
     generation: u64,
     /// Records the process was sent, by the ledger serial.
     sent: Vec<(u64, Registration)>,
-    /// Frames not yet answered, by id.
+    /// Frames not yet answered, by id. A refused record stays in `sent`, so
+    /// this generation is not sent it again.
     awaiting: HashMap<String, Registration>,
-    /// Paths whose frame this generation refused. Not retried in it.
-    refused: Vec<String>,
     frames: u64,
 }
 
@@ -877,7 +919,7 @@ impl Given {
         let openers = missing.iter().filter(|(_, record)| !record.is_alias());
         let aliases = missing.iter().filter(|(_, record)| record.is_alias());
         for (serial, record) in openers.chain(aliases) {
-            let Some((method, params)) = record.frame() else { continue };
+            let Some((method, params)) = record.held_frame() else { continue };
             let id = self.next_id();
             frames.push(credential_frame(&id, method, params));
             self.awaiting.insert(id, record.clone());
@@ -905,9 +947,7 @@ impl Given {
         if !refused {
             return None;
         }
-        let path = record.closing_path().to_string();
-        self.refused.push(path.clone());
-        Some(path)
+        Some(record.closing_path().to_string())
     }
 }
 
@@ -1850,14 +1890,28 @@ async fn forward_closes<R: Runtime>(app: &AppHandle<R>, label: &str) {
 /// of input. Its lifetime binding is held until it exits.
 async fn finish_run(worker: &Arc<EngineWorker>, generation: u64) {
     let mut guard = worker.child.lock().await;
-    if guard.as_ref().is_some_and(|child| child.generation == generation) {
-        let binding = guard.take().expect("matched engine child").close_input();
-        *worker.finishing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(binding);
+    if !guard.as_ref().is_some_and(|child| child.generation == generation) {
+        return;
     }
+    let binding = guard.take().expect("matched engine child").close_input();
+    *worker.finishing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(binding);
+    drop(guard);
+    // Its slot is given back only at its exit; a process that outlives its
+    // input (a thread its handler left running) is ended here instead.
+    tokio::time::sleep(RUN_EXIT_GRACE).await;
+    let lingering = worker.finishing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+    if lingering.is_some() {
+        eprintln!("[engine run] still running {} s after its answer; stopping it", RUN_EXIT_GRACE.as_secs());
+    }
+    drop(lingering);
 }
 
+/// How long a run process may keep running after its answer and the close
+/// of its input before its lifetime binding is dropped, which kills it and
+/// its descendants.
+const RUN_EXIT_GRACE: Duration = Duration::from_secs(30);
 
-// Resolves the path to the Python engine startup script.
+/// Resolves the path to the Python engine startup script.
 pub fn get_engine_script_path<R: Runtime>(app: &AppHandle<R>) -> String {
     let resource_dir = app
         .path()
@@ -2361,8 +2415,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
     Ok(())
 }
 
-
-// How long a worker may keep running to finish a write in flight after its
+/// How long a worker may keep running to finish a write in flight after its
 /// window closed, before an assent restart, or before the app exits. A worker
 /// still writing at the deadline is killed.
 pub const ENGINE_DRAIN_DEADLINE: Duration = Duration::from_secs(600);
@@ -2431,7 +2484,7 @@ async fn cancel_generation_writes<R: Runtime>(app: &AppHandle<R>, worker: &Engin
     }
 }
 
-//// Ask every write in flight, in every process, to stop at its next safe
+/// Ask every write in flight, in every process, to stop at its next safe
 /// point, then wait up to `within` for them to end. For a session that is
 /// ending. A run call still waiting for a slot is answered with the stopped
 /// error and never starts.
@@ -2532,8 +2585,7 @@ async fn drain_retired<R: Runtime>(
     }
 }
 
-
-// Add raw sidecar bytes to a partial frame, returning completed frames and
+/// Add raw sidecar bytes to a partial frame, returning completed frames and
 /// whether the next pending frame would exceed its limit. Completed frames
 /// earlier in the same chunk remain usable even if a later frame is oversized.
 /// CR and LF are both accepted as line endings; the engine emits LF.
@@ -2823,8 +2875,8 @@ mod start_tests {
 
     #[test]
     fn a_registration_prints_without_its_secret() {
-        let held = Registration::Password { path: "W".into(), password: Secret::new("hunter2".into()) };
-        let recipient = Registration::Recipient { path: "R".into(), pfx: "k".into(), password: Secret::new("hunter2".into()) };
+        let held = Registration::Password { path: "W".into(), password: Secret::new("hunter2".into()), grants: None };
+        let recipient = Registration::Recipient { path: "R".into(), pfx: "k".into(), password: Secret::new("hunter2".into()), grants: None };
         assert!(!format!("{held:?} {recipient:?}").contains("hunter2"));
     }
 
@@ -3350,9 +3402,20 @@ mod concurrency_tests {
         serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": result })
     }
 
+    fn permissions() -> serde_json::Value {
+        serde_json::json!({ "print": true, "copy": false })
+    }
+
     fn open_user(ledger: &mut CredentialLedger, outer: u64, path: &str, password: &str) {
         ledger.written(outer, &call("open_document", serde_json::json!({ "path": path, "password": password })));
-        ledger.answered(outer, &answer(serde_json::json!({ "encrypted": true, "opener": "user" })));
+        ledger.answered(outer, &answer(serde_json::json!({
+            "encrypted": true, "opener": "user", "permissions": permissions(), "revision": 6, "p": -1852,
+        })));
+    }
+
+    fn open_recipient(ledger: &mut CredentialLedger, outer: u64, path: &str) {
+        ledger.written(outer, &call("open_pubkey_document", serde_json::json!({ "path": path, "pfx": "k", "password": "p" })));
+        ledger.answered(outer, &answer(serde_json::json!({ "opener": "recipient", "permissions": permissions(), "p": -4 })));
     }
 
     fn share(ledger: &mut CredentialLedger, outer: u64, path: &str, alias: &str) {
@@ -3402,14 +3465,15 @@ mod concurrency_tests {
             assert!(seen.insert(*method), "{method} is classified twice");
         }
         let count = |class: ProcessClass| METHOD_CLASSES.iter().filter(|(_, c)| *c == class).count();
-        assert_eq!(count(ProcessClass::Window), 180);
-        assert_eq!(count(ProcessClass::Job), 33);
+        assert_eq!(count(ProcessClass::Window), 179);
+        assert_eq!(count(ProcessClass::Job), 34);
         assert_eq!(count(ProcessClass::Run), 4);
         assert_eq!(count(ProcessClass::Health), 4);
         for (method, class) in METHOD_CLASSES {
             assert_eq!(process_class(method), *class, "{method}");
         }
         assert_eq!(process_class("distill"), ProcessClass::Job);
+        assert_eq!(process_class("preflight"), ProcessClass::Job, "its coverage check renders with Ghostscript");
         assert_eq!(process_class("batch_ocr"), ProcessClass::Run);
         assert_eq!(process_class("get_page_count"), ProcessClass::Window);
         assert_eq!(process_class("a_method_no_table_names"), ProcessClass::Window);
@@ -3544,6 +3608,36 @@ mod concurrency_tests {
     }
 
     #[test]
+    fn a_job_process_is_given_an_opener_as_grants_and_never_an_open_of_the_file() {
+        let mut ledger = CredentialLedger::default();
+        open_user(&mut ledger, 1, "W", "u");
+        open_recipient(&mut ledger, 2, "R");
+        let frames = read(Given::default().delta(3, &ledger.held()));
+        assert_eq!(methods(&frames), vec![pair("open_document", "W"), pair("open_document", "R")]);
+        let (user, recipient) = (&frames[0].2, &frames[1].2);
+        assert_eq!(user["password"], "u");
+        assert_eq!(user["held"], serde_json::json!({ "opener": "user", "permissions": permissions(), "revision": 6, "p": -1852 }));
+        assert_eq!(recipient["held"], serde_json::json!({ "opener": "recipient", "permissions": permissions(), "revision": null, "p": -4 }));
+        assert!(recipient.get("pfx").is_none() && recipient["password"] == "", "a certificate frame carries its key");
+        // The window's own replacement still opens the document again.
+        let replay = ledger.replay_frames(4);
+        let replayed: Vec<serde_json::Value> =
+            replay.iter().map(|line| serde_json::from_str(line.trim_end()).unwrap()).collect();
+        assert_eq!(replayed[0]["method"], "open_document");
+        assert!(replayed[0]["params"].get("held").is_none());
+        assert_eq!(replayed[1]["method"], "pubkey_reattach");
+    }
+
+    #[test]
+    fn an_opener_that_answered_no_grants_is_not_given_to_a_job_process() {
+        let mut ledger = CredentialLedger::default();
+        ledger.written(1, &call("open_document", serde_json::json!({ "path": "W", "password": "u" })));
+        ledger.answered(1, &answer(serde_json::json!({ "encrypted": true, "opener": "user" })));
+        assert_eq!(ledger.held().len(), 1);
+        assert!(Given::default().delta(3, &ledger.held()).is_empty());
+    }
+
+    #[test]
     fn an_owner_password_open_never_reaches_a_job_process() {
         let mut ledger = CredentialLedger::default();
         ledger.written(1, &call("open_document", serde_json::json!({ "path": "O", "password": "owner" })));
@@ -3560,8 +3654,7 @@ mod concurrency_tests {
         let mut ledger = CredentialLedger::default();
         open_user(&mut ledger, 1, "C:/w/Doc.pdf", "u");
         share(&mut ledger, 2, "C:/w/Doc.pdf", "C:/w/stage.pdf");
-        ledger.written(3, &call("open_pubkey_document", serde_json::json!({ "path": "R", "pfx": "k", "password": "p" })));
-        ledger.answered(3, &answer(serde_json::json!({ "opener": "recipient" })));
+        open_recipient(&mut ledger, 3, "R");
         open_user(&mut ledger, 4, "X", "x");
         let held = ledger.held();
         let named = |params: serde_json::Value| -> Vec<(String, String)> {
@@ -3605,7 +3698,7 @@ mod concurrency_tests {
         given.delta(4, &ledger.held());
         let refused = serde_json::json!({ "id": old[0].0, "error": { "message": "invalid password" } });
         assert_eq!(given.answered(&old[0].0, &refused), None);
-        assert!(given.refused.is_empty());
+        assert_eq!(given.awaiting.len(), 1, "the current generation's frame was settled");
         assert_eq!(given.answered("spectra-credential-replay:4:99", &refused), None, "an id no frame carried");
     }
 
@@ -3617,7 +3710,6 @@ mod concurrency_tests {
         let frames = read(given.delta(3, &ledger.held()));
         let owner = serde_json::json!({ "id": frames[0].0, "result": { "encrypted": true, "opener": "owner" } });
         assert_eq!(given.answered(&frames[0].0, &owner), Some("W".to_string()));
-        assert_eq!(given.refused, vec!["W".to_string()]);
         assert!(read(given.delta(3, &ledger.held())).is_empty(), "a refusal is retried in the same generation");
         assert_eq!(ledger.held().len(), 1, "the window's own record changed");
         assert_eq!(read(given.delta(4, &ledger.held())).len(), 1, "a new generation tries again");
@@ -3626,11 +3718,10 @@ mod concurrency_tests {
     #[test]
     fn a_job_only_refusal_leaves_the_window_ledger_untouched() {
         let mut ledger = CredentialLedger::default();
-        ledger.written(1, &call("open_pubkey_document", serde_json::json!({ "path": "R", "pfx": "k", "password": "p" })));
-        ledger.answered(1, &answer(serde_json::json!({ "opener": "recipient" })));
+        open_recipient(&mut ledger, 1, "R");
         let mut given = Given::default();
         let frames = read(given.delta(3, &ledger.held()));
-        assert_eq!(methods(&frames), vec![pair("pubkey_reattach", "R")]);
+        assert_eq!(methods(&frames), vec![pair("open_document", "R")]);
         let refused = serde_json::json!({ "id": frames[0].0, "error": { "message": "the certificate file is gone" } });
         assert_eq!(given.answered(&frames[0].0, &refused), Some("R".to_string()));
         assert_eq!(ledger.held().len(), 1);
@@ -3646,7 +3737,7 @@ mod concurrency_tests {
         assert_eq!(given.sent.len(), 1);
         assert_eq!(given.awaiting.len(), 1);
         given.reset(0);
-        assert!(given.sent.is_empty() && given.awaiting.is_empty() && given.refused.is_empty());
+        assert!(given.sent.is_empty() && given.awaiting.is_empty());
     }
 
     #[test]
@@ -3658,7 +3749,9 @@ mod concurrency_tests {
         let mut given = Given::default();
         assert_eq!(read(given.delta(3, &ledger.held())).len(), 3);
         ledger.written(4, &call("open_document_attempt", serde_json::json!({ "path": "W", "password": "v" })));
-        ledger.answered(4, &answer(serde_json::json!({ "status": "opened", "document": { "opener": "user" } })));
+        ledger.answered(4, &answer(serde_json::json!({
+            "status": "opened", "document": { "opener": "user", "permissions": permissions(), "revision": 6, "p": -4 },
+        })));
         let frames = read(given.delta(3, &ledger.held()));
         assert_eq!(
             methods(&frames),

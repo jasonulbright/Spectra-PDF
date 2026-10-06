@@ -15,7 +15,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "scan-skew.pdf"
@@ -52,8 +51,7 @@ def _measure(threads: str | None) -> str:
 
 
 def test_one_blas_thread_measures_the_same_skew_angle():
-    if not FIXTURE.is_file():
-        pytest.skip("scan-skew.pdf not generated (tests/fixtures/make_enhance_scans.py)")
+    assert FIXTURE.is_file(), "scan-skew.pdf is a tracked fixture"
     one = _measure("1")
     default = _measure(None)
     assert one == default
