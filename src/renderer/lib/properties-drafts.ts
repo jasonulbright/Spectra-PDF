@@ -82,12 +82,12 @@ export function createPropertiesDrafts(readState: () => AppState,
     d.metadata.fresh = false; d.view.fresh = false; d.advanced.fresh = false;
     d.metadata.error = ''; d.view.error = ''; d.advanced.error = '';
   };
-  const load = async (d: PropertiesDraft, call: EngineCall, commit: () => Promise<void>) => {
+  const load = async (d: PropertiesDraft, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(d) || d.busy || d.loading || conflict(d)) return;
     if (at(d) && [d.metadata, d.view, d.advanced].every(g => g.fresh || g.error)) return;
     const token = {}; d.loading = token; notify();
     try {
-      await commit();
+      await commit([d.workingPath]);
       if (!live(d) || d.loading !== token) return;
       const file = readState().files.get(d.path)!;
       if (!file.buffer || readState().pageDirtyPaths.includes(d.path)) throw changed();

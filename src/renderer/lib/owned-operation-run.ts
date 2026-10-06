@@ -54,12 +54,12 @@ export function createOwnedOperationRuns(readState: () => AppState) {
       synchronize: () => { if (!visible()) abandoned = true; },
       /** Exclusive read arm for an operation's preview. This consumes the
        * ticket: it can never subsequently be used to write without consent. */
-      prepareRead: async (commit: () => Promise<void>) => {
+      prepareRead: async (commit: (paths: readonly string[]) => Promise<void>) => {
         assertActive();
         if (started) throw new Error(tChrome('app.history.changed'));
         assertOperationIntent(readState(), intent);
         started = true;
-        await commit();
+        await commit([file.workingPath]);
         assertActive();
         const now = readState(), current = now.files.get(file.path);
         if (!current || now.pageDirtyPaths.includes(file.path)) throw new Error(tChrome('app.history.changed'));

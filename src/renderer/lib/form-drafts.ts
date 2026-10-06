@@ -91,11 +91,11 @@ export function createFormDrafts(readState: () => AppState) {
     if (!editable(d) || buffer !== d.buffer) return;
     d.options = { flatten }; d.error = ''; d.status = ''; notify();
   };
-  const reload = async (d: FormDraft, commit: () => Promise<void>) => {
+  const reload = async (d: FormDraft, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(d) || d.busy) return;
     const values = d.values, options = d.options; d.busy = true; notify();
     try {
-      await commit();
+      await commit([d.workingPath]);
       if (!live(d) || d.values !== values || d.options !== options) return;
       d.form = null; d.buffer = null; d.needsRead = true; d.pending = empty(); d.values = empty();
       d.options = { flatten: false }; d.loading = null; d.blocked = false; d.error = ''; d.status = '';

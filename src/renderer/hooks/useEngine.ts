@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { engine, dialog, batch, file as fileIO } from '../lib/tauri-bridge';
 import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
-import { lockKeysFor, withFileLock } from '../lib/engine-lock';
+import { exclusiveKeys, lockKeysFor, withFileLock, withWriteChain } from '../lib/engine-lock';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
 import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-idle-lane';
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
@@ -137,8 +137,8 @@ export interface EngineResult {
 }
 
 // MODULE-scoped id counter, deliberately: per-mount counters restarted at
-// 1, so a call abandoned by an unmount (its listener gone, the engine
-// still running it — the engine is strictly serial FIFO) could complete
+// 1, so a call abandoned by an unmount (its listener gone, an engine
+// process still running it) could complete
 // and satisfy a LATER mount's pending entry that reused the same id —
 // resolving conversion B's promise with conversion A's result
 // (regression via the Create PDF dialog, but the class was
@@ -269,21 +269,25 @@ export function useEngine() {
         // file — pending in-memory page edits must be committed to disk first.
         // A gate failure rejects here, so the operation aborts instead of
         // running against bytes that don't match what the user sees.
-        await runCommitGate();
+        const claims = lockKeysFor(method, params);
+        await runCommitGate(claims.map(claim => claim.key));
         // The gate runs OUTSIDE the lock, deliberately — it writes files
         // itself, so gating from inside would have this operation wait on a
         // commit that is waiting on this operation. Once the gate is clear,
-        // the call takes the per-method locks of its paths: a path it writes
-        // exclusively, a path it only reads shared. Two whole-file rewrites
-        // of one path each write a temp and rename, so without the exclusive
-        // lock the later rename silently wins and the earlier work is lost.
-        return (await withFileLock(lockKeysFor(method, params), () => {
+        // the call takes the write chain of every path it writes, then the
+        // per-method locks of its paths: a path it writes exclusively, a path
+        // it only reads shared. Two whole-file rewrites of one path each
+        // write a temp and rename, so without the exclusive lock the later
+        // rename silently wins and the earlier work is lost. A staged rewrite
+        // reads its path under a shared lock while its engine step runs;
+        // the chain makes this write wait for that rewrite's publication.
+        return (await withWriteChain(exclusiveKeys(claims), () => withFileLock(claims, () => {
           options?.assertCurrent?.();
           return track(method, params, async () => {
             options?.assertCurrent?.();
             return rawCall(method, params, options);
           });
-        })) as EngineResult;
+        }))) as EngineResult;
       } finally {
         release();
       }

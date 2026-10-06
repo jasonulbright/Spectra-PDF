@@ -106,3 +106,12 @@ describe('owned workspace mutation gesture', () => {
     await run.perform(operation, 'rotate', {}); expect(run.visible()).toBe(false);
   });
 });
+
+describe('the gate of an owned read', () => {
+  it('names the working path of the document the run began on', async () => {
+    const f = fixture(), run = f.runs.begin(f.file)!;
+    const gate = vi.fn<(paths?: readonly string[]) => Promise<void>>(async () => {});
+    await run.prepareRead(gate);
+    expect(gate).toHaveBeenCalledWith(['work']);
+  });
+});

@@ -445,7 +445,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
         // page ids have settled before the run binds to them, instead of
         // moving underneath a run already in progress.
         try {
-          await runCommitGate();
+          await runCommitGate([...new Set(targetsRef.current.map((target) => target.workingPath))]);
         } catch {
           // A commit that refuses leaves the file as it was. The listing below
           // then reads the working bytes as they stand, which is what the

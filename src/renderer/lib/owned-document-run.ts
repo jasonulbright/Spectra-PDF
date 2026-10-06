@@ -19,9 +19,9 @@ export function createOwnedDocumentRuns(readState: () => AppState) {
       synchronize: () => {
         if (!visible() || prepared && !isCurrent()) abandoned = true;
       },
-      prepare: async (commit: () => Promise<void>) => {
+      prepare: async (commit: (paths: readonly string[]) => Promise<void>) => {
         if (!visible() || readState().files.get(file.path)?.buffer !== file.buffer) throw new Error(tChrome('app.history.changed'));
-        await commit();
+        await commit([file.workingPath]);
         if (!visible()) throw new Error(tChrome('app.history.changed'));
         const next = readState().files.get(file.path)!;
         if (next.buffer !== file.buffer && (next.authoredIdentity?.sourceBuffer !== file.buffer

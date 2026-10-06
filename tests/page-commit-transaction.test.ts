@@ -148,7 +148,9 @@ describe('page commit acknowledgement and recovery', () => {
 
   it('App cannot bypass recovery via an empty dirty set or disk undo/redo', () => {
     const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
-    expect(app).toContain('readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()');
+    expect(app).toMatch(/readState\(\)\.pageDirtyPaths\.length === 0 && !hasPendingPageCommit\(\)\s+&& workspaceSettled\(readState\(\)\)/);
+    const gate = readFileSync(new URL('../src/renderer/lib/commit-gate.ts', import.meta.url), 'utf8');
+    expect(gate).toContain('if (!hasWorkspacePublication(paths)) return;');
     expect(app).toContain('restoreHistory(direction, readState, dispatch,');
     const history = readFileSync(new URL('../src/renderer/lib/disk-history.ts', import.meta.url), 'utf8');
     expect(history.indexOf('await recoverPendingPageCommit()')).toBeLessThan(history.indexOf('await io.read('));

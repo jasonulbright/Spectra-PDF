@@ -1,6 +1,6 @@
 import type { AppState } from '../state/types';
 import { withFileLock } from './engine-lock';
-import { serializeWorkspacePublication } from './workspace-publication';
+import { announceWorkspacePublication, serializeWorkspacePublication } from './workspace-publication';
 
 type CommitState = Pick<AppState, 'files' | 'pageDirtyPaths'>;
 
@@ -47,14 +47,22 @@ export const PAGE_COMMIT_ATTEMPTS = 3;
 export async function runPageCommit<T>(io: PageCommitRunIo<T>): Promise<{ value: T } | null> {
   for (let attempt = 0; attempt < PAGE_COMMIT_ATTEMPTS; attempt++) {
     const locked = commitLockKeys(io.read());
-    const outcome = await withFileLock(locked, () => serializeWorkspacePublication(async () => {
-      await io.recover();
-      await io.settle();
-      const state = io.read();
-      if (!commitLockKeys(state).every((key) => locked.includes(key))) return null;
-      if (!state.pageDirtyPaths.length) return { value: io.clean };
-      return { value: await io.commit(state) };
-    }));
+    // A publication of the locked set from the claim on: a path-scoped gate
+    // that names one of them waits for this round.
+    const done = announceWorkspacePublication(locked);
+    let outcome: { value: T } | null;
+    try {
+      outcome = await withFileLock(locked, () => serializeWorkspacePublication(async () => {
+        await io.recover();
+        await io.settle();
+        const state = io.read();
+        if (!commitLockKeys(state).every((key) => locked.includes(key))) return null;
+        if (!state.pageDirtyPaths.length) return { value: io.clean };
+        return { value: await io.commit(state) };
+      }, locked));
+    } finally {
+      done();
+    }
     if (outcome) return outcome;
   }
   return null;

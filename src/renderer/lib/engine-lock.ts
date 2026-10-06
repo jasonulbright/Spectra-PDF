@@ -21,11 +21,13 @@
  *   - The commit gate runs OUTSIDE the lock. The gate itself writes files, so
  *     gating from inside would have an operation wait on a commit that waits
  *     on the operation.
- *   - Lock order: file locks of working copies are taken BEFORE the
- *     publication lane (`workspace-publication.ts`), never while holding it.
- *     Inside the lane only keys the holder created itself (stages, temps) are
- *     locked, and those have no other holder. A lane holder therefore never
- *     waits for a reader.
+ *   - Lock order, one for every holder: write chain (`withWriteChain`), then
+ *     file locks of working copies, then the publication lane
+ *     (`workspace-publication.ts`), then file locks of keys the holder created
+ *     itself (stages, temps), which have no other holder. A holder that needs
+ *     an earlier kind than one it holds releases the later kinds first. A
+ *     lane holder therefore never waits for a reader, and no file-lock holder
+ *     waits for a write chain.
  *   - Locks are not reentrant: a holder that locks a key it already holds
  *     waits for itself.
  */
@@ -347,7 +349,6 @@ interface KeyState {
   exclusive: Promise<void> | null;
   shared: Set<Promise<void>>;
 }
-const keys = new Map<string, KeyState>();
 
 function normalize(claims: readonly (string | LockClaim)[]): LockClaim[] {
   const modes = new Map<string, LockMode>();
@@ -358,53 +359,89 @@ function normalize(claims: readonly (string | LockClaim)[]): LockClaim[] {
   return Array.from(modes, ([key, mode]) => ({ key, mode }));
 }
 
+/** One independent set of keyed locks. File locks and write chains are two
+ * such sets: a key held in one never conflicts with the same key in the other. */
+function keyedLocks() {
+  const keys = new Map<string, KeyState>();
+  const acquire = async <T>(claims: readonly (string | LockClaim)[], body: () => Promise<T>): Promise<T> => {
+    const wanted = normalize(claims);
+    if (!wanted.length) return body();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const prior: Promise<void>[] = [];
+    // Claim every key before the first await: that is what makes one
+    // acquisition atomic and keeps arrival order per key.
+    for (const { key, mode } of wanted) {
+      let state = keys.get(key);
+      if (!state) {
+        state = { exclusive: null, shared: new Set() };
+        keys.set(key, state);
+      }
+      if (state.exclusive) prior.push(state.exclusive);
+      if (mode === 'exclusive') {
+        prior.push(...state.shared);
+        state.exclusive = held;
+        state.shared = new Set();
+      } else {
+        state.shared.add(held);
+      }
+    }
+    if (prior.length) await Promise.allSettled(prior);
+    try {
+      return await body();
+    } finally {
+      release();
+      for (const { key } of wanted) {
+        const state = keys.get(key);
+        if (!state) continue;
+        if (state.exclusive === held) state.exclusive = null;
+        state.shared.delete(held);
+        if (!state.exclusive && !state.shared.size) keys.delete(key);
+      }
+    }
+  };
+  return { acquire, count: () => keys.size };
+}
+
+const fileLocks = keyedLocks();
+const writeChains = keyedLocks();
+
 /**
  * Run `body` holding `claims`. A plain string claims its key exclusively.
  * With no claims it runs straight through: a call that names no path cannot
  * conflict with one that does. With nothing to wait for, `body` starts
  * synchronously.
  */
-export async function withFileLock<T>(claims: readonly (string | LockClaim)[], body: () => Promise<T>): Promise<T> {
-  const wanted = normalize(claims);
-  if (!wanted.length) return body();
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const prior: Promise<void>[] = [];
-  // Claim every key before the first await: that is what makes one
-  // acquisition atomic and keeps arrival order per key.
-  for (const { key, mode } of wanted) {
-    let state = keys.get(key);
-    if (!state) {
-      state = { exclusive: null, shared: new Set() };
-      keys.set(key, state);
-    }
-    if (state.exclusive) prior.push(state.exclusive);
-    if (mode === 'exclusive') {
-      prior.push(...state.shared);
-      state.exclusive = held;
-      state.shared = new Set();
-    } else {
-      state.shared.add(held);
-    }
-  }
-  if (prior.length) await Promise.allSettled(prior);
-  try {
-    return await body();
-  } finally {
-    release();
-    for (const { key } of wanted) {
-      const state = keys.get(key);
-      if (!state) continue;
-      if (state.exclusive === held) state.exclusive = null;
-      state.shared.delete(held);
-      if (!state.exclusive && !state.shared.size) keys.delete(key);
-    }
-  }
+export function withFileLock<T>(claims: readonly (string | LockClaim)[], body: () => Promise<T>): Promise<T> {
+  return fileLocks.acquire(claims, body);
+}
+
+/**
+ * Run `body` holding the write chain of every path in `paths`: per path, one
+ * holder at a time, in claim order. Every writer of a working copy takes it
+ * before any file lock, and holds it for the whole write, including a staged
+ * rewrite's engine step, which runs under a SHARED file lock. A second writer
+ * of the path therefore waits for the first one's publication instead of
+ * reading the bytes the first one is about to replace. With nothing to wait
+ * for, `body` starts synchronously.
+ */
+export function withWriteChain<T>(paths: readonly string[], body: () => Promise<T>): Promise<T> {
+  return writeChains.acquire(paths, body);
+}
+
+/** The keys a call writes: the keys of its exclusive claims. */
+export function exclusiveKeys(claims: readonly LockClaim[]): string[] {
+  return claims.filter(claim => claim.mode === 'exclusive').map(claim => claim.key);
 }
 
 /** Test seam: how many keys have a holder. */
 export function __lockedCount(): number {
-  return keys.size;
+  return fileLocks.count();
+}
+
+/** Test seam: how many paths have a write-chain holder. */
+export function __chainedCount(): number {
+  return writeChains.count();
 }

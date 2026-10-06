@@ -80,7 +80,7 @@ export function createLayerSessions(readState: () => AppState) {
     finally { if (live(s) && s.loading === token) { s.loading = null; notify(); } }
   };
   const cancelLoad = (s: LayerSession) => { if (live(s) && s.loading) { s.loading = null; notify(); } };
-  const toggle = async (s: LayerSession, layer: Layer, buffer: PdfBuffer | null, operation: PerformOperation, call: EngineCall, commit: () => Promise<void>) => {
+  const toggle = async (s: LayerSession, layer: Layer, buffer: PdfBuffer | null, operation: PerformOperation, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(s) || s.busy) return;
     s.busy = true; s.error = ''; s.status = ''; notify();
     try {
@@ -89,7 +89,7 @@ export function createLayerSessions(readState: () => AppState) {
       for (const doc of readState().workspace.documents) if (doc.buffer === buffer) for (const page of doc.pages) if (page.sourceDocId === s.path) {
         if (byId.has(page.id)) throw changed(); byId.set(page.id, page.sourcePageIndex);
       }
-      await commit(); if (!live(s) || readState().pageDirtyPaths.includes(s.path)) throw changed();
+      await commit([s.workingPath]); if (!live(s) || readState().pageDirtyPaths.includes(s.path)) throw changed();
       const file = readState().files.get(s.path)!; let index = layer.index;
       if (file.buffer !== buffer) {
         const edge = file.authoredIdentity;

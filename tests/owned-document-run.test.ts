@@ -59,3 +59,12 @@ describe('conversion gesture owns the source before any await', () => {
     await expect(run.prepare(gate)).rejects.toThrow(); expect(gate).not.toHaveBeenCalled();
   });
 });
+
+describe('the gate of a conversion gesture', () => {
+  it('names the working path of the document the run began on', async () => {
+    const f = fixture(), run = f.runs.begin(f.file)!;
+    const gate = vi.fn<(paths?: readonly string[]) => Promise<void>>(async () => {});
+    await run.prepare(gate);
+    expect(gate).toHaveBeenCalledWith(['work-A']);
+  });
+});

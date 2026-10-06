@@ -106,15 +106,20 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const set = <K extends keyof Opts>(key: K, value: Opts[K]): void =>
     setOpts((o) => ({ ...o, [key]: value }));
 
+  // The document the dialog opened on; the gate below waits only for its
+  // outstanding publications.
+  const openedWorkingPath = useRef(activeFile?.workingPath);
+
   useEffect(() => {
     let cancelled = false;
+    const gatedPaths = openedWorkingPath.current ? [openedWorkingPath.current] : undefined;
     void (async () => {
       // FLUSH FIRST (the PropertiesDialog rule): the page count this dialog
       // validates ranges against — and the bytes gs will read — must include
       // pending page-tier edits. `call('print')` gates again at submit;
       // gating on open makes the NUMBERS right, not just the job.
       try {
-        await runCommitGate();
+        await runCommitGate(gatedPaths);
       } catch (e: unknown) {
         if (!cancelled) setError(tChrome('dialog.print.gateFailed', { message: e instanceof Error ? e.message : String(e) }));
         return;

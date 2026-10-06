@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { engineClosures } from './helpers/engine-closures';
-import { lockKeysFor, withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
+import { exclusiveKeys, lockKeysFor, withFileLock, withWriteChain, __lockedCount } from '../src/renderer/lib/engine-lock';
 import {
   forgetLostCredential,
   markCredentialLost,
@@ -33,7 +33,7 @@ function engine() {
   const track = vi.fn(async (_m: string, _p: unknown, run: () => Promise<unknown>) => run());
   const closures = engineClosures({
     isTrackableMethod: () => false, beginInteractive: () => () => {},
-    runCommitGate, restoreLostCredentials, lockKeysFor, withFileLock, track, rawCall,
+    runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain, track, rawCall,
   });
   return { ...closures, rawCall, runCommitGate, track, sent };
 }
@@ -105,6 +105,28 @@ describe('the locked internal call path', () => {
     expect(print).toContain("callLocked('print_preview_cleanup', { directory: dir })");
     expect(print).not.toMatch(/\bcall\('print_preview/);
     expect(read('App.tsx')).toMatch(/unlockLostDocument\(record, \{\s*call: callLocked,/);
+  });
+});
+
+describe('the gated call path', () => {
+  it('gates the paths it names, then waits for the write chain of the paths it writes', async () => {
+    const e = engine();
+    const closures = engineClosures({
+      isTrackableMethod: () => true, beginInteractive: () => () => {},
+      runCommitGate: e.runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain,
+      track: e.track, rawCall: e.rawCall,
+    });
+    const writing = deferred();
+    const writer = withWriteChain([W], () => writing.promise);
+    const call = closures.call('compress', { file: 'C:\\in.pdf', output: W });
+    await settle();
+    expect(e.runCommitGate).toHaveBeenCalledWith(['C:\\in.pdf', W].sort());
+    // Neither its file locks nor the engine are reached while another writer holds the chain.
+    expect(__lockedCount()).toBe(0);
+    expect(e.sent).toEqual([]);
+    writing.resolve();
+    await Promise.all([writer, call]);
+    expect(e.sent).toEqual(['compress']);
   });
 });
 

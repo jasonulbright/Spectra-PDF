@@ -808,7 +808,7 @@ export const file = {
    * entry the caller pushes points at the committed state.
    */
   snapshot: async (workingPath: string) => {
-    await runCommitGate();
+    await runCommitGate([workingPath]);
     return snapshotRaw(workingPath);
   },
   /** Ungated variant — used by the commit implementation itself. */

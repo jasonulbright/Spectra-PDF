@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { engineClosures } from './helpers/engine-closures';
 
 describe('engine dispatch ownership', () => {
-  it.each(['entry', 'recovery', 'gate', 'lock', 'queue', 'read-lock', 'read-current', 'current'])('checks the actual dispatch boundary: %s', async boundary => {
+  it.each(['entry', 'recovery', 'gate', 'chain', 'lock', 'queue', 'read-lock', 'read-current', 'current'])('checks the actual dispatch boundary: %s', async boundary => {
     let current = boundary !== 'entry';
     const raw = vi.fn(async () => ({ output: 'copy.pdf' })), release = vi.fn();
     const gate = vi.fn(async () => { if (boundary === 'gate') current = false; });
@@ -10,8 +10,13 @@ describe('engine dispatch ownership', () => {
       isTrackableMethod: () => !boundary.startsWith('read-'), beginInteractive: () => release,
       runCommitGate: gate,
       restoreLostCredentials: vi.fn(async () => { if (boundary === 'recovery') current = false; }),
-      lockKeysFor: () => ['work.pdf'],
-      withFileLock: async (_keys: string[], run: () => Promise<unknown>) => {
+      lockKeysFor: () => [{ key: 'work.pdf', mode: 'exclusive' }],
+      exclusiveKeys: (claims: { key: string }[]) => claims.map(claim => claim.key),
+      withWriteChain: async (_paths: string[], run: () => Promise<unknown>) => {
+        if (boundary === 'chain') current = false;
+        return run();
+      },
+      withFileLock: async (_keys: unknown[], run: () => Promise<unknown>) => {
         if (boundary === 'lock' || boundary === 'read-lock') current = false;
         return run();
       },

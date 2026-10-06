@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTrackableMethod } from '../src/renderer/hooks/useOperationQueue';
+import * as locks from '../src/renderer/lib/engine-lock';
 import { ENGINE_LOCK_TABLE, lockKeysFor, withFileLock, __lockedCount, type LockClaim } from '../src/renderer/lib/engine-lock';
 
 /** A promise plus its resolver, so a test can hold an operation open. */
@@ -362,5 +363,30 @@ describe('withFileLock', () => {
     await Promise.all(runs);
     expect(order).toEqual([1, 2, 3]);
     expect(__lockedCount()).toBe(0);
+  });
+});
+
+describe('withWriteChain', () => {
+  it('holders of one path run one at a time in claim order, independent of the file locks of that path', async () => {
+    const order: string[] = [];
+    const first = deferred();
+    const a = locks.withWriteChain(['W'], async () => { order.push('a start'); await first.promise; order.push('a end'); });
+    const b = locks.withWriteChain(['W'], async () => { order.push('b'); });
+    const c = locks.withWriteChain(['V'], async () => { order.push('c'); });
+    // A file lock of W is another kind: the chain holder does not exclude it.
+    const reader = withFileLock([X('W')], async () => { order.push('lock W'); });
+    await reader;
+    await c;
+    expect(order).toEqual(['a start', 'c', 'lock W']);
+    first.resolve();
+    await Promise.all([a, b]);
+    expect(order).toEqual(['a start', 'c', 'lock W', 'a end', 'b']);
+    expect(locks.__chainedCount()).toBe(0);
+    expect(__lockedCount()).toBe(0);
+  });
+
+  it('the write keys of a call are its exclusive claims', () => {
+    expect(locks.exclusiveKeys(lockKeysFor('compress', { file: 'a.pdf', output: 'b.pdf' }))).toEqual(['b.pdf']);
+    expect(locks.exclusiveKeys(lockKeysFor('get_page_count', { file: 'a.pdf' }))).toEqual([]);
   });
 });

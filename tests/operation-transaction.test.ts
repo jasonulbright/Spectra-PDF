@@ -1,19 +1,26 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { PDFDocument, degrees } from 'pdf-lib';
-import { describe, expect, it, vi } from 'vitest';
-import { executeWorkspaceOperation, type OperationIo } from '../src/renderer/lib/operation-transaction';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { executeWorkspaceOperation, type OperationIo, type OperationOptions } from '../src/renderer/lib/operation-transaction';
 import { OP_EDIT_CLASS, type OpMethod } from '../src/renderer/lib/op-edit-class';
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
 import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
-import type { AppAction, OpenFile } from '../src/renderer/state/types';
-import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
+import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
+import { hasPendingPageCommit, recoverPendingPageCommit, type PageCommitEntry } from '../src/renderer/lib/page-commit-transaction';
+import * as locks from '../src/renderer/lib/engine-lock';
 import { withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
 import { serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
 import { runPageCommit } from '../src/renderer/lib/page-commit-run';
 import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
+import { restoreHistory, type HistoryIo } from '../src/renderer/lib/disk-history';
+import { withFileSave } from '../src/renderer/lib/file-save-barrier';
+import { runCommitGate, setCommitGate } from '../src/renderer/lib/commit-gate';
+import { engineClosures } from './helpers/engine-closures';
 import { readingWith } from './helpers/published-bytes';
+
+const __chainedCount = () => locks.__chainedCount();
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function fixture() {
@@ -186,7 +193,7 @@ describe('whole-file operation publication', () => {
     const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
     const callback = app.slice(app.indexOf('const performOperation ='), app.indexOf('const handleRedactFile ='));
     for (const part of ['sequenceEditClass(method, options?.following?.map(step => step.method))', 'executeWorkspaceOperation(filePath, method, params, readState, dispatch',
-      'confirmEditOfSignedDoc(path, working, editClass)', 'commit: () => commitRef.current()', 'callStaged: callRaw', 'trackOperation', 'trackInteractive']) expect(callback).toContain(part);
+      'confirmEditOfSignedDoc(path, working, editClass)', 'commit: (paths) => commitRef.current(paths)', 'callStaged: callRaw', 'trackOperation', 'trackInteractive']) expect(callback).toContain(part);
     for (const old of ['file.snapshot(', 'await call(', 'reloadFile(', "dispatch({ type: 'UPDATE_FILE'"]) expect(callback).not.toContain(old);
   });
   it.each(['read', 'count', 'stage', 'engine', 'publish'])('%s failure preserves disk/buffer/history and never reports done', async where => {
@@ -303,9 +310,11 @@ describe('lock order between a rewrite and a page commit', () => {
     let release!: () => void;
     const blocker = serializeWorkspacePublication(() => new Promise<void>(r => { release = r; }));
     const rewrite = f.run();
-    // The rewrite claims its working path before it queues for the lane.
-    for (let i = 0; i < 500 && __lockedCount() === 0; i++) await Promise.resolve();
-    expect(__lockedCount()).toBe(1);
+    // The rewrite claims its write chain before it queues for the lane, and
+    // holds no file lock there.
+    for (let i = 0; i < 500 && __chainedCount() === 0; i++) await Promise.resolve();
+    expect(__chainedCount()).toBe(1);
+    expect(__lockedCount()).toBe(0);
     const order: string[] = [];
     const commit = runPageCommit<string>({
       read: () => ({ ...f.store.getState(), pageDirtyPaths: ['source'] }),
@@ -318,7 +327,344 @@ describe('lock order between a rewrite and a page commit', () => {
     await blocker;
     await rewrite;
     await expect(commit).resolves.toEqual({ value: 'committed' });
-    expect(order).toEqual(['commit after 1 publish']);
+    // The commit claimed the working path before the rewrite's engine step
+    // asked for it shared, so it lands first; the rewrite's fence still holds
+    // because this commit's state is not the store's.
+    expect(order).toEqual(['commit after 0 publish']);
+    expect(__lockedCount()).toBe(0);
+    expect(__chainedCount()).toBe(0);
+  });
+});
+
+// Two documents in one window. Each engine step of a document waits for that
+// document's hold, so a test decides when a long rewrite's engine step ends.
+function twoDocuments() {
+  const disk = new Map<string, Uint8Array>([['work-A', new Uint8Array([1])], ['work-B', new Uint8Array([1])]]);
+  const open = (path: string): OpenFile => ({ path, workingPath: `work-${path}`, name: path,
+    buffer: new Uint8Array([1]), pageCount: 1, dirty: false, undoStack: [], redoStack: [] });
+  const store = createAppStore({ ...initialState, activeFileId: 'A', files: new Map([['A', open('A')], ['B', open('B')]]) });
+  const events: string[] = [];
+  const holds = new Map<string, Promise<void>>();
+  let view: ((state: AppState) => AppState) | null = null;
+  const read = () => (view ? view(store.getState()) : store.getState());
+  const transaction = {
+    publish: async (id: string, entries: PageCommitEntry[]) => {
+      const [entry] = entries;
+      if (hash(disk.get(entry.workingPath)!) !== entry.expectedWorkingSha256
+          || hash(disk.get(entry.stagedPath)!) !== entry.expectedStagedSha256) throw new Error('revision mismatch');
+      events.push(`publish ${entry.workingPath}`);
+      disk.set(`backup-${id}`, disk.get(entry.workingPath)!.slice());
+      disk.set(entry.workingPath, disk.get(entry.stagedPath)!.slice());
+      return { status: 'committed', snapshots: [`backup-${id}`], detail: '' };
+    },
+    abort: async () => ({ status: 'rolledBack', snapshots: [], detail: '' }),
+    acknowledge: async () => {},
+  };
+  const step = async (method: string, params: Record<string, unknown>) => {
+    const stage = String(params.file);
+    const doc = stage.slice('work-'.length, 'work-'.length + 1);
+    events.push(`engine ${doc} ${method}`);
+    await holds.get(doc);
+    events.push(`engine ${doc} done`);
+    disk.set(stage, new Uint8Array([...disk.get(stage)!, 2]));
+    return { output: params.output };
+  };
+  const io: OperationIo = {
+    confirm: async () => true,
+    commit: async () => {},
+    read: async path => disk.get(path)!.slice(),
+    write: async (path, bytes) => { disk.set(path, bytes.slice()); },
+    remove: async path => { disk.delete(path); },
+    index: readingWith(async bytes => bytes.length),
+    track: async (_method, _params, run) => run(),
+    callStaged: step,
+    transaction,
+  };
+  const history: HistoryIo = { read: io.read, write: io.write, remove: io.remove, index: io.index, transaction };
+  const hold = (doc: string) => {
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    holds.set(doc, held);
+    return () => { if (holds.get(doc) === held) holds.delete(doc); release(); };
+  };
+  const rewrite = (doc: string, options: OperationOptions = {}) =>
+    executeWorkspaceOperation(doc, 'rotate', { angle: 90 }, read, store.dispatch, io, options);
+  // The production `call` and `callLocked`, with the real locks and gate.
+  const sent: string[] = [];
+  const { call, callLocked } = engineClosures({
+    ...locks, isTrackableMethod: (method: string) => method !== 'get_page_count',
+    beginInteractive: () => () => {}, runCommitGate,
+    restoreLostCredentials: async () => {},
+    track: async (_m: string, _p: unknown, run: () => Promise<unknown>) => run(),
+    rawCall: async (method: string, params: Record<string, unknown>) => {
+      const bytes = disk.get(String(params.file));
+      sent.push(`${method} ${String(params.file)} [${bytes ? Array.from(bytes).join(',') : ''}]`);
+      return {};
+    },
+  });
+  return { disk, store, events, sent, io, history, hold, rewrite, read, step, call, callLocked,
+    setView: (next: ((state: AppState) => AppState) | null) => { view = next; } };
+}
+
+/** One macrotask: every microtask a runnable waiter needs has run. */
+const turn = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+async function until(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !check(); i++) await turn();
+  expect(check()).toBe(true);
+}
+function commitOf(w: ReturnType<typeof twoDocuments>, label: string) {
+  return runPageCommit<string>({
+    read: () => ({ ...w.store.getState(), pageDirtyPaths: ['A'] }),
+    recover: async () => {}, settle: async () => {}, clean: 'clean',
+    commit: async () => { w.events.push(label); return 'committed'; },
+  });
+}
+
+describe('a staged rewrite runs its engine step outside the publication lane', () => {
+  afterEach(() => setCommitGate(null));
+
+  it('another document publishes, and a gated call on it runs, while the engine step runs', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const other = w.rewrite('B');
+      await until(() => w.events.includes('publish work-B'));
+      await other;
+      const call = w.call('compress', { file: 'work-B', output: 'work-B' });
+      await until(() => w.sent.length === 1);
+      await call;
+      expect(w.events).toEqual(['engine A rotate', 'engine B rotate', 'engine B done', 'publish work-B']);
+      expect(w.sent).toEqual(['compress work-B [1,2]']);
+      release();
+      await long;
+      expect(w.events.slice(-2)).toEqual(['engine A done', 'publish work-A']);
+    } finally { release(); }
+    expect(__lockedCount()).toBe(0);
+  });
+
+  it('a read of the rewritten document returns the bytes the user sees until publication', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const reads = [w.callLocked('get_page_count', { file: 'work-A' }), w.call('get_page_count', { file: 'work-A' })];
+      await until(() => w.sent.length === 2);
+      await Promise.all(reads);
+      expect(w.sent).toEqual(['get_page_count work-A [1]', 'get_page_count work-A [1]']);
+      expect(w.store.getState().files.get('A')!.buffer).toEqual(new Uint8Array([1]));
+      release();
+      await long;
+      await w.callLocked('get_page_count', { file: 'work-A' });
+      expect(w.sent.at(-1)).toBe('get_page_count work-A [1,2]');
+      expect(w.store.getState().files.get('A')!.buffer).toEqual(new Uint8Array([1, 2]));
+    } finally { release(); }
+  });
+
+  it('a save, a disk undo and a gated write of the document wait for the publication, in issue order', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const save = withFileSave('work-A', 'dest-A', async () => {
+        w.events.push(`save [${Array.from(w.disk.get('work-A')!).join(',')}]`);
+      });
+      await turn();
+      const undo = restoreHistory('undo', w.read, w.store.dispatch, w.history);
+      await turn();
+      const write = w.call('compress', { file: 'work-A', output: 'work-A' }).then(() => { w.events.push('compress'); });
+      await turn();
+      // A reader still runs while the three writers wait.
+      const reader = w.callLocked('get_page_count', { file: 'work-A' });
+      await until(() => w.sent.length === 1);
+      await reader;
+      expect(w.sent).toEqual(['get_page_count work-A [1]']);
+      expect(w.events).toEqual(['engine A rotate']);
+      release();
+      await Promise.all([long, save, undo, write]);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A', 'save [1,2]', 'publish work-A', 'compress']);
+      expect(w.sent.at(-1)).toBe('compress work-A [1]');
+    } finally { release(); }
+    expect(__lockedCount()).toBe(0);
+  });
+
+  it('a second rewrite of the path never sends its engine step before the first one publishes', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const first = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      // Unheld, the second engine step would answer before the first.
+      w.io.callStaged = async (method, params) => {
+        w.events.push(w.events.includes('publish work-A') ? 'second step after publish' : 'second step before publish');
+        return { output: params.output, method };
+      };
+      const second = w.rewrite('A');
+      const outcome = second.then(() => 'published', (error: Error) => error.message);
+      await turn();
+      const reader = w.callLocked('get_page_count', { file: 'work-A' });
+      await until(() => w.sent.length === 1);
+      await reader;
+      expect(w.sent).toEqual(['get_page_count work-A [1]']);
+      release();
+      await first;
+      // The second rewrite was asked for on the revision the first replaced.
+      expect(await outcome).toMatch(/changed/);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A']);
+    } finally { release(); }
+  });
+
+  it('a commit of a dirty document does not wait for a long rewrite of another one', async () => {
+    const w = twoDocuments();
+    const release = w.hold('B');
+    try {
+      const long = w.rewrite('B');
+      await until(() => w.events.includes('engine B rotate'));
+      const commit = commitOf(w, 'commit A');
+      await until(() => w.events.includes('commit A'));
+      await expect(commit).resolves.toEqual({ value: 'committed' });
+      expect(w.events).toEqual(['engine B rotate', 'commit A']);
+      release();
+      await long;
+    } finally { release(); }
+  });
+
+  it('a path-scoped gate waits for a rewrite that waits for its exclusive lock, and only for that path', async () => {
+    const w = twoDocuments();
+    const releaseEngine = w.hold('A');
+    let releaseReader: () => void = () => {};
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      // A reader that holds the path when the engine step ends keeps the
+      // rewrite from its exclusive lock.
+      const reader = withFileLock([{ key: 'work-A', mode: 'shared' }], () => new Promise<void>(r => { releaseReader = r; }));
+      releaseEngine();
+      await until(() => w.events.includes('engine A done'));
+      await turn();
+      const gates: string[] = [];
+      const gateA = runCommitGate(['work-A']).then(() => {
+        gates.push(`A after ${w.events.includes('publish work-A') ? 'publish' : 'nothing'}`);
+      });
+      await runCommitGate(['work-B']);
+      gates.push('B');
+      await turn();
+      expect(gates).toEqual(['B']);
+      expect(w.events).not.toContain('publish work-A');
+      releaseReader();
+      await reader;
+      await Promise.all([long, gateA]);
+      expect(gates).toEqual(['B', 'A after publish']);
+    } finally { releaseEngine(); releaseReader(); }
+  });
+
+  it('a rewrite survives a page edit of another document committed during its engine steps', async () => {
+    const w = twoDocuments();
+    const releaseFirst = w.hold('A');
+    let releaseSecond: () => void = () => {};
+    try {
+      const long = w.rewrite('A', { following: [{ method: 'rotate', params: { angle: 90 } }] });
+      await until(() => w.events.includes('engine A rotate'));
+      // A page edit of B, pending while the first step ends and the second runs.
+      w.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      releaseSecond = w.hold('A');
+      releaseFirst();
+      await until(() => w.events.filter(e => e === 'engine A rotate').length === 2);
+      // Committed before the publication: B has new bytes, nothing is pending.
+      const committedB = { ...w.store.getState().files.get('B')!, buffer: new Uint8Array([9]) };
+      w.setView(state => ({ ...state, files: new Map([...state.files, ['B', committedB]]), pageDirtyPaths: [] }));
+      releaseSecond();
+      await long;
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'engine A rotate', 'engine A done', 'publish work-A']);
+      expect(w.store.getState().files.get('A')!.buffer).toEqual(new Uint8Array([1, 2, 2]));
+    } finally { releaseFirst(); releaseSecond(); w.setView(null); }
+  });
+
+  it('a page edit still pending at the publication refuses it; one on the rewritten file refuses before the next step', async () => {
+    const pending = twoDocuments();
+    let release = pending.hold('A');
+    try {
+      const long = pending.rewrite('A');
+      await until(() => pending.events.includes('engine A rotate'));
+      pending.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      release();
+      await expect(long).rejects.toThrow(/changed/);
+      expect(pending.events).not.toContain('publish work-A');
+      expect(pending.disk.get('work-A')).toEqual(new Uint8Array([1]));
+    } finally { release(); }
+    const own = twoDocuments();
+    release = own.hold('A');
+    try {
+      const long = own.rewrite('A', { following: [{ method: 'rotate', params: { angle: 90 } }] });
+      await until(() => own.events.includes('engine A rotate'));
+      own.setView(state => ({ ...state, pageDirtyPaths: ['A'] }));
+      release();
+      await expect(long).rejects.toThrow(/changed/);
+      expect(own.events).toEqual(['engine A rotate', 'engine A done']);
+    } finally { release(); }
+  });
+});
+
+describe('lock order across the write chain, the file locks and the lane', () => {
+  it('two rewrites of one path with a commit, a save and a disk undo queued between them all settle', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const first = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const commit = commitOf(w, 'commit A');
+      const save = withFileSave('work-A', 'dest-A', async () => { w.events.push('save'); });
+      const undo = restoreHistory('undo', w.read, w.store.dispatch, w.history);
+      const second = w.rewrite('A');
+      release();
+      const outcomes = await Promise.allSettled([first, commit, save, undo, second]);
+      expect(outcomes.map(o => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled', 'rejected']);
+      expect(w.events).toContain('commit A');
+      expect(w.events).toContain('save');
+    } finally { release(); }
+    expect(__lockedCount()).toBe(0);
+  });
+
+  it('a commit of the path issued while a rewrite waits for the lane to publish settles after the publication', async () => {
+    const w = twoDocuments();
+    const releaseEngine = w.hold('A');
+    let releaseLane: () => void = () => {};
+    try {
+      const rewrite = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const blocker = serializeWorkspacePublication(() => new Promise<void>(r => { releaseLane = r; }));
+      releaseEngine();
+      await until(() => w.events.includes('engine A done'));
+      await turn();
+      // The rewrite holds exclusive(work-A) while it waits for the lane, so
+      // this commit waits for the rewrite and never holds the lane against it.
+      const commit = commitOf(w, 'commit A');
+      await turn();
+      releaseLane();
+      await Promise.all([blocker, rewrite, commit]);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A', 'commit A']);
+    } finally { releaseEngine(); releaseLane(); }
+    expect(__lockedCount()).toBe(0);
+  });
+
+  it('a rewrite whose own gate must commit settles while another commit holds the dirty lock and waits for the lane', async () => {
+    const w = twoDocuments();
+    let releaseLane!: () => void;
+    const blocker = serializeWorkspacePublication(() => new Promise<void>(r => { releaseLane = r; }));
+    // The other commit holds exclusive(work-A) and queues for the lane.
+    const other = commitOf(w, 'other commit');
+    await turn();
+    // The rewrite's own gate is a commit of the same dirty set.
+    w.io.commit = async () => { await commitOf(w, 'gate commit'); };
+    const rewrite = w.rewrite('A');
+    await turn();
+    releaseLane();
+    await blocker;
+    await Promise.all([other, rewrite]);
+    expect(w.events).toEqual(['other commit', 'gate commit', 'engine A rotate', 'engine A done', 'publish work-A']);
     expect(__lockedCount()).toBe(0);
   });
 });

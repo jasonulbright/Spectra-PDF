@@ -3957,7 +3957,8 @@ export function WorkspaceCanvasView({
     editListingPendingRef.current = token;
     const runListingPass = async (): Promise<void> => {
       try {
-        await runCommitGate();
+        const listed = state.files.get(doc.path)?.workingPath;
+        await runCommitGate(listed ? [listed] : undefined);
       } catch {
         return; // gate failure surfaces on the commit banner; no overlays
       }
