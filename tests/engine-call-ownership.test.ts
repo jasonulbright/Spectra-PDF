@@ -12,6 +12,7 @@ describe('engine dispatch ownership', () => {
       restoreLostCredentials: vi.fn(async () => { if (boundary === 'recovery') current = false; }),
       lockKeysFor: () => [{ key: 'work.pdf', mode: 'exclusive' }],
       exclusiveKeys: (claims: { key: string }[]) => claims.map(claim => claim.key),
+      beginDocumentWrites: () => () => {},
       withWriteChain: async (_paths: string[], run: () => Promise<unknown>) => {
         if (boundary === 'chain') current = false;
         return run();

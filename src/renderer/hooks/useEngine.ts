@@ -3,6 +3,7 @@ import { engine, dialog, batch, file as fileIO } from '../lib/tauri-bridge';
 import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
 import { exclusiveKeys, lockKeysFor, withFileLock, withWriteChain } from '../lib/engine-lock';
+import { beginDocumentWrites } from '../lib/document-writes';
 import { useOperationQueue, isTrackableMethod } from './useOperationQueue';
 import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-idle-lane';
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
@@ -257,8 +258,18 @@ export function useEngine() {
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}, options?: EngineCallOptions): Promise<EngineResult> => {
     options?.assertCurrent?.();
-    await restoreLostCredentials(params);
-    if (isTrackableMethod(method)) {
+    const trackable = isTrackableMethod(method);
+    const claims = lockKeysFor(method, params);
+    // Recorded before the first await: a document leaving this window waits
+    // for this write, and a write asked for while it leaves refuses here.
+    const written = trackable ? beginDocumentWrites(exclusiveKeys(claims)) : () => {};
+    try {
+      await restoreLostCredentials(params);
+    } catch (error) {
+      written();
+      throw error;
+    }
+    if (trackable) {
       // Counted interactive from HERE, not from the dispatch below: the gate
       // and the lock run first and can take arbitrarily long, and the question
       // the count answers is "has a user asked for something", not "has a
@@ -269,7 +280,6 @@ export function useEngine() {
         // file — pending in-memory page edits must be committed to disk first.
         // A gate failure rejects here, so the operation aborts instead of
         // running against bytes that don't match what the user sees.
-        const claims = lockKeysFor(method, params);
         await runCommitGate(claims.map(claim => claim.key));
         // The gate runs OUTSIDE the lock, deliberately — it writes files
         // itself, so gating from inside would have this operation wait on a
@@ -290,6 +300,7 @@ export function useEngine() {
         }))) as EngineResult;
       } finally {
         release();
+        written();
       }
     }
     // Read-only is not handle-free: qpdf can hold the working file while an

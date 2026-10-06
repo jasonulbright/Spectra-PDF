@@ -14,6 +14,7 @@
 // original recipient lists (`saveWorkingCopy`).
 import { tChrome } from '../i18n';
 import { withWriteChain } from './engine-lock';
+import { awaitSaveBarriers } from './file-save-barrier';
 import {
   UNRESTRICTED,
   isRecipientOpened,
@@ -215,6 +216,8 @@ function readRecipient(raw: unknown): CertificateRecipient | null {
 }
 
 export interface SaveWorkingCopyIo {
+  /** An engine call that runs no commit gate: the reseal calls it under the
+   * working copy's write chain. */
   call: (method: string, params: Record<string, unknown>) => Promise<unknown>;
   saveAs: (source: string, dest: string) => Promise<unknown>;
   remove: (path: string) => Promise<void>;
@@ -249,9 +252,13 @@ export async function saveWorkingCopy(
   resealStage += 1;
   const stage = `${workingPath}.${Date.now()}-${resealStage}.sealed`;
   try {
-    // The reseal reads the working copy, so it holds the copy's write chain:
-    // a staged rewrite of the copy publishes first, as it does before an
-    // unsealed save (`withFileSave`). The stage it writes has no other writer.
+    // The reseal reads the working copy, so it waits for the copy's save
+    // barriers (they may publish), then holds the copy's write chain: a staged
+    // rewrite of the copy publishes first, as it does before an unsealed save
+    // (`withFileSave`). The stage it writes has no other writer. `io.call`
+    // runs no commit gate: a gate waits for publications, and a disk undo of
+    // the copy is announced while it waits for this chain.
+    await awaitSaveBarriers(workingPath);
     const resealed = await withWriteChain([workingPath], async () => {
       let breakSignatures = false;
       let reattached = false;

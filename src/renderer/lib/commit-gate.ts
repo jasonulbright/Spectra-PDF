@@ -37,13 +37,25 @@ function commitShared(): Promise<void> {
 }
 
 /**
+ * Commits every dirty file through the shared run, and waits for no
+ * publication. For a holder of a write chain: the commit takes no chain, so it
+ * cannot wait for the holder, while a publication it would wait for (a disk
+ * undo announced from its chain claim) can.
+ */
+export function commitPendingPageEdits(): Promise<void> {
+  return commitShared();
+}
+
+/**
  * Flushes pending page edits, then waits for every outstanding publication
  * that may replace one of `paths` (working paths), then flushes again: what a
  * publication lands is indexed, and edits made while it ran are committed.
  * Without `paths` it waits for every outstanding publication.
  *
- * Runs holding no lock. A publication never waits for a gate, so waiting for
- * one here cannot close a cycle. Only the publications outstanding when the
+ * The caller holds no lock and no write chain. A publication never waits for
+ * a gate, so waiting for one here cannot close a cycle; a caller holding the
+ * write chain of a path would wait for a disk undo of that path, which is
+ * announced while it waits for the chain. Only the publications outstanding when the
  * wait begins are awaited; the shared run is never extended by one caller's
  * wait, so a call on another document does not wait for it.
  */
