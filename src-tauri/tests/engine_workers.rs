@@ -706,6 +706,17 @@ fn an_assent_restart_replaces_an_idle_job_process() {
     engine::retire_window(&handle, B);
 }
 
+/// The methods of every line the gated handler's process had received when
+/// it answered.
+fn gated_received(reply: &serde_json::Value) -> Vec<String> {
+    reply["result"]["received"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|method| method.as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
 #[test]
 fn a_job_process_is_given_the_windows_credentials_read_only() {
     let Some(python) = provisioned_python() else { return };
@@ -755,25 +766,111 @@ fn a_job_process_is_given_the_windows_credentials_read_only() {
     let (pid_job, _, log) = gated_result(&await_response(&live.b, 10, Duration::from_secs(120)));
     assert_ne!(pid_job, pid_of(&live, B, 11));
     let ran = |method: &str| log.iter().filter(|(m, _)| m == method).count();
-    assert_eq!(ran("open_document"), 1, "{log:?}");
+    assert_eq!(ran("open_document"), 2, "the user and the certificate credential: {log:?}");
     assert_eq!(ran("share_document"), 1, "{log:?}");
-    assert_eq!(ran("pubkey_reattach"), 1, "{log:?}");
-    for in_place in ["open_document_attempt", "open_pubkey_document", "unlock"] {
+    for in_place in ["open_document_attempt", "open_pubkey_document", "pubkey_reattach", "unlock"] {
         assert_eq!(ran(in_place), 0, "the job process ran {in_place}: {log:?}");
     }
     assert!(log.iter().all(|(_, ok)| *ok), "a credential frame was refused: {log:?}");
 
-    // A document closed in the window leaves the job process too.
-    call_ok(&live, B, 12, "close_document", serde_json::json!({ "path": path("pw/doc.pdf") }));
-    send(&live, B, request(13, "search_in_files", serde_json::json!({ "paths": [path("pw/stage.pdf")], "query": "a" })));
-    let closed = await_response(&live.b, 13, Duration::from_secs(120));
+    // A document closed in the window leaves the job process at once, not
+    // with the window's next job request: the job process receives the close
+    // while its only request is still running.
+    let waiting = root.join("waiting");
+    send(&live, B, gated(12, "distill", &waiting));
+    call_ok(&live, B, 13, "close_document", serde_json::json!({ "path": path("pw/doc.pdf") }));
+    std::fs::write(&waiting, b"close_document").unwrap();
+    let reply = await_response(&live.b, 12, Duration::from_secs(120));
+    let received = gated_received(&reply);
+    assert_eq!(received.iter().filter(|m| *m == "close_document").count(), 1, "{received:?}");
+    send(&live, B, request(14, "search_in_files", serde_json::json!({ "paths": [path("pw/stage.pdf")], "query": "a" })));
+    let closed = await_response(&live.b, 14, Duration::from_secs(120));
     assert_ne!(closed["result"]["errors"], serde_json::json!([]), "a closed document's alias still opened: {closed}");
     engine::retire_window(&handle, A);
     engine::retire_window(&handle, B);
 }
 
+/// The bytes and modification time of `path`.
+fn file_state(path: &Path) -> (Vec<u8>, std::time::SystemTime) {
+    (std::fs::read(path).unwrap(), std::fs::metadata(path).unwrap().modified().unwrap())
+}
+
+/// Hold `path` open so that no other handle may read, write or replace it.
+#[cfg(windows)]
+fn hold_exclusively(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new().read(true).share_mode(0).open(path).unwrap()
+}
+
 #[test]
-fn a_credential_only_the_job_process_refuses_fails_only_there() {
+fn a_job_process_given_credentials_never_opens_or_writes_the_documents_files() {
+    let Some(python) = provisioned_python() else { return };
+    let live = live_app(&python);
+    let handle = live.app.handle().clone();
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tests").join("fixtures").join("sample.pdf");
+    let sample = sample.to_string_lossy().into_owned();
+    for folder in ["pw", "cert", "other"] {
+        std::fs::create_dir(root.join(folder)).unwrap();
+    }
+    let pw = root.join("pw").join("doc.pdf");
+    let cert = root.join("cert").join("doc.pdf");
+    let other = root.join("other").join("doc.pdf");
+    std::fs::copy(&sample, &other).unwrap();
+    let identity = call_ok(&live, A, 1, "test_identity", serde_json::json!({ "folder": root.to_string_lossy() }));
+    call_ok(&live, A, 2, "encrypt", serde_json::json!({
+        "file": sample, "output": pw.to_string_lossy(), "user_password": "u", "owner_password": "o",
+    }));
+    call_ok(&live, A, 3, "encrypt_pubkey", serde_json::json!({
+        "file": sample, "output": cert.to_string_lossy(), "certs": [identity["cert"]],
+    }));
+    call_ok(&live, A, 4, "open_document", serde_json::json!({ "path": pw.to_string_lossy(), "password": "u" }));
+    call_ok(&live, A, 5, "open_pubkey_document", serde_json::json!({
+        "path": cert.to_string_lossy(), "pfx": identity["pfx"], "password": "test-pass",
+    }));
+    // Every file the window's opens read or wrote: the working copies, the
+    // sealed original and the folder marker of the certificate open.
+    let files = [
+        pw.clone(),
+        cert.clone(),
+        root.join("cert").join("spectra-recipient.sealed"),
+        root.join("cert").join("spectra-recipient.json"),
+    ];
+    let before: Vec<_> = files.iter().map(|file| file_state(file)).collect();
+    #[cfg(windows)]
+    let held: Vec<std::fs::File> = files.iter().map(|file| hold_exclusively(file)).collect();
+
+    // The job request names another document; the window's credentials
+    // reach the job process first.
+    let gate = root.join("gate");
+    std::fs::write(&gate, b"").unwrap();
+    send(&live, A, gated(6, "distill", &gate));
+    let (_, _, log) = gated_result(&await_response(&live.a, 6, Duration::from_secs(120)));
+    let found = call_ok(&live, A, 7, "search_in_files", serde_json::json!({ "paths": [other.to_string_lossy()], "query": "a" }));
+    assert_eq!(found["errors"], serde_json::json!([]), "{found}");
+    #[cfg(windows)]
+    drop(held);
+
+    assert_eq!(
+        log,
+        vec![("open_document".to_string(), true), ("open_document".to_string(), true)],
+        "the job process touched a document's files to take its credential"
+    );
+    for (file, state) in files.iter().zip(before) {
+        assert!(file_state(file) == state, "{} changed", file.display());
+    }
+    // The registered credentials work once a request names the documents.
+    let read = call_ok(&live, A, 8, "search_in_files", serde_json::json!({
+        "paths": [pw.to_string_lossy(), cert.to_string_lossy()], "query": "a",
+    }));
+    assert_eq!(read["errors"], serde_json::json!([]), "{read}");
+    engine::retire_window(&handle, A);
+    engine::retire_window(&handle, B);
+}
+
+#[test]
+fn a_job_process_is_given_a_certificate_credential_without_its_key_file() {
     let Some(python) = provisioned_python() else { return };
     let live = live_app(&python);
     let handle = live.app.handle().clone();
@@ -798,14 +895,33 @@ fn a_credential_only_the_job_process_refuses_fails_only_there() {
     std::fs::write(&gate, b"").unwrap();
     send(&live, A, gated(4, "distill", &gate));
     let (_, _, log) = gated_result(&await_response(&live.a, 4, Duration::from_secs(120)));
-    assert_eq!(log, vec![("pubkey_reattach".to_string(), false)], "the job process was given the credential");
-    let window_read = call_ok(&live, A, 5, "document_permissions", serde_json::json!({ "path": doc }));
+    assert_eq!(log, vec![("open_document".to_string(), true)], "the job process needed the key file");
+    let found = call_ok(&live, A, 5, "search_in_files", serde_json::json!({ "paths": [doc], "query": "a" }));
+    assert_eq!(found["errors"], serde_json::json!([]), "{found}");
+    let window_read = call_ok(&live, A, 6, "document_permissions", serde_json::json!({ "path": doc }));
     assert_eq!(window_read["opener"], "recipient", "the window process lost the credential");
-    assert!(lost.recv_timeout(Duration::from_secs(2)).is_err(), "a job-only refusal was told to the window");
-    // Not retried in the same process generation.
-    send(&live, A, gated(6, "distill", &gate));
-    let (_, _, log) = gated_result(&await_response(&live.a, 6, Duration::from_secs(120)));
-    assert_eq!(log.iter().filter(|(m, _)| m == "pubkey_reattach").count(), 1, "{log:?}");
+    assert!(lost.recv_timeout(Duration::from_secs(2)).is_err(), "a credential-lost notice reached the window");
+    engine::retire_window(&handle, A);
+    engine::retire_window(&handle, B);
+}
+
+#[test]
+fn a_run_process_that_outlives_its_input_is_stopped_and_gives_back_its_slot() {
+    let Some(python) = provisioned_python() else { return };
+    let live = live_app_with(&python, Some(1));
+    let handle = live.app.handle().clone();
+    let scratch = tempfile::tempdir().unwrap();
+    let gate = scratch.path().join("gate");
+    std::fs::write(&gate, b"").unwrap();
+    let mut inbox = Inbox::new(&live.a);
+    send(&live, A, request(1, "create_pdf_folders", serde_json::json!({ "gate": gate.to_string_lossy(), "linger": true })));
+    let (lingering, _, _) = gated_result(&inbox.take(1, Duration::from_secs(120)));
+    send(&live, A, gated(2, "create_pdf_folders", &gate));
+    // The only slot is held until the first process ends, which it does not
+    // do on its own; the second call starts once that process is stopped.
+    let (second, _, _) = gated_result(&inbox.take(2, Duration::from_secs(180)));
+    assert_ne!(second, lingering);
+    wait_dead(lingering, Duration::from_secs(30));
     engine::retire_window(&handle, A);
     engine::retire_window(&handle, B);
 }

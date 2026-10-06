@@ -456,3 +456,57 @@ class TestAStoppedDistillLeavesTheOutputWhole:
         assert reclaim_stale_stages(tmp_dir) == len(left)
         assert _stages(tmp_dir) == []
 
+
+    def test_a_killed_spooled_job_leaves_only_stages_the_next_run_removes(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "spool.ps", SPOOL_PROLOGUE + ENDLESS_PS)
+        out = os.path.join(tmp_dir, "out.pdf")
+        engine_src = str(Path(__file__).resolve().parent.parent / "src")
+        process = subprocess.Popen(
+            [sys.executable, "-c", KILL_CHILD, engine_src, src, out, gs_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=os.name != "nt",
+        )
+        try:
+            deadline = time.monotonic() + 120
+            # The payload copy and the output stage.
+            while len(_stages(tmp_dir)) < 2:
+                assert process.poll() is None, "the run ended before it staged its output"
+                assert time.monotonic() < deadline, "the run never staged its output"
+                time.sleep(0.05)
+        finally:
+            _kill_tree(process)
+        assert not os.path.exists(out)
+        assert sorted(os.listdir(tmp_dir)) == sorted(["spool.ps", *_stages(tmp_dir)])
+        ok = _write(tmp_dir, "ok.ps", PS_FIXTURE)
+        distill(ok, os.path.join(tmp_dir, "next.pdf"), gs_path=gs_path)
+        assert _stages(tmp_dir) == []
+
+    def test_a_run_killed_during_field_adoption_leaves_only_stages(self, tmp_dir, gs_path):
+        src = _write(tmp_dir, "form.ps", PS_FIXTURE)
+        out = _write(tmp_dir, "out.pdf", PREVIOUS)
+        engine_src = str(Path(__file__).resolve().parent.parent / "src")
+        child = (
+            "import os, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import engine.distill as d\n"
+            "d.adopt_orphan_widget_fields = lambda pdf: 1\n"
+            "def dies(pdf, path, *args, **kwargs):\n"
+            "    open(path, 'wb').write(b'%PDF-1.7 partial')\n"
+            "    os._exit(9)\n"
+            "d.save_pdf = dies\n"
+            "d.distill(sys.argv[2], sys.argv[3], gs_path=sys.argv[4])\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", child, engine_src, src, out, gs_path],
+            capture_output=True, timeout=600, check=False,
+        )
+        assert done.returncode == 9, done.stderr
+        assert Path(out).read_bytes() == PREVIOUS
+        left = _stages(tmp_dir)
+        assert len(left) == 2, left
+        assert sorted(os.listdir(tmp_dir)) == sorted(["form.ps", "out.pdf", *left])
+        ok = _write(tmp_dir, "ok.ps", PS_FIXTURE)
+        distill(ok, os.path.join(tmp_dir, "next.pdf"), gs_path=gs_path)
+        assert _stages(tmp_dir) == []

@@ -612,18 +612,54 @@ def _open_document(path: str, password: str, *, report_wrong_password: bool) -> 
         _documents[_key(path)] = _Credential("owner", None, permissions, revision, p, _key(path))
         return {"encrypted": True, "opener": "owner", "encryption_kept": False}
     _documents[_key(path)] = _Credential("user", password, permissions, revision, p, _key(path))
-    return {"encrypted": True, "opener": "user", "encryption_kept": True}
+    return {
+        "encrypted": True,
+        "opener": "user",
+        "encryption_kept": True,
+        "permissions": dict(permissions),
+        "revision": revision,
+        "p": p,
+    }
 
 
-def open_document(path: str, password: str = "") -> dict:
+def open_document(path: str, password: str = "", held: dict | None = None) -> dict:
     """Open the working copy at `path` with `password` and remember it.
 
     The owner password removes the protection from the working copy. The
     user password leaves it byte for byte as it is and records the password
-    for later reads. A wrong password raises `pikepdf.PasswordError`."""
+    for later reads. A wrong password raises `pikepdf.PasswordError`.
+
+    `held` is a credential another engine process of the same window has
+    already opened: `{"opener": "user" | "recipient", "permissions",
+    "revision", "p"}` as that open answered. It is recorded without opening,
+    reading or writing any file, so a process that is given it never holds
+    the working copy open and never decrypts it."""
+    if held is not None:
+        return _register_held(path, password, held)
     result = _open_document(path, password, report_wrong_password=False)
     assert result is not None
     return result
+
+
+def _register_held(path: str, password: str, held: dict) -> dict:
+    opener = held.get("opener")
+    if opener not in ("user", "recipient"):
+        raise ValueError(f"a held credential is a user or recipient open, not {opener!r}")
+    granted = held.get("permissions")
+    if not isinstance(granted, dict):
+        raise ValueError("a held credential names its permissions")
+    permissions = {name: granted.get(name) is True for name, _ in _PERMISSION_KEYS}
+    revision = held.get("revision")
+    flags = held.get("p")
+    _documents[_key(path)] = _Credential(
+        opener,
+        password if opener == "user" else None,
+        permissions,
+        int(revision) if isinstance(revision, int) else None,
+        int(flags) if isinstance(flags, int) else None,
+        _key(path),
+    )
+    return {"encrypted": True, "opener": opener, "registered": True}
 
 
 def open_document_attempt(path: str, password: str = "") -> dict:

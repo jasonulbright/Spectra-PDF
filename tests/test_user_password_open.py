@@ -73,7 +73,12 @@ def protected(tmp_dir):
 @pytest.fixture
 def user_opened(protected):
     result = open_document(protected, USER)
+    # The grants another engine process of the window is given without
+    # opening the file.
+    grants = {key: result.pop(key) for key in ("permissions", "revision", "p")}
     assert result == {"encrypted": True, "opener": "user", "encryption_kept": True}
+    assert grants["revision"] == 6 and isinstance(grants["p"], int)
+    assert grants["permissions"]["print"] is False and grants["permissions"]["modify"] is True
     return protected
 
 
@@ -147,6 +152,8 @@ def test_open_document_attempt_returns_wrong_password_as_status(protected):
     assert open(protected, "rb").read() == before
 
     opened = open_document_attempt(protected, USER)
+    for key in ("permissions", "revision", "p"):
+        opened["document"].pop(key)
     assert opened == {
         "status": "opened",
         "document": {"encrypted": True, "opener": "user", "encryption_kept": True},

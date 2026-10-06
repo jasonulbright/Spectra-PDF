@@ -10,12 +10,17 @@ registers any of them.
 `distill` (a job method) and `create_pdf_folders` (a run method) are
 replaced by one gated handler: it waits until the file named by `gate`
 exists, or returns early when its request is cancelled, and answers its
-process id, whether it was cancelled, and the log of every request this
-process served before it as `[method, succeeded]` pairs. The harness
-registers last, so these replace the shipped handlers."""
+process id, whether it was cancelled, the log of every request this
+process served before it as `[method, succeeded]` pairs, and the methods of
+every line its input reader has received so far. A gate file whose content
+names a method also waits until a line of that method has been received.
+`linger` starts a thread that never ends, so the process does not exit
+when its input closes. The harness registers last, so these replace the
+shipped handlers."""
 
 import os
 import sys
+import threading
 import time
 
 sys.dont_write_bytecode = True
@@ -25,7 +30,9 @@ from engine import ipc  # noqa: E402
 
 _run = ipc.JsonRpcServer.run
 _handle = ipc.JsonRpcServer._handle
+_offer = ipc._Inbox.offer
 _served: list = []
+_received: list = []
 
 
 def _sleep(seconds: float) -> dict:
@@ -36,16 +43,32 @@ def _sleep(seconds: float) -> dict:
     return {"slept": seconds}
 
 
-def _gated(gate: str, **_ignored) -> dict:
+def _gate_open(gate: str) -> bool:
+    try:
+        with open(gate, encoding="utf-8") as f:
+            awaited = f.read().strip()
+    except OSError:
+        return False
+    return not awaited or awaited in _received
+
+
+def _gated(gate: str, linger: bool = False, **_ignored) -> dict:
     while True:
         if ipc.cancelled():
             cancelled = True
             break
-        if os.path.exists(gate):
+        if _gate_open(gate):
             cancelled = False
             break
         time.sleep(0.02)
-    return {"pid": os.getpid(), "cancelled": cancelled, "log": list(_served)}
+    if linger:
+        threading.Thread(target=lambda: time.sleep(10**9), daemon=False).start()
+    return {
+        "pid": os.getpid(),
+        "cancelled": cancelled,
+        "log": list(_served),
+        "received": list(_received),
+    }
 
 
 def _identity(folder: str) -> dict:
@@ -95,6 +118,12 @@ def _logged_handle(self, request):
     return response
 
 
+def _logged_offer(self, kind, value, *args, **kwargs):
+    if kind == "request" and isinstance(value, dict):
+        _received.append(value.get("method"))
+    return _offer(self, kind, value, *args, **kwargs)
+
+
 def _run_with_test_methods(self, *args, **kwargs):
     self.register("test_sleep", _sleep)
     self.register("test_pid", os.getpid)
@@ -106,6 +135,7 @@ def _run_with_test_methods(self, *args, **kwargs):
 
 ipc.JsonRpcServer.run = _run_with_test_methods
 ipc.JsonRpcServer._handle = _logged_handle
+ipc._Inbox.offer = _logged_offer
 
 from engine.__main__ import main  # noqa: E402
 

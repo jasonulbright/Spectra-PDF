@@ -99,7 +99,8 @@ def run_preflight_sweep(
     """Measure — and optionally repair — every PDF under `source`.
 
     Args:
-        source: The folder to sweep. Never written to, in either mode.
+        source: The folder to sweep. Read only, except that `in_place`
+            replaces each original with its fixed version.
         dest: Where the reports (and, in fix mode, the fixed copies) land.
         profile: A shipped profile id, or the rule itself as an object.
         mode: `check` reports; `fix` repairs a copy and re-checks it.
