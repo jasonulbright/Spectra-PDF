@@ -10,6 +10,7 @@ import {
   unlockLostDocument,
 } from '../src/renderer/lib/credential-recovery';
 import { recognizePage } from '../src/renderer/lib/ocr-recognize';
+import { beginDocumentWrites } from '../src/renderer/lib/document-writes';
 import { UNRESTRICTED } from '../src/renderer/lib/document-permissions';
 
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({ app: { getTesseractPath: async () => 'tesseract.exe' } }));
@@ -33,7 +34,7 @@ function engine() {
   const track = vi.fn(async (_m: string, _p: unknown, run: () => Promise<unknown>) => run());
   const closures = engineClosures({
     isTrackableMethod: () => false, beginInteractive: () => () => {},
-    runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain, track, rawCall,
+    runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain, beginDocumentWrites, track, rawCall,
   });
   return { ...closures, rawCall, runCommitGate, track, sent };
 }
@@ -113,7 +114,7 @@ describe('the gated call path', () => {
     const e = engine();
     const closures = engineClosures({
       isTrackableMethod: () => true, beginInteractive: () => () => {},
-      runCommitGate: e.runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain,
+      runCommitGate: e.runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain, beginDocumentWrites,
       track: e.track, rawCall: e.rawCall,
     });
     const writing = deferred();

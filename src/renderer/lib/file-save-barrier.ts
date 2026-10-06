@@ -14,7 +14,12 @@ export function registerFileSaveBarrier(barrier: SaveBarrier): () => void {
   return () => { barriers.delete(barrier); };
 }
 
-export async function withFileSave<T>(workingPath: string, destPath: string, save: () => Promise<T>): Promise<T> {
+/** Waits for every registered barrier of `workingPath`, holding nothing. */
+export async function awaitSaveBarriers(workingPath: string): Promise<void> {
   await Promise.all(Array.from(barriers, barrier => barrier(workingPath)));
+}
+
+export async function withFileSave<T>(workingPath: string, destPath: string, save: () => Promise<T>): Promise<T> {
+  await awaitSaveBarriers(workingPath);
   return withWriteChain([workingPath], () => withFileLock([workingPath, destPath], save));
 }

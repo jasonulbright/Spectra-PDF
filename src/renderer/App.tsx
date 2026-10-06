@@ -4,6 +4,7 @@ import { restoreHistory } from './lib/disk-history';
 import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { runPageCommit } from './lib/page-commit-run';
+import { whileDocumentLeaves } from './lib/document-writes';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
@@ -526,7 +527,9 @@ function AppContent(): React.ReactElement {
         const record = [...readState().files.values()].find((f) => f.workingPath === workingPath);
         const name = dest.split(/[\\/]/).pop() ?? dest;
         return await saveWorkingCopy(workingPath, record?.security, dest, {
-          call: (method, params) => call(method, params),
+          // The reseal runs under the copy's write chain: no gated call, so
+          // no commit gate runs while the chain is held.
+          call: (method, params) => callLocked(method, params),
           saveAs: file.saveAs,
           remove: file.remove,
           ...(asked
@@ -546,7 +549,7 @@ function AppContent(): React.ReactElement {
               if (answer === 'cancel') return false;
               pfx = answer.pfx;
               try {
-                await call('pubkey_reattach', {
+                await callLocked('pubkey_reattach', {
                   path: workingPath, source: record.path, pfx: answer.pfx, password: answer.password,
                 });
                 return true;
@@ -562,7 +565,7 @@ function AppContent(): React.ReactElement {
         return false;
       }
     },
-    [reportSaveFailure, showProceedConfirm, showCertUnlockPrompt, readState, call],
+    [reportSaveFailure, showProceedConfirm, showCertUnlockPrompt, readState, callLocked],
   );
   const saveOrReportRef = useRef(saveOrReport);
   saveOrReportRef.current = saveOrReport;
@@ -2763,10 +2766,12 @@ function AppContent(): React.ReactElement {
 
   // Run the commit ahead of a dependent step; on failure surface the error
   // and tell the caller to abort (the edits are still pending and retryable).
-  const commitOrAbort = useCallback(async (): Promise<boolean> => {
+  // `paths`: the working paths the dependent step reads or writes; the gate
+  // then waits only for their publications.
+  const commitOrAbort = useCallback(async (paths: readonly string[]): Promise<boolean> => {
     historyRetry.current = null;
     try {
-      await commitIfNeeded();
+      await commitIfNeeded(paths);
       return true;
     } catch (err) {
       setCommitError(
@@ -2794,7 +2799,8 @@ function AppContent(): React.ReactElement {
         );
       },
       async (pending) => {
-        if (!(await commitOrAbort())) return false;
+        const working = pending.flatMap(({ path }) => readState().files.get(path)?.workingPath ?? []);
+        if (!(await commitOrAbort(working))) return false;
         for (const { path } of pending) {
           const before = snapshots().find((snapshot) => snapshot.path === path);
           if (!before) continue;
@@ -2824,7 +2830,7 @@ function AppContent(): React.ReactElement {
       await handleSaveAsRef.current();
       return;
     }
-    if (!(await commitOrAbort())) return;
+    if (!(await commitOrAbort([activeFile.workingPath]))) return;
     if (!(await saveOrReport(activeFile.workingPath, activeFile.path))) return;
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
   }, [activeFile, dispatch, commitOrAbort, saveOrReport]);
@@ -2835,7 +2841,7 @@ function AppContent(): React.ReactElement {
   const handleSaveFiles = useCallback(async (paths: readonly string[]) => {
     const pending = unsavedAmong(readState(), paths);
     if (pending.length === 0) return;
-    if (!(await commitOrAbort())) return;
+    if (!(await commitOrAbort(pending.flatMap((path) => readState().files.get(path)?.workingPath ?? [])))) return;
     await saveListedFiles(readState, pending, {
       route: (path) => {
         const f = readState().files.get(path);
@@ -2871,7 +2877,7 @@ function AppContent(): React.ReactElement {
         return false;
       }
       granted = claim.granted;
-      if (!(await commitOrAbort())) return false;
+      if (!(await commitOrAbort([file.workingPath]))) return false;
       if (!(await saveOrReport(file.workingPath, dest))) return false;
       dispatch({ type: 'MARK_SAVED', path: file.path });
       return true;
@@ -2902,7 +2908,7 @@ function AppContent(): React.ReactElement {
   // back fast and named, and are shown rather than swallowed.
   const handleSendToEmail = useCallback(async () => {
     if (!activeFile) return;
-    if (!(await commitOrAbort())) return;
+    if (!(await commitOrAbort([activeFile.workingPath]))) return;
     try {
       const staged = await app.stageSendCopy(activeFile.workingPath, activeFile.name);
       await app.sendByEmail(staged);
@@ -3068,54 +3074,59 @@ function AppContent(): React.ReactElement {
         sourcePathOperations.current.run([path], async () => {
           const beforeCommit = readState().files.get(path);
           if (!beforeCommit || beforeCommit.importOnly) return false;
-          if (!(await commitOrAbort())) return false;
-          const held = await reserve();
-          const handed = readState().files.get(path);
-          if (!handed || handed.importOnly) {
-            await tabDrag.release(held.token).catch(() => {});
-            return false;
-          }
-          const plan = planHandOff(reservationHolds(held), isFileDirty(handed));
-          if (!plan.hand) return false;
-          // A destination that dies before it opens the document gives it back, and
-          // the window it goes back to is this one. Recorded per path so the return
-          // can be told apart from a document arriving from anywhere else: the tab
-          // is still open here, and re-opening it would be a second copy.
-          const flight = { returned: false };
-          handOffsInFlight.current.set(path, flight);
-          let moved: TabDragResult;
-          try {
-            if (plan.saveFirst) {
-              // A failed write gives the document back BEFORE it is reported:
-              // the notice waits on the user, and the reservation must not.
-              const failures: unknown[] = [];
-              if (!(await saveOrReportRef.current(
-                handed.workingPath, handed.path, false, (error) => failures.push(error),
-              ))) {
-                handOffsInFlight.current.delete(path);
-                await tabDrag.release(held.token).catch(() => {});
-                if (failures.length > 0) void reportSaveFailureRef.current(handed.path, failures[0]);
-                return false;
-              }
-              dispatch({ type: 'MARK_SAVED', path });
+          // The working copy written back over the user's file must hold every
+          // write asked for before the move: the move waits for those, and a
+          // write asked for while the document leaves refuses at once.
+          return whileDocumentLeaves(beforeCommit.workingPath, async () => {
+            if (!(await commitOrAbort([beforeCommit.workingPath]))) return false;
+            const held = await reserve();
+            const handed = readState().files.get(path);
+            if (!handed || handed.importOnly) {
+              await tabDrag.release(held.token).catch(() => {});
+              return false;
             }
-            moved = await tabDrag.commit(held.token);
-          } catch (e) {
-            // The write a move costs failed. The document is still held somewhere
-            // else, and nothing will ever come for it.
+            const plan = planHandOff(reservationHolds(held), isFileDirty(handed));
+            if (!plan.hand) return false;
+            // A destination that dies before it opens the document gives it back, and
+            // the window it goes back to is this one. Recorded per path so the return
+            // can be told apart from a document arriving from anywhere else: the tab
+            // is still open here, and re-opening it would be a second copy.
+            const flight = { returned: false };
+            handOffsInFlight.current.set(path, flight);
+            let moved: TabDragResult;
+            try {
+              if (plan.saveFirst) {
+                // A failed write gives the document back BEFORE it is reported:
+                // the notice waits on the user, and the reservation must not.
+                const failures: unknown[] = [];
+                if (!(await saveOrReportRef.current(
+                  handed.workingPath, handed.path, false, (error) => failures.push(error),
+                ))) {
+                  handOffsInFlight.current.delete(path);
+                  await tabDrag.release(held.token).catch(() => {});
+                  if (failures.length > 0) void reportSaveFailureRef.current(handed.path, failures[0]);
+                  return false;
+                }
+                dispatch({ type: 'MARK_SAVED', path });
+              }
+              moved = await tabDrag.commit(held.token);
+            } catch (e) {
+              // The write a move costs failed. The document is still held somewhere
+              // else, and nothing will ever come for it.
+              handOffsInFlight.current.delete(path);
+              await tabDrag.release(held.token).catch(() => {});
+              throw e;
+            }
             handOffsInFlight.current.delete(path);
-            await tabDrag.release(held.token).catch(() => {});
-            throw e;
-          }
-          handOffsInFlight.current.delete(path);
-          // Nothing below this line awaits, so a return that arrives after the
-          // check finds no flight and re-opens the document instead.
-          if (!tabMoved(moved) || flight.returned) return false;
-          // Closed WITHOUT a release — the path already belongs to the receiving
-          // window, and releasing here would strip the claim off the window that
-          // now holds it.
-          dispatch({ type: 'CLOSE_FILE', path });
-          return true;
+            // Nothing below this line awaits, so a return that arrives after the
+            // check finds no flight and re-opens the document instead.
+            if (!tabMoved(moved) || flight.returned) return false;
+            // Closed WITHOUT a release — the path already belongs to the receiving
+            // window, and releasing here would strip the claim off the window that
+            // now holds it.
+            dispatch({ type: 'CLOSE_FILE', path });
+            return true;
+          });
         }),
       ),
     [dispatch, commitOrAbort, isFileDirty, readState],
@@ -3140,7 +3151,9 @@ function AppContent(): React.ReactElement {
   // document saved here would discard its undo chain for a tab that moved.
   const reorderTab = useCallback(
     async (path: string, index: number): Promise<boolean> => {
-      if (!(await commitOrAbort())) return false;
+      // Arrangement writes no bytes: the gate commits the page tier and waits
+      // for no publication.
+      if (!(await commitOrAbort([]))) return false;
       dispatch({ type: 'REORDER_FILE', path, index });
       // The document did not change hands: the tab is still here, in its new
       // place, and the caller must not close it.

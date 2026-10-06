@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { setCommitGate, runCommitGate } from '../src/renderer/lib/commit-gate';
+import { commitPendingPageEdits, setCommitGate, runCommitGate } from '../src/renderer/lib/commit-gate';
 import { commitLockKeys, runPageCommit, PAGE_COMMIT_ATTEMPTS } from '../src/renderer/lib/page-commit-run';
 import { withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
-import { hasWorkspacePublication, serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
+import { announceWorkspacePublication, hasWorkspacePublication, serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenFile } from '../src/renderer/state/types';
 
@@ -93,6 +93,19 @@ describe('runCommitGate', () => {
     await publication;
     await gateW;
     expect(order).toEqual(['gate D', 'publish W', 'gate W']);
+  });
+
+  it('the page commit alone commits every dirty file and waits for no publication', async () => {
+    const tier = pageTier();
+    tier.edit('E1');
+    const done = announceWorkspacePublication(['work-W']);
+    try {
+      const commit = commitPendingPageEdits();
+      await tier.completeWrites();
+      await commit;
+      expect(tier.committed).toEqual(['E1']);
+      expect(hasWorkspacePublication(['work-W'])).toBe(true);
+    } finally { done(); }
   });
 
   it('without paths, waits for every outstanding publication', async () => {

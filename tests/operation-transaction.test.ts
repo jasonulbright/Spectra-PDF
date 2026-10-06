@@ -7,11 +7,13 @@ import { OP_EDIT_CLASS, type OpMethod } from '../src/renderer/lib/op-edit-class'
 import { EDIT_DECLINED } from '../src/renderer/lib/edit-text';
 import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
-import type { AppAction, AppState, OpenFile } from '../src/renderer/state/types';
+import type { AppAction, AppState, OpenDocument, OpenFile } from '../src/renderer/state/types';
+import { commitPageEdits } from '../src/renderer/lib/workspace-commit';
 import { hasPendingPageCommit, recoverPendingPageCommit, type PageCommitEntry } from '../src/renderer/lib/page-commit-transaction';
 import * as locks from '../src/renderer/lib/engine-lock';
+import * as writes from '../src/renderer/lib/document-writes';
 import { withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
-import { serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
+import { hasWorkspacePublication, serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
 import { runPageCommit } from '../src/renderer/lib/page-commit-run';
 import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
 import { restoreHistory, type HistoryIo } from '../src/renderer/lib/disk-history';
@@ -206,6 +208,8 @@ describe('whole-file operation publication', () => {
     await expect(f.run()).rejects.toThrow(`injected ${where}`);
     f.unchanged(); expect(f.events).not.toContain('done'); expect(f.events).toContain('error');
     expect([...f.disk.keys()].some(p => p.includes('.operation-'))).toBe(false);
+    expect(__chainedCount()).toBe(0); expect(__lockedCount()).toBe(0);
+    expect(hasWorkspacePublication()).toBe(false); expect(writes.__documentWriteCount()).toBe(0);
   });
   it.each([null, [], 'done', {}, { output: 'foreign' }])('refuses an invalid report %j', async report => {
     const f = await fixture(); f.io.callStaged = async () => report;
@@ -392,7 +396,7 @@ function twoDocuments() {
   // The production `call` and `callLocked`, with the real locks and gate.
   const sent: string[] = [];
   const { call, callLocked } = engineClosures({
-    ...locks, isTrackableMethod: (method: string) => method !== 'get_page_count',
+    ...locks, ...writes, isTrackableMethod: (method: string) => method !== 'get_page_count',
     beginInteractive: () => () => {}, runCommitGate,
     restoreLostCredentials: async () => {},
     track: async (_m: string, _p: unknown, run: () => Promise<unknown>) => run(),
@@ -491,29 +495,66 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
     expect(__lockedCount()).toBe(0);
   });
 
-  it('a second rewrite of the path never sends its engine step before the first one publishes', async () => {
+  it('a second rewrite of the path, asked for during the first one, queues and applies to its result', async () => {
     const w = twoDocuments();
+    w.io.commit = paths => runCommitGate(paths);
+    const confirms: string[] = [];
+    w.io.confirm = async () => { confirms.push(`confirm after ${w.events.filter(e => e === 'publish work-A').length}`); return true; };
     const release = w.hold('A');
     try {
       const first = w.rewrite('A');
       await until(() => w.events.includes('engine A rotate'));
       // Unheld, the second engine step would answer before the first.
-      w.io.callStaged = async (method, params) => {
-        w.events.push(w.events.includes('publish work-A') ? 'second step after publish' : 'second step before publish');
-        return { output: params.output, method };
-      };
       const second = w.rewrite('A');
-      const outcome = second.then(() => 'published', (error: Error) => error.message);
       await turn();
-      const reader = w.callLocked('get_page_count', { file: 'work-A' });
+      expect(w.events).toEqual(['engine A rotate']);
+      release();
+      await Promise.all([first, second]);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A',
+        'engine A rotate', 'engine A done', 'publish work-A']);
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1, 2, 2]));
+      expect(w.store.getState().files.get('A')!.undoStack).toHaveLength(2);
+      // Consent is asked again for the bytes the second write now applies to.
+      expect(confirms).toEqual(['confirm after 0', 'confirm after 0', 'confirm after 1']);
+    } finally { release(); }
+    expect(locks.__chainedCount()).toBe(0);
+  });
+
+  it('two rewrites of the path asked for in one turn both publish, in issue order', async () => {
+    const w = twoDocuments();
+    w.io.commit = paths => runCommitGate(paths);
+    let confirms = 0;
+    w.io.confirm = async () => { confirms++; return true; };
+    const release = w.hold('A');
+    try {
+      const first = w.rewrite('A');
+      const second = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      await turn();
+      expect(w.events).toEqual(['engine A rotate']);
+      release();
+      await Promise.all([first, second]);
+      expect(w.events.filter(e => e === 'publish work-A')).toHaveLength(2);
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1, 2, 2]));
+      expect(confirms).toBe(3);
+    } finally { release(); }
+  });
+
+  it('a gated reader asked for during a rewrite reads the rewritten bytes; a reader that runs no gate reads the old ones', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      // A user operation whose output leaves the workspace (print, export).
+      const gated = w.call('compress', { file: 'work-A', output: 'out.pdf' });
+      const background = w.callLocked('get_page_count', { file: 'work-A' });
       await until(() => w.sent.length === 1);
-      await reader;
+      await background;
       expect(w.sent).toEqual(['get_page_count work-A [1]']);
       release();
-      await first;
-      // The second rewrite was asked for on the revision the first replaced.
-      expect(await outcome).toMatch(/changed/);
-      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A']);
+      await Promise.all([long, gated]);
+      expect(w.sent).toEqual(['get_page_count work-A [1]', 'compress work-A [1,2]']);
     } finally { release(); }
   });
 
@@ -583,18 +624,38 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
     } finally { releaseFirst(); releaseSecond(); w.setView(null); }
   });
 
-  it('a page edit still pending at the publication refuses it; one on the rewritten file refuses before the next step', async () => {
-    const pending = twoDocuments();
-    let release = pending.hold('A');
+  it('a page edit of another document pending at the publication is committed first, then the rewrite publishes', async () => {
+    const w = twoDocuments();
+    const commits: string[] = [];
+    // The page commit: what it commits leaves the tier.
+    setCommitGate(async () => { commits.push('commit B'); w.setView(null); });
+    const release = w.hold('A');
     try {
-      const long = pending.rewrite('A');
-      await until(() => pending.events.includes('engine A rotate'));
-      pending.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      w.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
       release();
-      await expect(long).rejects.toThrow(/changed/);
-      expect(pending.events).not.toContain('publish work-A');
-      expect(pending.disk.get('work-A')).toEqual(new Uint8Array([1]));
-    } finally { release(); }
+      await long;
+      expect(commits).toEqual(['commit B']);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A']);
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1, 2]));
+    } finally { release(); w.setView(null); }
+  });
+
+  it('a page edit that cannot be committed refuses the rewrite; one on the rewritten file refuses before the next step', async () => {
+    const stuck = twoDocuments();
+    setCommitGate(async () => { throw new Error('commit refused'); });
+    let release = stuck.hold('A');
+    try {
+      const long = stuck.rewrite('A');
+      await until(() => stuck.events.includes('engine A rotate'));
+      stuck.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      release();
+      await expect(long).rejects.toThrow('commit refused');
+      expect(stuck.events).not.toContain('publish work-A');
+      expect(stuck.disk.get('work-A')).toEqual(new Uint8Array([1]));
+      expect([...stuck.disk.keys()].filter(key => key.includes('.operation-'))).toEqual([]);
+    } finally { release(); stuck.setView(null); setCommitGate(null); }
     const own = twoDocuments();
     release = own.hold('A');
     try {
@@ -604,7 +665,86 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
       release();
       await expect(long).rejects.toThrow(/changed/);
       expect(own.events).toEqual(['engine A rotate', 'engine A done']);
+    } finally { release(); own.setView(null); }
+    expect(locks.__chainedCount()).toBe(0);
+    expect(__lockedCount()).toBe(0);
+    expect(hasWorkspacePublication()).toBe(false);
+  });
+
+  it.each(['engine step', 'fence'])('an owner that goes away at the %s refuses the rewrite and leaves nothing held', async where => {
+    const w = twoDocuments();
+    let active = true;
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A', { assertActive: () => { if (!active) throw new Error('owner gone'); } });
+      await until(() => w.events.includes('engine A rotate'));
+      if (where === 'engine step') active = false;
+      else w.io.index = readingWith(async bytes => { active = false; return bytes.length; });
+      release();
+      await expect(long).rejects.toThrow('owner gone');
+      expect(w.events).not.toContain('publish work-A');
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1]));
+      expect([...w.disk.keys()].filter(key => key.includes('.operation-'))).toEqual([]);
     } finally { release(); }
+    expect(locks.__chainedCount()).toBe(0);
+    expect(__lockedCount()).toBe(0);
+    expect(hasWorkspacePublication()).toBe(false);
+    expect(writes.__documentWriteCount()).toBe(0);
+  });
+});
+
+describe('a document that leaves this window', () => {
+  it('leaves only after a write in progress has published, and refuses a write asked for while it leaves', async () => {
+    const w = twoDocuments();
+    w.io.commit = paths => runCommitGate(paths);
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const left = writes.whileDocumentLeaves('work-A', async () => {
+        await runCommitGate(['work-A']);
+        w.events.push(`leave with [${Array.from(w.disk.get('work-A')!).join(',')}]`);
+      });
+      await turn();
+      // Asked for while the document leaves: refused before any await.
+      const confirm = vi.fn(async () => true);
+      w.io.confirm = confirm;
+      const late = w.rewrite('A');
+      const lateCall = w.call('compress', { file: 'work-A', output: 'work-A' });
+      await expect(late).rejects.toThrow(/changed/);
+      await expect(lateCall).rejects.toThrow(/changed/);
+      expect(confirm).not.toHaveBeenCalled();
+      expect(w.events).toEqual(['engine A rotate']);
+      release();
+      await Promise.all([long, left]);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A', 'leave with [1,2]']);
+      // Once it stayed, writes are accepted again.
+      await w.rewrite('A');
+      expect(w.events.at(-1)).toBe('publish work-A');
+    } finally { release(); }
+    expect(writes.__documentWriteCount()).toBe(0);
+  });
+
+  it('App moves a document only inside the leave, gated on its own working path', () => {
+    const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
+    const handOff = app.slice(app.indexOf('const handOffDocument = useCallback('), app.indexOf('const handleMoveToNewWindow'));
+    expect(handOff).toContain('return whileDocumentLeaves(beforeCommit.workingPath, async () => {');
+    expect(handOff.indexOf('whileDocumentLeaves(')).toBeLessThan(handOff.indexOf('commitOrAbort([beforeCommit.workingPath])'));
+    expect(handOff.indexOf('commitOrAbort([beforeCommit.workingPath])')).toBeLessThan(handOff.indexOf("dispatch({ type: 'CLOSE_FILE', path })"));
+  });
+});
+
+describe('commit gates of the App name their paths', () => {
+  const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
+  it('every dependent step passes the working paths it reads or writes', () => {
+    expect(app).not.toMatch(/commitOrAbort\(\)/);
+    for (const call of ['commitOrAbort([activeFile.workingPath])', 'commitOrAbort([file.workingPath])',
+      'commitOrAbort(working)', 'commitOrAbort([])']) expect(app).toContain(call);
+  });
+  it('the reseal of a save runs no gated call under the write chain', () => {
+    const save = app.slice(app.indexOf('const saveOrReport = useCallback('), app.indexOf('const saveOrReportRef'));
+    expect(save).toContain('call: (method, params) => callLocked(method, params)');
+    expect(save).toContain("await callLocked('pubkey_reattach'");
   });
 });
 
@@ -621,7 +761,9 @@ describe('lock order across the write chain, the file locks and the lane', () =>
       const second = w.rewrite('A');
       release();
       const outcomes = await Promise.allSettled([first, commit, save, undo, second]);
-      expect(outcomes.map(o => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled', 'rejected']);
+      // The second rewrite queues behind the chain and applies to the result.
+      expect(outcomes.map(o => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+      expect(w.events.filter(e => e === 'publish work-A').length).toBe(3);
       expect(w.events).toContain('commit A');
       expect(w.events).toContain('save');
     } finally { release(); }
@@ -666,5 +808,107 @@ describe('lock order across the write chain, the file locks and the lane', () =>
     await Promise.all([other, rewrite]);
     expect(w.events).toEqual(['other commit', 'gate commit', 'engine A rotate', 'engine A done', 'publish work-A']);
     expect(__lockedCount()).toBe(0);
+  });
+});
+
+describe('the page commit a rewrite runs under its write chain', () => {
+  afterEach(() => setCommitGate(null));
+
+  it('settles while a disk undo of the same path, announced, waits for that chain', async () => {
+    const w = twoDocuments();
+    setCommitGate(async () => { w.events.push('commit B'); w.setView(null); });
+    const release = w.hold('A');
+    try {
+      const rewrite = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      const undo = restoreHistory('undo', w.read, w.store.dispatch, w.history);
+      await until(() => hasWorkspacePublication(['work-A']) && locks.__chainedCount() === 1);
+      w.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      release();
+      await Promise.all([rewrite, undo]);
+      expect(w.events).toEqual(['engine A rotate', 'engine A done', 'commit B', 'publish work-A', 'publish work-A']);
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1]));
+    } finally { release(); w.setView(null); }
+    expect(locks.__chainedCount()).toBe(0);
+    expect(hasWorkspacePublication()).toBe(false);
+  });
+});
+
+describe('a page edit of another document during a rewrite, through the reducer', () => {
+  afterEach(() => setCommitGate(null));
+
+  it('is committed before the publication, keeps its page ids, and the rewrite publishes', async () => {
+    const onePage = async (width: number) => {
+      const pdf = await PDFDocument.create(); pdf.addPage([width, 800]); return pdf.save();
+    };
+    const disk = new Map<string, Uint8Array>([['work-A', await onePage(600)], ['work-B', await onePage(300)]]);
+    const open = (path: string): OpenFile => ({ path, workingPath: `work-${path}`, name: path,
+      buffer: disk.get(`work-${path}`)!.slice(), pageCount: 1, dirty: false, undoStack: [], redoStack: [] });
+    const fileA = open('A'), fileB = open('B');
+    const documentOf = (file: OpenFile, width: number): OpenDocument => ({ ...file, id: `${file.path}#g1#0`, pageCount: 1,
+      pages: [{ id: `${file.path}#g1#p0`, sourceDocId: file.path, sourcePageIndex: 0, rotation: 0, width, height: 800 }] });
+    const store = createAppStore({ ...initialState, activeFileId: 'A', files: new Map([['A', fileA], ['B', fileB]]),
+      workspace: { documents: [documentOf(fileA, 600), documentOf(fileB, 300)] } });
+    const events: string[] = [];
+    const transaction = {
+      publish: async (id: string, entries: PageCommitEntry[]) => {
+        for (const entry of entries) {
+          if (entry.expectedWorkingSha256 && hash(disk.get(entry.workingPath)!) !== entry.expectedWorkingSha256) throw new Error('revision mismatch');
+          disk.set(`${entry.workingPath}.snap-${id}`, disk.get(entry.workingPath)!.slice());
+          disk.set(entry.workingPath, disk.get(entry.stagedPath)!.slice());
+          events.push(`publish ${entry.workingPath}`);
+        }
+        return { status: 'committed', snapshots: entries.map(e => `${e.workingPath}.snap-${id}`), detail: '' };
+      },
+      abort: async () => ({ status: 'rolledBack', snapshots: [], detail: '' }),
+      acknowledge: async () => {},
+    };
+    const writeBuffer = async (path: string, bytes: Uint8Array) => { disk.set(path, bytes.slice()); };
+    const remove = async (path: string) => { disk.delete(path); };
+    setCommitGate(async () => {
+      const state = store.getState();
+      if (!state.pageDirtyPaths.length) return;
+      events.push(`commit ${state.pageDirtyPaths.join(',')}`);
+      await commitPageEdits({ workspace: state.workspace, files: state.files, dirtyPaths: state.pageDirtyPaths,
+        tier: { planned: { pageUndoStack: state.pageUndoStack, pageRedoStack: state.pageRedoStack }, current: store.getState },
+        dispatch: store.dispatch, transaction, writeBuffer, remove });
+    });
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    const io: OperationIo = {
+      confirm: async () => true, commit: paths => runCommitGate(paths),
+      read: async path => disk.get(path)!.slice(), write: writeBuffer, remove,
+      index: readingWith(async bytes => (await PDFDocument.load(bytes)).getPageCount()),
+      track: async (_method, _params, run) => run(),
+      callStaged: async (_method, params) => {
+        events.push('engine A');
+        await held;
+        const pdf = await PDFDocument.load(disk.get(String(params.file))!);
+        pdf.getPage(0).setRotation(degrees(90));
+        disk.set(String(params.output), await pdf.save());
+        return { output: params.output };
+      },
+      transaction,
+    };
+    try {
+      const rewrite = executeWorkspaceOperation('A', 'rotate', { angle: 90 }, store.getState, store.dispatch, io);
+      await until(() => events.includes('engine A'));
+      store.dispatch({ type: 'ROTATE_PAGE_REF', docId: 'B#g1#0', pageId: 'B#g1#p0', rotation: 90 });
+      expect(store.getState().pageDirtyPaths).toEqual(['B']);
+      release();
+      await rewrite;
+      expect(events).toEqual(['engine A', 'commit B', 'publish work-B', 'publish work-A']);
+      const state = store.getState();
+      expect(state.pageDirtyPaths).toEqual([]);
+      expect(state.files.get('B')!.undoStack).toHaveLength(1);
+      expect(state.files.get('A')!.undoStack).toHaveLength(1);
+      // B's page keeps the id the commit planned; its turn is in its bytes now.
+      const pageB = state.workspace.documents.find(d => d.path === 'B')!.pages[0];
+      expect(pageB.id).toBe('B#g1#p0');
+      expect(pageB.rotation).toBe(0);
+      expect((await PDFDocument.load(disk.get('work-B')!)).getPage(0).getRotation().angle).toBe(90);
+      expect((await PDFDocument.load(disk.get('work-A')!)).getPage(0).getRotation().angle).toBe(90);
+      expect(state.files.get('A')!.buffer).toEqual(disk.get('work-A'));
+    } finally { release(); }
   });
 });

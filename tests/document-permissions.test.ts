@@ -30,6 +30,7 @@ import {
   type PrepareDocumentIo,
 } from '../src/renderer/lib/document-open';
 import * as locks from '../src/renderer/lib/engine-lock';
+import { registerFileSaveBarrier } from '../src/renderer/lib/file-save-barrier';
 import { droppedCredentials, releaseDocumentCredentials } from '../src/renderer/lib/credential-release';
 import { documentPassword, rememberDocumentPassword } from '../src/renderer/lib/document-passwords';
 import { releaseStageCredential, setStageCredentialCaller, shareStageCredential } from '../src/renderer/lib/stage-credentials';
@@ -604,6 +605,22 @@ describe('a certificate-encrypted document', () => {
     finish();
     await Promise.all([writer, saved]);
     expect(order).toEqual(['rewrite published', 'pubkey_reseal', 'saveAs']);
+  });
+
+  it('waits for the save barriers of the working copy before the reseal reads it', async () => {
+    const order: string[] = [];
+    const unregister = registerFileSaveBarrier(async (path) => { order.push(`barrier ${path}`); });
+    try {
+      const security = parseDocumentSecurity({ opener: 'recipient', permissions: PRINT_ONLY });
+      await saveWorkingCopy('scratch/w.pdf', security, PATH, {
+        call: async (method, params) => { order.push(method); return { output: params.output }; },
+        saveAs: async () => { order.push('saveAs'); },
+        remove: async () => {},
+        reattach: async () => false,
+      });
+    } finally { unregister(); }
+    expect(order[0]).toBe('barrier scratch/w.pdf');
+    expect(order.indexOf('barrier scratch/w.pdf')).toBeLessThan(order.indexOf('pubkey_reseal'));
   });
 
   it('writes nothing over the file when the reseal is refused', async () => {

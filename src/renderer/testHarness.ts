@@ -12,6 +12,9 @@
 import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBridge, type StoreCertificateAnswer } from './lib/tauri-bridge';
 import { emit } from '@tauri-apps/api/event';
 import { runCommitGate } from './lib/commit-gate';
+import { holdRewriteEngineSteps } from './lib/workspace-rewrite';
+
+let rewriteHold: ReturnType<typeof holdRewriteEngineSteps> | null = null;
 import { windowLabel } from './lib/window-label';
 import {
   platformCapabilities,
@@ -846,6 +849,25 @@ function armAnyFilePicker(path: string | null): void {
   armedAnyFilePick = { path };
 }
 
+/** The certificate prompt's key-bundle picker, answered at
+ * `dialog.pickCertificate` so the prompt and the unlock run unchanged. */
+let armedCertificatePick: { path: string | null } | null = null;
+let certificatePickerIntercepted = false;
+
+function armCertificatePicker(path: string | null): void {
+  if (!certificatePickerIntercepted) {
+    const native = dialog.pickCertificate;
+    dialog.pickCertificate = async () => {
+      const armed = armedCertificatePick;
+      if (!armed) return native();
+      armedCertificatePick = null;
+      return armed.path;
+    };
+    certificatePickerIntercepted = true;
+  }
+  armedCertificatePick = { path };
+}
+
 /**
  * The native "save form data" dialog: OS-modal like every other picker, and
  * the sole entry to the branches that hand a FILE over — a submission built
@@ -1521,6 +1543,12 @@ export interface TestHarness {
    * MAPI launch half is deliberately not bridged — it opens a real compose
    * window on boxes with a mail client. */
   sendToEmailStage: () => Promise<string>;
+  /** Holds every workspace rewrite at the start of its engine steps until
+   * `releaseRewriteEngineSteps`; `rewriteEngineStepsWaiting` counts the
+   * rewrites held there. */
+  holdRewriteEngineSteps: () => void;
+  releaseRewriteEngineSteps: () => void;
+  rewriteEngineStepsWaiting: () => number;
   /** Override platform capability flags; unnamed flags keep their value.
    * Surfaces read the flags on render, so the change shows on the next one.
    * Returns the full record in force afterwards. */
@@ -2153,6 +2181,9 @@ export interface TestHarness {
    * that opens it, so the browse handler, its probe and its store-or-refuse
    * decision are all the shipped ones. */
   answerAnyFilePicker: (path: string | null) => void;
+  /** Answer the next pick of the certificate prompt's key bundle with this
+   * path, or with `null` for a cancelled one. Consumed by a single pick. */
+  answerCertificatePicker: (path: string | null) => void;
   /** Answer the next native raster pick — the signature capture dialog's
    * import door or the stamp appearance section's logo — with this path, or
    * with `null` for a cancelled one. Consumed by a single pick. */
@@ -2646,6 +2677,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       return platformCapabilities();
     },
     platformCapabilities: () => platformCapabilities(),
+    holdRewriteEngineSteps: () => {
+      rewriteHold?.release();
+      rewriteHold = holdRewriteEngineSteps();
+    },
+    releaseRewriteEngineSteps: () => {
+      rewriteHold?.release();
+      rewriteHold = null;
+    },
+    rewriteEngineStepsWaiting: () => rewriteHold?.waiting() ?? 0,
     sendToEmailStage: async () => {
       const snap = deps.getStateSnapshot();
       if (!snap.activeFile) {
@@ -3735,6 +3775,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     gsAnswer: () => gsCapability(),
     answerAnyFilePicker: (path) => armAnyFilePicker(path),
+    answerCertificatePicker: (path) => armCertificatePicker(path),
     answerImagePicker: (path) => armImagePicker(path),
     answerNextFormDataSaveDialog: (path) => armFormDataSaveDialog(path),
     iccAssentRefresh: async () => {
