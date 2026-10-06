@@ -170,7 +170,59 @@ fn reclaim_job_intermediates(dir: &Path) -> usize {
             removed += 1;
         }
     }
-    removed
+    removed + reclaim_engine_stages(dir)
+}
+
+/// How the engine names the stage its `distill` writes beside the output
+/// (`engine/inplace.py`): `.spectra-stage-<pid>-<token>.pdf`.
+const ENGINE_STAGE_PREFIX: &str = ".spectra-stage-";
+
+/// The process id an engine stage name carries: the engine process that
+/// wrote it, a child of the CLI the printer ran, never the CLI itself.
+fn engine_stage_owner(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(ENGINE_STAGE_PREFIX)?.strip_suffix(".pdf")?;
+    let (pid, token) = rest.split_once('-')?;
+    if token.is_empty() || !token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    crate::staging::decimal_pid(pid)
+}
+
+/// Whether the engine process `pid` may still be writing its stage. Only a
+/// proof that no process holds `pid` answers false: any other answer, and a
+/// pid the platform cannot ask about, keeps the stage. A pid the system has
+/// since given to another process reads as alive, so the stage is kept.
+#[cfg(windows)]
+fn stage_owner_alive(pid: u32) -> bool {
+    crate::staging::process_running(pid)
+}
+
+/// `kill(pid, 0)` refuses with ESRCH only when no process holds `pid`; a
+/// zombie still holds it.
+#[cfg(target_os = "linux")]
+fn stage_owner_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return true;
+    };
+    if pid <= 0 || unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn stage_owner_alive(_pid: u32) -> bool {
+    true
+}
+
+/// Remove the engine stages in the printed folder whose writer has exited: a
+/// conversion killed before it landed its PDF leaves one.
+fn reclaim_engine_stages(dir: &Path) -> usize {
+    reclaim_engine_stages_with(dir, stage_owner_alive)
+}
+
+fn reclaim_engine_stages_with(dir: &Path, alive: impl Fn(u32) -> bool) -> usize {
+    crate::staging::reclaim(dir, std::process::id(), engine_stage_owner, alive)
 }
 
 /// Create a path atomically, failing if anything is already there.
@@ -313,6 +365,7 @@ fn run_cli_conversion(
             // name taken.
             let _ = std::fs::remove_file(&part_path);
             let _ = std::fs::remove_file(&pdf_path);
+            reclaim_engine_stages(&dir);
             Err(e)
         }
     }
@@ -782,6 +835,138 @@ mod tests {
             unrelated.iter().map(|(name, _)| name.to_string()).collect();
         kept.insert(finished.file_name().unwrap().to_str().unwrap().to_string());
         assert_eq!(names(dir.path()), kept);
+    }
+
+    #[test]
+    fn an_engine_stage_name_yields_the_pid_of_its_writer_and_nothing_else_does() {
+        assert_eq!(engine_stage_owner(".spectra-stage-4300-ab_C9.pdf"), Some(4300));
+        for name in [
+            ".spectra-stage-04300-ab.pdf",
+            ".spectra-stage-4300-.pdf",
+            ".spectra-stage--ab.pdf",
+            ".spectra-stage-x-ab.pdf",
+            ".spectra-stage-4300-a-b.pdf",
+            ".spectra-stage-4300-a.b.pdf",
+            ".spectra-stage-4300-ab.pdf.part",
+            ".spectra-stage-4300-ab.ps",
+            ".spectra-stage-99999999999-ab.pdf",
+            "spectra-stage-4300-ab.pdf",
+            "Printed 1700000000.pdf",
+        ] {
+            assert_eq!(engine_stage_owner(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_stage_is_removed_only_when_its_writer_is_proven_gone() {
+        const LIVE: u32 = 4200;
+        const GONE: u32 = 4300;
+        // Another process now holds the pid the stage carries.
+        const RECYCLED: u32 = 4400;
+        // The platform cannot answer for this pid.
+        const UNKNOWN: u32 = 4500;
+        let dir = tempfile::tempdir().unwrap();
+        let stage = |pid: u32| format!("{ENGINE_STAGE_PREFIX}{pid}-tok_1.pdf");
+        let mut kept: std::collections::BTreeSet<String> = [LIVE, RECYCLED, UNKNOWN, std::process::id()]
+            .into_iter()
+            .map(stage)
+            .collect();
+        kept.extend(["Printed 1700000000.pdf".to_string(), ".spectra-stage-04300-tok.pdf".to_string()]);
+        for name in kept.iter().chain([&stage(GONE)]) {
+            std::fs::write(dir.path().join(name), b"%PDF").unwrap();
+        }
+        let asked = std::sync::Mutex::new(Vec::new());
+        let alive = |pid: u32| {
+            asked.lock().unwrap().push(pid);
+            pid != GONE
+        };
+        assert_eq!(reclaim_engine_stages_with(dir.path(), alive), 1);
+        assert_eq!(names(dir.path()), kept);
+        assert!(!asked.lock().unwrap().contains(&std::process::id()), "this process was asked about itself");
+    }
+
+    #[cfg(windows)]
+    fn exited_child() -> (std::process::Child, u32) {
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("cmd")
+            .arg("/Q")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        drop(child.stdin.take());
+        child.wait().unwrap();
+        // The held handle keeps the id from being given to another process.
+        let pid = child.id();
+        (child, pid)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_windows_check_answers_gone_only_for_a_process_that_exited() {
+        assert!(stage_owner_alive(std::process::id()));
+        let mut running = std::process::Command::new("cmd")
+            .arg("/Q")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(stage_owner_alive(running.id()));
+        drop(running.stdin.take());
+        running.wait().unwrap();
+        let (_held, gone) = exited_child();
+        assert!(!stage_owner_alive(gone));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_linux_check_answers_gone_only_for_a_pid_no_process_holds() {
+        assert!(stage_owner_alive(std::process::id()));
+        let mut child = std::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(stage_owner_alive(child.id()));
+        drop(child.stdin.take());
+        // Exited and not yet reaped: the zombie still holds its pid.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(format!("/proc/{}/stat", child.id()))
+            .is_ok_and(|stat| !stat.rsplit_once(") ").is_some_and(|(_, rest)| rest.starts_with('Z')))
+        {
+            assert!(std::time::Instant::now() < deadline, "the child never exited");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(stage_owner_alive(child.id()));
+        child.wait().unwrap();
+        // Above every pid_max the kernel allows, so no process holds it.
+        assert!(!stage_owner_alive(i32::MAX as u32));
+        // Not a pid_t: it cannot be asked about.
+        assert!(stage_owner_alive(u32::MAX));
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn a_listener_start_removes_a_killed_conversions_stage_and_keeps_a_running_ones() {
+        #[cfg(windows)]
+        let (_held, gone) = exited_child();
+        #[cfg(target_os = "linux")]
+        let gone = i32::MAX as u32;
+        let mut running = std::process::Command::new(if cfg!(windows) { "cmd" } else { "cat" })
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let live = format!("{ENGINE_STAGE_PREFIX}{}-abc.pdf", running.id());
+        let dead = format!("{ENGINE_STAGE_PREFIX}{gone}-abc.pdf");
+        std::fs::write(dir.path().join(&live), b"%PDF").unwrap();
+        std::fs::write(dir.path().join(&dead), b"%PDF").unwrap();
+        assert_eq!(reclaim_job_intermediates(dir.path()), 1);
+        assert_eq!(names(dir.path()), [live].into_iter().collect());
+        drop(running.stdin.take());
+        running.wait().unwrap();
     }
 
     #[test]
