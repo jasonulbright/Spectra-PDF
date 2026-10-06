@@ -8,11 +8,17 @@ count must come from a run WITHOUT skips. The absent axis for this door is a
 roster row in `test_gs_absent.py`."""
 
 import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
 
 import pikepdf
 import pytest
 
 from engine.distill import distill
+from engine.inplace import STAGE_PREFIX, reclaim_stale_stages
 
 # A minimal but real one-page PostScript program: text + a vector stroke.
 PS_FIXTURE = b"""%!PS-Adobe-3.0
@@ -363,3 +369,90 @@ class TestPjlTrailerNeverCutsJobData:
         out = os.path.join(tmp_dir, "ordinary.pdf")
         assert distill(src, out, preset="default", gs_path=gs_path)["pages"] == 1
         assert _page_carries_the_samples(out, b"123456789")
+
+
+# Draws one page, then never ends: the run is stopped from outside.
+ENDLESS_PS = b"""%!PS-Adobe-3.0
+/Helvetica findfont 24 scalefont setfont
+72 700 moveto (endless) show showpage
+{ 1 pop } loop
+"""
+
+BROKEN_PS = b"""%!PS
+/undefinedthing 42 def
+thisisnotanoperator
+"""
+
+PREVIOUS = b"%PDF-1.4 the previous bytes, which must survive"
+
+KILL_CHILD = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from engine.distill import distill
+distill(sys.argv[2], sys.argv[3], gs_path=sys.argv[4])
+"""
+
+
+def _stages(folder):
+    return sorted(name for name in os.listdir(folder) if name.startswith(STAGE_PREFIX))
+
+
+def _kill_tree(process):
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False)
+    else:
+        os.killpg(process.pid, signal.SIGKILL)
+    process.wait(timeout=60)
+
+
+class TestAStoppedDistillLeavesTheOutputWhole:
+    """The output is written to a stage and replaces the target only when
+    it is a complete, validated PDF."""
+
+    @pytest.mark.parametrize("existing", [True, False], ids=["existing-output", "new-output"])
+    def test_a_failing_run_changes_nothing_at_the_output(self, tmp_dir, gs_path, existing):
+        src = _write(tmp_dir, "broken.ps", BROKEN_PS)
+        out = os.path.join(tmp_dir, "out.pdf")
+        if existing:
+            _write(tmp_dir, "out.pdf", PREVIOUS)
+        with pytest.raises(RuntimeError):
+            distill(src, out, gs_path=gs_path)
+        if existing:
+            assert Path(out).read_bytes() == PREVIOUS
+        else:
+            assert not os.path.exists(out)
+        assert _stages(tmp_dir) == []
+
+    @pytest.mark.parametrize("existing", [True, False], ids=["existing-output", "new-output"])
+    def test_a_killed_run_changes_nothing_at_the_output(self, tmp_dir, gs_path, existing):
+        src = _write(tmp_dir, "endless.ps", ENDLESS_PS)
+        out = os.path.join(tmp_dir, "out.pdf")
+        if existing:
+            _write(tmp_dir, "out.pdf", PREVIOUS)
+        engine_src = str(Path(__file__).resolve().parent.parent / "src")
+        process = subprocess.Popen(
+            [sys.executable, "-c", KILL_CHILD, engine_src, src, out, gs_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=os.name != "nt",
+        )
+        try:
+            deadline = time.monotonic() + 120
+            while not _stages(tmp_dir):
+                assert process.poll() is None, "the run ended before it staged its output"
+                assert time.monotonic() < deadline, "the run never staged its output"
+                time.sleep(0.05)
+        finally:
+            _kill_tree(process)
+        if existing:
+            assert Path(out).read_bytes() == PREVIOUS
+        else:
+            assert not os.path.exists(out)
+        # What the killed run left is a stage named for its dead process,
+        # which the next staged write into the folder removes.
+        left = _stages(tmp_dir)
+        assert left
+        assert reclaim_stale_stages(tmp_dir) == len(left)
+        assert _stages(tmp_dir) == []
+
