@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Käynnistysasetuksia ei voitu lukea, joten sovellus käynnistyi oletusasetuksilla.",
   "app.unreadableRecord.startupTitle": "Käynnistysasetuksia ei otettu käyttöön",
   "app.window.claimTitle": "Avoinna toisessa ikkunassa",
+  "app.window.moveRefusedAction": "Toimintoa ei suoritettu, koska asiakirjaa siirrettiin toiseen ikkunaan.",
+  "app.window.moveCancelled": "Asiakirja jäi tähän ikkunaan, koska siihen pyydettiin toimintoa siirron aikana. Siirrä se uudelleen, kun toiminto on valmis.",
   "app.window.focusOther": "Näytä kyseinen ikkuna",
   "app.window.outputOpenTitle": "Tiedosto on auki",
   "app.window.outputOpenHere": "\"{{name}}\" on auki tässä ikkunassa. Sulje se tai valitse toinen nimi.",

@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Oppstartsinnstillingene kunne ikke leses, så programmet startet med standardinnstillingene.",
   "app.unreadableRecord.startupTitle": "Oppstartsinnstillingene ble ikke brukt",
   "app.window.claimTitle": "Åpen i et annet vindu",
+  "app.window.moveRefusedAction": "Handlingen ble ikke utført fordi dokumentet var i ferd med å flyttes til et annet vindu.",
+  "app.window.moveCancelled": "Dokumentet ble værende i dette vinduet fordi det ble bedt om en handling på det under flyttingen. Flytt det på nytt når handlingen er fullført.",
   "app.window.focusOther": "Vis det vinduet",
   "app.window.outputOpenTitle": "Filen er åpen",
   "app.window.outputOpenHere": "«{{name}}» er åpen i dette vinduet. Lukk den, eller velg et annet navn.",

@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "Les paramètres de démarrage n’ont pas pu être lus ; l’application a donc démarré avec les paramètres par défaut.",
   "app.unreadableRecord.startupTitle": "Paramètres de démarrage non appliqués",
   "app.window.claimTitle": "Ouvert dans une autre fenêtre",
+  "app.window.moveRefusedAction": "Cette action n'a pas été exécutée, car le document était en cours de déplacement vers une autre fenêtre.",
+  "app.window.moveCancelled": "Le document est resté dans cette fenêtre, car une action a été demandée sur lui pendant le déplacement. Déplacez-le à nouveau une fois l'action terminée.",
   "app.window.focusOther": "Afficher cette fenêtre",
   "app.window.outputOpenTitle": "Fichier ouvert",
   "app.window.outputOpenHere": "« {{name}} » est ouvert dans cette fenêtre. Fermez-le ou choisissez un autre nom.",

@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "No s’ha pogut llegir la configuració d’inici, de manera que l’aplicació s’ha iniciat amb la configuració per defecte.",
   "app.unreadableRecord.startupTitle": "No s’ha aplicat la configuració d’inici",
   "app.window.claimTitle": "Obert en una altra finestra",
+  "app.window.moveRefusedAction": "Aquesta acció no s'ha executat perquè el document s'estava movent a una altra finestra.",
+  "app.window.moveCancelled": "El document s'ha quedat en aquesta finestra perquè s'ha demanat una acció sobre ell durant el trasllat. Torneu-lo a moure quan l'acció hagi acabat.",
   "app.window.focusOther": "Mostra aquella finestra",
   "app.window.outputOpenTitle": "El fitxer és obert",
   "app.window.outputOpenHere": "\"{{name}}\" és obert en aquesta finestra. Tanqueu-lo o trieu un altre nom.",

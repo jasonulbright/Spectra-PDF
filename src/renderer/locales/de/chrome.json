@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Die Starteinstellungen konnten nicht gelesen werden, daher wurde die Anwendung mit den Standardeinstellungen gestartet.",
   "app.unreadableRecord.startupTitle": "Starteinstellungen nicht angewendet",
   "app.window.claimTitle": "In einem anderen Fenster geöffnet",
+  "app.window.moveRefusedAction": "Diese Aktion wurde nicht ausgeführt, weil das Dokument gerade in ein anderes Fenster verschoben wurde.",
+  "app.window.moveCancelled": "Das Dokument ist in diesem Fenster geblieben, weil während des Verschiebens eine Aktion dafür angefordert wurde. Verschieben Sie es erneut, wenn die Aktion abgeschlossen ist.",
   "app.window.focusOther": "Dieses Fenster anzeigen",
   "app.window.outputOpenTitle": "Datei ist geöffnet",
   "app.window.outputOpenHere": "„{{name}}“ ist in diesem Fenster geöffnet. Schließen Sie die Datei, oder wählen Sie einen anderen Namen.",

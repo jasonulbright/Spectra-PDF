@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "De opstartinstellingen konden niet worden gelezen, dus de toepassing is gestart met de standaardinstellingen.",
   "app.unreadableRecord.startupTitle": "Opstartinstellingen niet toegepast",
   "app.window.claimTitle": "Geopend in een ander venster",
+  "app.window.moveRefusedAction": "Deze actie is niet uitgevoerd omdat het document naar een ander venster werd verplaatst.",
+  "app.window.moveCancelled": "Het document is in dit venster gebleven omdat er tijdens het verplaatsen een actie op werd gevraagd. Verplaats het opnieuw zodra de actie klaar is.",
   "app.window.focusOther": "Dat venster tonen",
   "app.window.outputOpenTitle": "Bestand is geopend",
   "app.window.outputOpenHere": "\"{{name}}\" is geopend in dit venster. Sluit het, of kies een andere naam.",

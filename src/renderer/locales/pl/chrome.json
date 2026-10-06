@@ -161,6 +161,8 @@
   "app.unreadableRecord.startupInPlace": "Nie udało się odczytać ustawień uruchamiania, więc aplikacja uruchomiła się z ustawieniami domyślnymi.",
   "app.unreadableRecord.startupTitle": "Nie zastosowano ustawień uruchamiania",
   "app.window.claimTitle": "Otwarty w innym oknie",
+  "app.window.moveRefusedAction": "Ta czynność nie została wykonana, ponieważ dokument był przenoszony do innego okna.",
+  "app.window.moveCancelled": "Dokument pozostał w tym oknie, ponieważ podczas przenoszenia zażądano na nim czynności. Przenieś go ponownie po zakończeniu czynności.",
   "app.window.focusOther": "Pokaż to okno",
   "app.window.outputOpenTitle": "Plik jest otwarty",
   "app.window.outputOpenHere": "„{{name}}” jest otwarty w tym oknie. Zamknij go lub wybierz inną nazwę.",

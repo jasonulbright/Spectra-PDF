@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "Setările de pornire nu au putut fi citite, așa că aplicația a pornit cu setările implicite.",
   "app.unreadableRecord.startupTitle": "Setările de pornire nu au fost aplicate",
   "app.window.claimTitle": "Deschis în altă fereastră",
+  "app.window.moveRefusedAction": "Această acțiune nu a rulat deoarece documentul era mutat în altă fereastră.",
+  "app.window.moveCancelled": "Documentul a rămas în această fereastră deoarece a fost cerută o acțiune asupra lui în timpul mutării. Mutați-l din nou după ce acțiunea s-a încheiat.",
   "app.window.focusOther": "Arată acea fereastră",
   "app.window.outputOpenTitle": "Fișierul este deschis",
   "app.window.outputOpenHere": "„{{name}}” este deschis în această fereastră. Închideți-l sau alegeți alt nume.",

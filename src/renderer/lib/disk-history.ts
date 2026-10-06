@@ -57,10 +57,13 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
     const path = selected.activeFileId;
     const working = path && selected.files.get(path)?.workingPath;
     if (!path || !working) return null;
+    // The document active now can differ from the one active at the key
+    // press: the step records the path it restores as well.
+    const restoring = working === pressedWorking ? () => {} : beginDocumentWrite(working);
     const done = announceWorkspacePublication([working]);
     const restored = withWriteChain([working], () => withFileLock([working],
       () => serializeWorkspacePublication(() => restoreDisk(path, working), [working])));
-    return { restored: restored.finally(done) };
+    return { restored: restored.finally(() => { done(); restoring(); }) };
   }, pressedWorking ? [pressedWorking] : []);
   return look.then(next => next?.restored).finally(written);
 

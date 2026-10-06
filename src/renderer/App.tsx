@@ -225,7 +225,7 @@ import { useKeymapDispatcher } from './commands/keymap';
 import { useAppModal } from './hooks/useAppModal';
 import type { AppCommandHandlers } from './commands/types';
 import { useTranslation } from 'react-i18next';
-import i18next, { SHIPPED_LOCALES, tChrome, tChromeCount, tNumber } from './i18n';
+import i18next, { SHIPPED_LOCALES, tChrome, tChromeCount, tCommandTitle, tNumber } from './i18n';
 import {
   summarizeOpenOutcomes,
   translateOpenFailure,
@@ -3043,69 +3043,83 @@ function AppContent(): React.ReactElement {
           // write asked for before the move: the move waits for those. A
           // gesture asked for while the document leaves refuses at once and
           // keeps the document here, until the hand-over itself.
+          let refused = false;
           return whileDocumentLeaves(beforeCommit.workingPath, async (cancelled) => {
-            if (!(await commitOrAbort([beforeCommit.workingPath]))) return false;
-            const held = await reserve();
-            const handed = readState().files.get(path);
-            if (!handed || handed.importOnly) {
-              await tabDrag.release(held.token).catch(() => {});
-              return false;
-            }
-            const plan = planHandOff(reservationHolds(held), isFileDirty(handed));
-            if (!plan.hand) return false;
-            // A destination that dies before it opens the document gives it back, and
-            // the window it goes back to is this one. Recorded per path so the return
-            // can be told apart from a document arriving from anywhere else: the tab
-            // is still open here, and re-opening it would be a second copy.
-            const flight = { returned: false };
-            handOffsInFlight.current.set(path, flight);
-            let moved: TabDragResult;
             try {
-              if (cancelled()) {
-                handOffsInFlight.current.delete(path);
+              if (!(await commitOrAbort([beforeCommit.workingPath]))) return false;
+              const held = await reserve();
+              const handed = readState().files.get(path);
+              if (!handed || handed.importOnly) {
                 await tabDrag.release(held.token).catch(() => {});
                 return false;
               }
-              if (plan.saveFirst) {
-                // A failed write gives the document back BEFORE it is reported:
-                // the notice waits on the user, and the reservation must not.
-                const failures: unknown[] = [];
-                if (!(await saveOrReportRef.current(
-                  handed.workingPath, handed.path, false, (error) => failures.push(error),
-                ))) {
+              const plan = planHandOff(reservationHolds(held), isFileDirty(handed));
+              if (!plan.hand) return false;
+              // A destination that dies before it opens the document gives it back, and
+              // the window it goes back to is this one. Recorded per path so the return
+              // can be told apart from a document arriving from anywhere else: the tab
+              // is still open here, and re-opening it would be a second copy.
+              const flight = { returned: false };
+              handOffsInFlight.current.set(path, flight);
+              let moved: TabDragResult;
+              try {
+                if (cancelled()) {
                   handOffsInFlight.current.delete(path);
                   await tabDrag.release(held.token).catch(() => {});
-                  if (failures.length > 0) void reportSaveFailureRef.current(handed.path, failures[0]);
                   return false;
                 }
-                dispatch({ type: 'MARK_SAVED', path });
-              }
-              if (cancelled()) {
+                if (plan.saveFirst) {
+                  // A failed write gives the document back BEFORE it is reported:
+                  // the notice waits on the user, and the reservation must not.
+                  const failures: unknown[] = [];
+                  if (!(await saveOrReportRef.current(
+                    handed.workingPath, handed.path, false, (error) => failures.push(error),
+                  ))) {
+                    handOffsInFlight.current.delete(path);
+                    await tabDrag.release(held.token).catch(() => {});
+                    if (failures.length > 0) void reportSaveFailureRef.current(handed.path, failures[0]);
+                    return false;
+                  }
+                  dispatch({ type: 'MARK_SAVED', path });
+                }
+                if (cancelled()) {
+                  handOffsInFlight.current.delete(path);
+                  await tabDrag.release(held.token).catch(() => {});
+                  return false;
+                }
+                moved = await tabDrag.commit(held.token);
+              } catch (e) {
+                // The write a move costs failed. The document is still held somewhere
+                // else, and nothing will ever come for it.
                 handOffsInFlight.current.delete(path);
                 await tabDrag.release(held.token).catch(() => {});
-                return false;
+                throw e;
               }
-              moved = await tabDrag.commit(held.token);
-            } catch (e) {
-              // The write a move costs failed. The document is still held somewhere
-              // else, and nothing will ever come for it.
               handOffsInFlight.current.delete(path);
-              await tabDrag.release(held.token).catch(() => {});
-              throw e;
+              // Nothing below this line awaits, so a return that arrives after the
+              // check finds no flight and re-opens the document instead.
+              if (!tabMoved(moved) || flight.returned) return false;
+              // Closed WITHOUT a release — the path already belongs to the receiving
+              // window, and releasing here would strip the claim off the window that
+              // now holds it.
+              dispatch({ type: 'CLOSE_FILE', path });
+              return true;
+            } finally {
+              refused = cancelled();
             }
-            handOffsInFlight.current.delete(path);
-            // Nothing below this line awaits, so a return that arrives after the
-            // check finds no flight and re-opens the document instead.
-            if (!tabMoved(moved) || flight.returned) return false;
-            // Closed WITHOUT a release — the path already belongs to the receiving
-            // window, and releasing here would strip the claim off the window that
-            // now holds it.
-            dispatch({ type: 'CLOSE_FILE', path });
-            return true;
+          }).then((moved) => {
+            // A gesture refused during the move did not run, and an owned panel
+            // run shows nothing for it: say so, and say whether the document
+            // stayed because of it.
+            if (refused) {
+              void showNotice(tCommandTitle('window.moveToNewWindow', 'Move to New Window'),
+                tChrome(moved ? 'app.window.moveRefusedAction' : 'app.window.moveCancelled'));
+            }
+            return moved;
           });
         }),
       ),
-    [dispatch, commitOrAbort, isFileDirty, readState],
+    [dispatch, commitOrAbort, isFileDirty, readState, showNotice],
   );
 
   const handleMoveToNewWindow = useCallback(async () => {

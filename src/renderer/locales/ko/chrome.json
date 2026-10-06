@@ -155,6 +155,8 @@
   "app.unreadableRecord.startupInPlace": "시작 설정을 읽을 수 없어 이번 시작에는 기본값을 사용했습니다.",
   "app.unreadableRecord.startupTitle": "시작 설정이 적용되지 않음",
   "app.window.claimTitle": "다른 창에서 열려 있음",
+  "app.window.moveRefusedAction": "문서를 다른 창으로 옮기는 중이어서 이 작업이 실행되지 않았습니다.",
+  "app.window.moveCancelled": "이동 중에 문서에 대한 작업이 요청되어 문서가 이 창에 남아 있습니다. 작업이 끝난 후 다시 옮기세요.",
   "app.window.focusOther": "해당 창 표시",
   "app.window.outputOpenTitle": "파일이 열려 있음",
   "app.window.outputOpenHere": "\"{{name}}\"이(가) 이 창에서 열려 있습니다. 닫거나 다른 이름을 선택하세요.",

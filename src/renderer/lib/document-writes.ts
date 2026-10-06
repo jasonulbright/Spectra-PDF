@@ -14,13 +14,13 @@ const inFlight = new Map<string, Set<Promise<void>>>();
 const leaving = new Map<string, { moves: number; refused: boolean }>();
 
 /** Records a write of every path in `paths` until the returned function runs.
- * Throws the changed refusal, synchronously and recording nothing, when one of
+ * Throws the move refusal, synchronously and recording nothing, when one of
  * them is leaving and has no write recorded. */
 export function beginDocumentWrites(paths: readonly string[]): () => void {
   const refused = paths.filter(path => leaving.has(path) && !inFlight.get(path)?.size);
   if (refused.length) {
     for (const path of refused) leaving.get(path)!.refused = true;
-    throw new Error(tChrome('app.history.changed'));
+    throw new Error(tChrome('app.window.moveRefusedAction'));
   }
   let finish!: () => void;
   const done = new Promise<void>(resolve => { finish = resolve; });
@@ -73,7 +73,8 @@ export function withDocumentWrite<T>(paths: readonly string[], run: () => Promis
  * Runs `leave` once no write of `workingPath` is recorded, whatever the
  * outcome of each. From this call until `leave` settles, a write that starts
  * a new gesture on the path refuses at once; `leave` reads `cancelled()`
- * before it hands the document over, and stays when a gesture was refused.
+ * before it hands the document over, and stays when a gesture was refused,
+ * and reads it again after the hand-over to report a gesture refused then.
  * Holds no lock: a write never waits for a document to leave.
  */
 export async function whileDocumentLeaves<T>(workingPath: string,
