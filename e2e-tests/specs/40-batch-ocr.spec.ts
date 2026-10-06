@@ -25,6 +25,7 @@ import {
   batchOcrStart,
   batchOcrSnapshot,
 } from '../support/harness.js';
+import { onlyEngineProcess, processAlive } from '../support/engine-processes.js';
 
 const require = createRequire(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
@@ -625,11 +626,19 @@ describe('batch OCR folder mirror', () => {
       interval: 100,
       timeoutMsg: 'no original was replaced',
     });
+    // The in-place run is one folder call, served by a process of its own.
+    const runProcess = onlyEngineProcess('run', 'main');
     await stop.click();
     await browser.waitUntil(async () => (await batchOcrSnapshot())?.phase === 'done', {
       timeout: 60_000,
       interval: 250,
       timeoutMsg: 'Stop never ended the in-place run — snapshot: ' + JSON.stringify(await batchOcrSnapshot()),
+    });
+    // It answers its partial report and then ends.
+    await browser.waitUntil(async () => !processAlive(runProcess), {
+      timeout: 30_000,
+      interval: 250,
+      timeoutMsg: 'the run process outlived its answer',
     });
 
     const snapshot = (await batchOcrSnapshot())!;

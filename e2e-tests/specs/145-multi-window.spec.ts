@@ -8,6 +8,7 @@ import {
   invokeAppCommand,
   waitForDisplayedSelector,
 } from '../support/harness.js';
+import { engineProcesses, onlyEngineProcess } from '../support/engine-processes.js';
 
 /**
  * A second workspace window, and the four failures that are live the instant
@@ -199,6 +200,30 @@ describe('multi-window', () => {
     expect(mainResult.file).toBe(mainWorking);
     expect(secondResult.file).toBe(secondWorking);
     expect(mainWorking).not.toBe(secondWorking);
+  });
+
+  it('gives each window its own job process, named by role and window label', async () => {
+    // `print_preview_cleanup` of a folder that is not a preview removes
+    // nothing; it is the cheapest call the job process serves.
+    const jobCall = async (id: number): Promise<string> =>
+      await browser.executeAsync<string, [number]>(function (requestId, done) {
+        (window as any).__SPECTRA_TEST__
+          .engineRequestWithId('print_preview_cleanup', { directory: 'C:\\not-a-preview' }, requestId)
+          .then(() => done('ok'))
+          .catch((e: unknown) => done(String(e)));
+      }, id);
+    await browser.switchToWindow(mainHandle);
+    expect(await jobCall(4343)).toBe('ok');
+    await browser.switchToWindow(secondHandle);
+    const secondLabel = await labelOfCurrentWindow();
+    expect(await jobCall(4343)).toBe('ok');
+
+    const processes = engineProcesses();
+    const mainJob = onlyEngineProcess('job', 'main', processes);
+    const secondJob = onlyEngineProcess('job', secondLabel, processes);
+    expect(mainJob).not.toBe(secondJob);
+    expect(onlyEngineProcess('window', 'main', processes)).not.toBe(mainJob);
+    expect(onlyEngineProcess('window', secondLabel, processes)).not.toBe(secondJob);
   });
 
   it('closing the second window leaves the app and the first window alive', async () => {
