@@ -59,9 +59,9 @@ export function commitPendingPageEdits(): Promise<void> {
  * wait begins are awaited; the shared run is never extended by one caller's
  * wait, so a call on another document does not wait for it.
  */
-export async function runCommitGate(paths?: readonly string[]): Promise<void> {
+export async function runCommitGate(paths?: readonly string[], before = Infinity): Promise<void> {
   await commitShared();
-  if (!hasWorkspacePublication(paths)) return;
-  await workspacePublicationsSettled(paths);
+  if (!hasWorkspacePublication(paths, before)) return;
+  await workspacePublicationsSettled(paths, before);
   await commitShared();
 }

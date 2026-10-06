@@ -195,7 +195,7 @@ describe('whole-file operation publication', () => {
     const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
     const callback = app.slice(app.indexOf('const performOperation ='), app.indexOf('const handleRedactFile ='));
     for (const part of ['sequenceEditClass(method, options?.following?.map(step => step.method))', 'executeWorkspaceOperation(filePath, method, params, readState, dispatch',
-      'confirmEditOfSignedDoc(path, working, editClass)', 'commit: (paths) => commitRef.current(paths)', 'callStaged: callRaw', 'trackOperation', 'trackInteractive']) expect(callback).toContain(part);
+      'confirmEditOfSignedDoc(path, working, editClass)', 'commit: (paths, before) => commitRef.current(paths, before)', 'callStaged: callRaw', 'trackOperation', 'trackInteractive']) expect(callback).toContain(part);
     for (const old of ['file.snapshot(', 'await call(', 'reloadFile(', "dispatch({ type: 'UPDATE_FILE'"]) expect(callback).not.toContain(old);
   });
   it.each(['read', 'count', 'stage', 'engine', 'publish'])('%s failure preserves disk/buffer/history and never reports done', async where => {
@@ -497,7 +497,7 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
 
   it('a second rewrite of the path, asked for during the first one, queues and applies to its result', async () => {
     const w = twoDocuments();
-    w.io.commit = paths => runCommitGate(paths);
+    w.io.commit = (paths, before) => runCommitGate(paths, before);
     const confirms: string[] = [];
     w.io.confirm = async () => { confirms.push(`confirm after ${w.events.filter(e => e === 'publish work-A').length}`); return true; };
     const release = w.hold('A');
@@ -522,7 +522,7 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
 
   it('two rewrites of the path asked for in one turn both publish, in issue order', async () => {
     const w = twoDocuments();
-    w.io.commit = paths => runCommitGate(paths);
+    w.io.commit = (paths, before) => runCommitGate(paths, before);
     let confirms = 0;
     w.io.confirm = async () => { confirms++; return true; };
     const release = w.hold('A');
@@ -556,6 +556,38 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
       await Promise.all([long, gated]);
       expect(w.sent).toEqual(['get_page_count work-A [1]', 'compress work-A [1,2]']);
     } finally { release(); }
+  });
+
+  it('a gated reader asked for in the same turn as a rewrite reads the rewritten bytes', async () => {
+    const w = twoDocuments();
+    w.io.commit = (paths, before) => runCommitGate(paths, before);
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      // Before the rewrite has run its own consent prompt or its own gate.
+      const gated = w.call('compress', { file: 'work-A', output: 'out.pdf' });
+      await until(() => w.events.includes('engine A rotate'));
+      await turn();
+      expect(w.sent).toEqual([]);
+      release();
+      await Promise.all([long, gated]);
+      expect(w.sent).toEqual(['compress work-A [1,2]']);
+    } finally { release(); }
+  });
+
+  it('page history of another document recorded during a rewrite refuses its publication', async () => {
+    const w = twoDocuments();
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      // A page edit of B undone: nothing is dirty, and a redo entry exists.
+      w.setView(state => ({ ...state, pageRedoStack: [{ documents: [], dirtyPaths: ['B'], action: { type: 'NOOP' } } as never] }));
+      release();
+      await expect(long).rejects.toThrow(/changed/);
+      expect(w.events).not.toContain('publish work-A');
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1]));
+    } finally { release(); w.setView(null); }
   });
 
   it('a commit of a dirty document does not wait for a long rewrite of another one', async () => {
@@ -694,31 +726,38 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
 });
 
 describe('a document that leaves this window', () => {
-  it('leaves only after a write in progress has published, and refuses a write asked for while it leaves', async () => {
+  it('leaves only after a write in progress has published; a write asked for once nothing is recorded refuses and cancels the move', async () => {
     const w = twoDocuments();
-    w.io.commit = paths => runCommitGate(paths);
+    w.io.commit = (paths, before) => runCommitGate(paths, before);
     const release = w.hold('A');
+    let stays: boolean | null = null;
     try {
       const long = w.rewrite('A');
       await until(() => w.events.includes('engine A rotate'));
-      const left = writes.whileDocumentLeaves('work-A', async () => {
+      let reachedLeave!: () => void;
+      const atLeave = new Promise<void>(r => { reachedLeave = r; });
+      let finishLeave!: () => void;
+      const leaveHeld = new Promise<void>(r => { finishLeave = r; });
+      const left = writes.whileDocumentLeaves('work-A', async (cancelled) => {
         await runCommitGate(['work-A']);
         w.events.push(`leave with [${Array.from(w.disk.get('work-A')!).join(',')}]`);
+        reachedLeave();
+        await leaveHeld;
+        stays = cancelled();
       });
-      await turn();
-      // Asked for while the document leaves: refused before any await.
+      release();
+      await atLeave;
+      // Nothing is recorded any more: a new gesture refuses before any await.
       const confirm = vi.fn(async () => true);
       w.io.confirm = confirm;
-      const late = w.rewrite('A');
-      const lateCall = w.call('compress', { file: 'work-A', output: 'work-A' });
-      await expect(late).rejects.toThrow(/changed/);
-      await expect(lateCall).rejects.toThrow(/changed/);
+      await expect(w.rewrite('A')).rejects.toThrow(/changed/);
+      await expect(w.call('compress', { file: 'work-A', output: 'work-A' })).rejects.toThrow(/changed/);
       expect(confirm).not.toHaveBeenCalled();
-      expect(w.events).toEqual(['engine A rotate']);
-      release();
+      finishLeave();
       await Promise.all([long, left]);
       expect(w.events).toEqual(['engine A rotate', 'engine A done', 'publish work-A', 'leave with [1,2]']);
-      // Once it stayed, writes are accepted again.
+      expect(stays).toBe(true);
+      // Once the move is over, writes are accepted again.
       await w.rewrite('A');
       expect(w.events.at(-1)).toBe('publish work-A');
     } finally { release(); }
@@ -728,7 +767,7 @@ describe('a document that leaves this window', () => {
   it('App moves a document only inside the leave, gated on its own working path', () => {
     const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
     const handOff = app.slice(app.indexOf('const handOffDocument = useCallback('), app.indexOf('const handleMoveToNewWindow'));
-    expect(handOff).toContain('return whileDocumentLeaves(beforeCommit.workingPath, async () => {');
+    expect(handOff).toContain('return whileDocumentLeaves(beforeCommit.workingPath, async (cancelled) => {');
     expect(handOff.indexOf('whileDocumentLeaves(')).toBeLessThan(handOff.indexOf('commitOrAbort([beforeCommit.workingPath])'));
     expect(handOff.indexOf('commitOrAbort([beforeCommit.workingPath])')).toBeLessThan(handOff.indexOf("dispatch({ type: 'CLOSE_FILE', path })"));
   });
@@ -876,7 +915,7 @@ describe('a page edit of another document during a rewrite, through the reducer'
     let release!: () => void;
     const held = new Promise<void>(r => { release = r; });
     const io: OperationIo = {
-      confirm: async () => true, commit: paths => runCommitGate(paths),
+      confirm: async () => true, commit: (paths, before) => runCommitGate(paths, before),
       read: async path => disk.get(path)!.slice(), write: writeBuffer, remove,
       index: readingWith(async bytes => (await PDFDocument.load(bytes)).getPageCount()),
       track: async (_method, _params, run) => run(),

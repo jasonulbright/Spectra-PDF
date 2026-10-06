@@ -2,6 +2,7 @@ import type { AppState, PageRef } from '../state/types';
 import type { PerformOperation } from '../hooks/useOperations';
 import { tChrome } from '../i18n';
 import { captureFileOperationIntent } from './operation-intent';
+import { beginDocumentWrite } from './document-writes';
 import {
   buildRedactionRegions, EMPTY_MARK_LEDGER, marksAcross, wroteBytes,
   type PageGeometry, type RedactionMark,
@@ -43,19 +44,25 @@ export async function writeRedactionMarks(
   if (!marks.length && source.buffer !== original.buffer
       && source.authoredIdentity?.sourceBuffer !== original.buffer) throw changed();
   const intent = captureFileOperationIntent(current, source);
-  const params = method === 'redact' ? { gs_path: await gsPath() } : {};
-  const result = await perform(path, method, params, {
-    intent,
-    prepareParams: async accepted => {
-      const carried = marksAcross({ ...EMPTY_MARK_LEDGER, marks: [...marks] }, seen, accepted).marks;
-      if (carried.length !== marks.length) throw changed();
-      const payload = await buildRedactionRegions(accepted.workspace.documents, carried,
-        page => geometry(page, accepted));
-      if (payload.skippedMarkIds.length || payload.files.some(file => file.path !== path)) throw changed();
-      return { regions: payload.files[0]?.regions ?? [] };
-    },
-  });
-  const wrote = wroteBytes(result);
-  if (wrote && method === 'redact' && offerResidue) await offerResidue(path, result);
-  return wrote;
+  // Recorded before the first await: a move of the document waits for it.
+  const written = beginDocumentWrite(source.workingPath);
+  try {
+    const params = method === 'redact' ? { gs_path: await gsPath() } : {};
+    const result = await perform(path, method, params, {
+      intent,
+      prepareParams: async accepted => {
+        const carried = marksAcross({ ...EMPTY_MARK_LEDGER, marks: [...marks] }, seen, accepted).marks;
+        if (carried.length !== marks.length) throw changed();
+        const payload = await buildRedactionRegions(accepted.workspace.documents, carried,
+          page => geometry(page, accepted));
+        if (payload.skippedMarkIds.length || payload.files.some(file => file.path !== path)) throw changed();
+        return { regions: payload.files[0]?.regions ?? [] };
+      },
+    });
+    const wrote = wroteBytes(result);
+    if (wrote && method === 'redact' && offerResidue) await offerResidue(path, result);
+    return wrote;
+  } finally {
+    written();
+  }
 }

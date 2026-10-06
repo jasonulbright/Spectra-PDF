@@ -3,6 +3,7 @@ import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { assertOperationGateResult, assertOperationIntent, captureFileOperationIntent } from '../src/renderer/lib/operation-intent';
 import { initialState } from '../src/renderer/state/reducer';
+import { withDocumentWrite, __documentWriteCount } from '../src/renderer/lib/document-writes';
 import type { AppState, OpenFile } from '../src/renderer/state/types';
 import type { PerformOperation } from '../src/renderer/hooks/useOperations';
 import type { WorkspaceOperationResult } from '../src/renderer/lib/operation-transaction';
@@ -69,15 +70,19 @@ describe('App write wrappers own the gesture session across their awaits', () =>
         performOperation: operation, lockNeedsFields: () => false, toEngineFormat: (x: unknown) => x, toEngineAction: (x: unknown) => x,
       };
       bindings.gestureIntent = callback('gestureIntent', bindings);
+      bindings.writeGesture = callback('writeGesture', { ...bindings, withDocumentWrite });
       const settled = invoke(callback(name, bindings)).then(() => 'ok', (error: unknown) => String(error));
       for (let i = 0; i < 50 && !reached; i++) await new Promise(resolve => setTimeout(resolve, 0));
       expect(reached).toBe(true);
       expect(operation).not.toHaveBeenCalled();
+      // Recorded from the handler's first line: a move of the document waits.
+      expect(__documentWriteCount()).toBe(1);
       if (mode === 'reopen') {
         state = { ...state, files: new Map([[file.path, { ...file, workingPath: 'work-A-reopened.pdf', buffer: new Uint8Array([3]) }]]) };
       }
       release();
       const outcome = await settled;
+      expect(__documentWriteCount()).toBe(0);
       if (mode === 'control') {
         expect(outcome).toBe('ok');
         expect(published).toEqual(['work-A.pdf']);
@@ -105,6 +110,7 @@ describe('image extraction reads only the revision the gesture addressed', () =>
       performOperation: async () => { throw new Error('no write expected'); }, performImageEdit: async () => false,
     };
     bindings.gestureIntent = callback('gestureIntent', bindings);
+    bindings.writeGesture = callback('writeGesture', { ...bindings, withDocumentWrite });
     const settled = callback('handleEditImage', bindings)('extract', 'A.pdf', 1, 0).then(() => 'ok', (error: unknown) => String(error));
     for (let i = 0; i < 50 && !reached; i++) await new Promise(resolve => setTimeout(resolve, 0));
     expect(reached).toBe(true);

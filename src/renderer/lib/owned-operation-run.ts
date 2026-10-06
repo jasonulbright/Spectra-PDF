@@ -6,6 +6,7 @@ import type { OperationOptions } from './operation-transaction';
 import type { OpMethod } from './op-edit-class';
 import { captureOperationIntent, assertOperationIntent, assertOperationGateResult, type OperationIntent } from './operation-intent';
 import { tChrome } from '../i18n';
+import { beginDocumentWrite } from './document-writes';
 
 /** A page-tier edit republishes its file with only `editRevision` advanced by
  * one; any other field change means a different step replaced the file. */
@@ -21,11 +22,17 @@ function isRevisionStep(before: OpenFile, after: OpenFile): boolean {
  * Unlike a read run, its own commit/publication must not invalidate its result. */
 export function createOwnedOperationRuns(readState: () => AppState) {
   let mounted = true, epoch = 0, active: object | null = null;
+  // The write record of the active run: a move of its document waits for the
+  // run from its first line, and a run begun while the document moves is not
+  // begun. A run that only reads ends its record when it starts reading.
+  let written: (() => void) | null = null;
+  const endWrite = () => { written?.(); written = null; };
   const begin = (file: OpenFile | null) => {
     const state = readState();
     if (!mounted || active || !file?.buffer || file.importOnly
         || state.activeFileId !== file.path || state.files.get(file.path) !== file) return null;
     let intent = captureOperationIntent(state, file);
+    try { written = beginDocumentWrite(file.workingPath); } catch { return null; }
     const ticket = {}, lifetime = epoch;
     active = ticket;
     let abandoned = false, started = false, publication: OpenFile | undefined, readIntent: OperationIntent | undefined;
@@ -59,6 +66,7 @@ export function createOwnedOperationRuns(readState: () => AppState) {
         if (started) throw new Error(tChrome('app.history.changed'));
         assertOperationIntent(readState(), intent);
         started = true;
+        if (active === ticket) endWrite();
         await commit([file.workingPath]);
         assertActive();
         const now = readState(), current = now.files.get(file.path);
@@ -127,10 +135,10 @@ export function createOwnedOperationRuns(readState: () => AppState) {
             || edited?.note !== note) throw new Error(tChrome('app.history.changed'));
         intent = captureOperationIntent(after, editedFile);
       },
-      finish: () => { if (active === ticket) active = null; },
+      finish: () => { if (active === ticket) { active = null; endWrite(); } },
     };
   };
   return { begin, activate: () => { mounted = true; epoch++; },
-    deactivate: () => { mounted = false; epoch++; active = null; } };
+    deactivate: () => { mounted = false; epoch++; active = null; endWrite(); } };
 }
 export type OwnedOperationRun = NonNullable<ReturnType<ReturnType<typeof createOwnedOperationRuns>['begin']>>;

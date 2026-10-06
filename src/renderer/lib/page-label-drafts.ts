@@ -1,4 +1,5 @@
 import type { AppState, OpenFile, PdfBuffer } from '../state/types';
+import { beginDocumentWrite } from './document-writes';
 import type { PerformOperation } from '../hooks/useOperations';
 import type { EngineCall } from './engine-call';
 import { EDIT_DECLINED } from './edit-text';
@@ -139,7 +140,10 @@ export function createPageLabelDrafts(readState: () => AppState) {
     if (new Set(d.ranges.map(r => r.start)).size !== d.ranges.length) { d.error = tChrome('panel.pageLabels.duplicateStart'); notify(); return; }
     if (!validLabelRanges(d.ranges, d.pages)) { d.error = tChrome('panel.pageLabels.invalid'); notify(); return; }
     const original = d.ranges; d.busy = true; d.error = ''; d.status = tChrome('panel.pageLabels.applying'); notify();
-    try { const submitted = await prepare(d, original, call, commit);
+    let written = () => {};
+    // Recorded from here: a move of the document waits for this apply.
+    try { written = beginDocumentWrite(d.workingPath);
+      const submitted = await prepare(d, original, call, commit);
       const result = await operation(d.path, 'set_page_labels', {
         ranges: submitted.map(r => ({ start: r.start - 1, style: r.style, prefix: r.prefix, start_at: r.startAt })),
       }, { expectedWorkingPath: d.workingPath, expectedBuffer: d.buffer! });
@@ -148,7 +152,7 @@ export function createPageLabelDrafts(readState: () => AppState) {
       d.buffer = result.publication.buffer; d.baseline = submitted; d.dirty = !sameLabelRanges(d.ranges, submitted);
       d.status = submitted.length ? tChromeCount('panel.pageLabels.applied', submitted.length) : tChrome('panel.pageLabels.removed');
     } catch (e) { if (live(d)) d.error = errorText(e); }
-    finally { if (live(d)) { d.busy = false; if (d.error || d.dirty) d.status = ''; notify(); } }
+    finally { written(); if (live(d)) { d.busy = false; if (d.error || d.dirty) d.status = ''; notify(); } }
   };
   const reload = async (d: PageLabelDraft, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(d) || d.busy) return;

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { beginDocumentWrite } from '../src/renderer/lib/document-writes';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { PDFDocument, degrees } from 'pdf-lib';
@@ -129,6 +130,7 @@ async function fixture() {
       }, remove: async (p: string) => { disk.delete(p); } },
     app: { getEditFontPath: async () => 'fonts' },
     EDIT_DECLINED, tChrome: (key: string, p?: { message?: string }) => `${key} ${p?.message ?? ''}`,
+    beginDocumentWrite,
     tChromeCount: (key: string, n: number) => `${key}:${n}`,
   };
   const operations = { fillFormValues: actual('App.tsx', 'handleFillFormValues', env), performOperation: actual('App.tsx', 'performOperation', env) };
