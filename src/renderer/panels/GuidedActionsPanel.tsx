@@ -41,6 +41,7 @@ import {
   type PlanRequest,
 } from '../lib/guided-actions';
 import { writeFailureText } from '../lib/save-failure';
+import { beginDocumentWrite } from '../lib/document-writes';
 import { useTranslation } from 'react-i18next';
 import {
   tChrome,
@@ -173,6 +174,15 @@ export function GuidedActionsPanel(): React.ReactElement {
       // its gate. Never reuse consent across an intervening document edit.
       setView({ kind: 'run', action });
       setRunStatuses(action.steps.map(() => 'pending'));
+      // Recorded for the whole run: a move of the document waits for it.
+      let written: () => void;
+      try {
+        written = beginDocumentWrite(workingPath);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setRunStatuses((s) => s.map((v, j) => (j === 0 ? { error: msg } : v)));
+        return;
+      }
       setRunning(true);
       try {
         // Every step's Ghostscript is settled before the first step runs: a
@@ -231,6 +241,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           }
         }
       } finally {
+        written();
         setRunning(false);
       }
     },

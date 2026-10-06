@@ -10,8 +10,9 @@ import { releaseStageCredential, shareStageCredential } from './stage-credential
 
 export interface WorkspaceRewriteIo {
   confirm: (path: string, workingPath: string) => Promise<boolean>;
-  /** The commit gate for the working paths the rewrite acts on. */
-  commit: (paths: readonly string[]) => Promise<void>;
+  /** The commit gate for the working paths the rewrite acts on; it waits only
+   * for publications announced before `before`. */
+  commit: (paths: readonly string[], before?: number) => Promise<void>;
   write: (path: string, bytes: Uint8Array) => Promise<void>;
   read: (path: string) => Promise<Uint8Array>;
   remove: (path: string) => Promise<void>;
@@ -71,11 +72,12 @@ export function holdRewriteEngineSteps(): { release: () => void; waiting: () => 
  * every pending page edit is committed. Phase 3: the exclusive lock, then the
  * lane, then the fence and the publication.
  *
- * Fence: the file is the captured one and no page edit is pending anywhere.
- * Replacing a file's bytes resets a live page tier (`withNewBytes` in the
- * reducer), so a pending edit of another document is committed before phase
- * 3, never published over. A page edit of the rewritten file itself voids the
- * work in progress.
+ * Fence: the file is the captured one, no page edit is pending anywhere, and
+ * the page history is the one at phase 1 or empty. Replacing a file's bytes
+ * resets a live page tier (`withNewBytes` in the reducer), so a pending edit
+ * of another document is committed before phase 3, never published over, and
+ * page history recorded during the rewrite refuses it. A page edit of the
+ * rewritten file itself voids the work in progress.
  *
  * The commit run while the chain is held is the page commit alone, never a
  * gate: a gate waits for announced publications, and a disk undo of this path
@@ -98,13 +100,18 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
   if (!initial || initial.importOnly) throw new Error(tChrome('refusal.file.noLongerOpen'));
   const working = initial.workingPath;
   const ended = beginDocumentWrite(working);
+  // Announced from the request on: a gate that names the path waits for this
+  // rewrite, also while its own consent prompt and its own gate run. Its own
+  // gate waits only for older announcements, so two rewrites of one path
+  // never wait for each other.
+  const announced = announceWorkspacePublication([working]);
   try {
     if (!await io.confirm(path, working)) return { completed: false };
     options.assertActive?.();
     if (!sameRevision(getState(), before, path)) throw changed();
     // The gate commits through the lane and the dirty paths' locks; it runs
     // holding nothing, before the chain, never inside phase 1.
-    await io.commit([working]);
+    await io.commit([working], announced.order);
     options.assertActive?.();
     const open = (): OpenFile => {
       const file = getState().files.get(path);
@@ -145,90 +152,96 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
     };
 
     let publication: OpenFile | undefined;
-    const publish = async (): Promise<T | typeof DECLINED> => {
-      const announced = announceWorkspacePublication([working]);
-      try {
-        return await withWriteChain([working], async () => {
-          if (!await settle(true)) return DECLINED;
-          await serializeWorkspacePublication(async () => {
-            await recoverPendingPageCommit();
+    const publish = (): Promise<T | typeof DECLINED> =>
+      withWriteChain([working], async () => {
+        if (!await settle(true)) return DECLINED;
+        // The page history as the rewrite starts. Publishing resets a live page
+        // tier, so history recorded since (a page undo of another document)
+        // refuses the rewrite rather than being dropped.
+        const history = await serializeWorkspacePublication(async () => {
+          await recoverPendingPageCommit();
+          requireCurrent();
+          const { pageUndoStack, pageRedoStack } = getState();
+          return { pageUndoStack, pageRedoStack };
+        }, [working]);
+        const historyKept = () => {
+          const now = getState();
+          return (now.pageUndoStack === history.pageUndoStack && now.pageRedoStack === history.pageRedoStack)
+            || (!now.pageUndoStack.length && !now.pageRedoStack.length);
+        };
+        const stage = `${working}.${options.kind}-${crypto.randomUUID()}.pdf`;
+        let shared = false;
+        const cleanup = async () => {
+          await io.remove(stage).catch(() => {});
+          if (shared) await releaseStageCredential(stage);
+        };
+        let published = false;
+        try {
+          // Shared: a builder may read the working path itself (a sealed
+          // document's plaintext), and no writer may replace it meanwhile.
+          const file = current;
+          const staged = await withFileLock([{ key: working, mode: 'shared' }], async () => {
             requireCurrent();
-          }, [working]);
-          const stage = `${working}.${options.kind}-${crypto.randomUUID()}.pdf`;
-          let shared = false;
-          const cleanup = async () => {
-            await io.remove(stage).catch(() => {});
-            if (shared) await releaseStageCredential(stage);
-          };
-          let published = false;
-          try {
-            // Shared: a builder may read the working path itself (a sealed
-            // document's plaintext), and no writer may replace it meanwhile.
-            const file = current;
-            const staged = await withFileLock([{ key: working, mode: 'shared' }], async () => {
+            const original = copy(file.buffer!);
+            const expectedWorkingSha256 = await digest(original);
+            shared = await shareStageCredential(file, stage);
+            const hold = engineStepHold;
+            if (hold) {
+              hold.waiting++;
+              try { await hold.held; } finally { hold.waiting--; }
               requireCurrent();
-              const original = copy(file.buffer!);
-              const expectedWorkingSha256 = await digest(original);
-              shared = await shareStageCredential(file, stage);
-              const hold = engineStepHold;
-              if (hold) {
-                hold.waiting++;
-                try { await hold.held; } finally { hold.waiting--; }
-                requireCurrent();
-              }
-              const value = await build(stage, original, requireCurrent);
-              const buffer = (await io.read(stage)).slice();
-              // The reading runs on a copy; the documents describe the object dispatched.
-              const { pageCount, documents: read } = await io.index(file, buffer.slice());
-              if (!Number.isSafeInteger(pageCount) || pageCount < 1
-                  || options.preservePageCount && pageCount !== file.pageCount) throw options.unverified();
-              const documents = read.map(d => ({ ...d, buffer }));
-              return { value, buffer, pageCount, documents, expectedWorkingSha256, expectedStagedSha256: await digest(buffer) };
-            });
-            const requireFence = () => {
-              requireCurrent();
-              if (getState().pageDirtyPaths.length) throw changed();
-            };
-            for (let attempt = 0; ; attempt++) {
-              if (attempt === REWRITE_COMMIT_ATTEMPTS) throw changed();
-              requireCurrent();
-              await settle(false);
-              const outcome = await withFileLock([working], () => serializeWorkspacePublication(async () => {
-                requireCurrent();
-                // A page edit made since the commit above: commit it outside
-                // the lane and the exclusive lock, then try again.
-                if (getState().pageDirtyPaths.length) return RETRY;
-                published = true;
-                await publishPageCommit(io.transaction,
-                  [{ workingPath: working, stagedPath: stage,
-                    expectedWorkingSha256: staged.expectedWorkingSha256, expectedStagedSha256: staged.expectedStagedSha256 }],
-                  snapshots => {
-                    requireFence();
-                    dispatch({ type: 'UPDATE_FILE', path, buffer: staged.buffer, pageCount: staged.pageCount,
-                      snapshotPath: snapshots[0], documents: staged.documents });
-                    if (getState().files.get(path)?.buffer !== staged.buffer) throw changed();
-                    publication = getState().files.get(path)!;
-                  }, cleanup);
-                return staged.value;
-              }, [working]));
-              if (outcome !== RETRY) return outcome as T;
             }
-          } finally {
-            // An unconfirmed abort of this publication fences its stage before
-            // cleanup; a rewrite that never published owns its stage alone.
-            if (!published || !hasPendingPageCommit()) await cleanup();
+            const value = await build(stage, original, requireCurrent);
+            const buffer = (await io.read(stage)).slice();
+            // The reading runs on a copy; the documents describe the object dispatched.
+            const { pageCount, documents: read } = await io.index(file, buffer.slice());
+            if (!Number.isSafeInteger(pageCount) || pageCount < 1
+                || options.preservePageCount && pageCount !== file.pageCount) throw options.unverified();
+            const documents = read.map(d => ({ ...d, buffer }));
+            return { value, buffer, pageCount, documents, expectedWorkingSha256, expectedStagedSha256: await digest(buffer) };
+          });
+          const requireFence = () => {
+            requireCurrent();
+            if (getState().pageDirtyPaths.length || !historyKept()) throw changed();
+          };
+          for (let attempt = 0; ; attempt++) {
+            if (attempt === REWRITE_COMMIT_ATTEMPTS) throw changed();
+            requireCurrent();
+            await settle(false);
+            const outcome = await withFileLock([working], () => serializeWorkspacePublication(async () => {
+              requireCurrent();
+              // A page edit made since the commit above: commit it outside
+              // the lane and the exclusive lock, then try again.
+              if (getState().pageDirtyPaths.length) return RETRY;
+              requireFence();
+              published = true;
+              await publishPageCommit(io.transaction,
+                [{ workingPath: working, stagedPath: stage,
+                  expectedWorkingSha256: staged.expectedWorkingSha256, expectedStagedSha256: staged.expectedStagedSha256 }],
+                snapshots => {
+                  requireFence();
+                  dispatch({ type: 'UPDATE_FILE', path, buffer: staged.buffer, pageCount: staged.pageCount,
+                    snapshotPath: snapshots[0], documents: staged.documents });
+                  if (getState().files.get(path)?.buffer !== staged.buffer) throw changed();
+                  publication = getState().files.get(path)!;
+                }, cleanup);
+              return staged.value;
+            }, [working]));
+            if (outcome !== RETRY) return outcome as T;
           }
-        });
-      } finally {
-        announced();
-      }
-    };
+        } finally {
+          // An unconfirmed abort of this publication fences its stage before
+          // cleanup; a rewrite that never published owns its stage alone.
+          if (!published || !hasPendingPageCommit()) await cleanup();
+        }
+      });
     const value = await (options.track ? options.track(publish as () => Promise<T>) : publish());
     if (value === DECLINED) return { completed: false };
     // Captured at dispatch, not by re-reading after an acknowledgement await:
     // another publication may already be current by then.
     return { completed: true, value: value as T, publication: publication! };
   } finally {
+    announced();
     ended();
   }
 }

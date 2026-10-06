@@ -1,4 +1,5 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFObject, PDFRawStream, PDFRef } from 'pdf-lib';
+import { beginDocumentWrite } from './document-writes';
 import type { AppState, OpenFile, PdfBuffer } from '../state/types';
 import type { PerformOperation } from '../hooks/useOperations';
 import type { EngineCall } from './engine-call';
@@ -83,7 +84,10 @@ export function createLayerSessions(readState: () => AppState) {
   const toggle = async (s: LayerSession, layer: Layer, buffer: PdfBuffer | null, operation: PerformOperation, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(s) || s.busy) return;
     s.busy = true; s.error = ''; s.status = ''; notify();
+    let written = () => {};
     try {
+      // Recorded from here: a move of the document waits for this toggle.
+      written = beginDocumentWrite(s.workingPath);
       if (!s.loaded || !at(s, buffer) || s.buffer !== buffer || s.layers[layer.index] !== layer || layer.locked) throw changed();
       const byId = new Map<string, number>();
       for (const doc of readState().workspace.documents) if (doc.buffer === buffer) for (const page of doc.pages) if (page.sourceDocId === s.path) {
@@ -110,7 +114,7 @@ export function createLayerSessions(readState: () => AppState) {
       if (!result.publication?.buffer || result.publication.path !== s.path || result.publication.workingPath !== s.workingPath) throw invalid();
       s.loaded = false; s.buffer = result.publication.buffer;
     } catch (e) { if (live(s)) s.error = e instanceof Error ? e.message : String(e); }
-    finally { if (live(s)) { s.busy = false; notify(); } }
+    finally { written(); if (live(s)) { s.busy = false; notify(); } }
   };
   const retry = (s: LayerSession) => { if (live(s) && !s.busy) { s.error = ''; s.loaded = false; s.loading = null; notify(); } };
   return { get, at, reconcile, load, cancelLoad, toggle, retry,

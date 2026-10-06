@@ -1,4 +1,5 @@
 import type { AppState, OpenFile, PdfBuffer } from '../state/types';
+import { beginDocumentWrite } from './document-writes';
 import type { PerformOperation } from '../hooks/useOperations';
 import type { EngineCall } from './engine-call';
 import type { OutlineNode } from './outline-reorder';
@@ -130,6 +131,10 @@ export function createBookmarkDrafts(readState: () => AppState) {
     if (!editable(d) || !d.dirty && !d.busy) return d.running ?? Promise.resolve();
     if (!sameBookmarkTree(d.queue.at(-1) ?? d.baseline, d.nodes)) d.queue.push(d.nodes);
     if (d.running) return d.running;
+    // Recorded from here: a move of the document waits for this flush.
+    let written: () => void;
+    try { written = beginDocumentWrite(d.workingPath); }
+    catch (e) { d.saveRefused = true; d.error = errorText(e); d.queue = []; notify(); return Promise.resolve(); }
     d.busy = true; d.loading = null; d.error = ''; d.saveRefused = false; d.status = tChrome('nav.bookmarks.saving'); notify();
     const run = async () => {
       try {
@@ -145,7 +150,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
           d.dirty = !sameBookmarkTree(d.nodes, submitted); notify();
         }
       } catch (e) { if (live(d)) { d.saveRefused = true; d.error = errorText(e); d.blocked = !at(d); d.queue = []; } }
-      finally { if (live(d)) { d.busy = false; d.running = null; d.status = ''; notify(); } }
+      finally { written(); if (live(d)) { d.busy = false; d.running = null; d.status = ''; notify(); } }
     };
     // Set the owner promise before any await can run a competing flush.
     d.running = Promise.resolve().then(run); return d.running;

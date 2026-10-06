@@ -4,7 +4,7 @@ import { restoreHistory } from './lib/disk-history';
 import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { runPageCommit } from './lib/page-commit-run';
-import { whileDocumentLeaves } from './lib/document-writes';
+import { whileDocumentLeaves, withDocumentWrite } from './lib/document-writes';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
@@ -945,9 +945,19 @@ function AppContent(): React.ReactElement {
   pendingRef.current = commitPending;
   // The commit gate: every dirty file, then every outstanding publication of
   // `paths`, or of any path without them.
-  const commitIfNeeded = useCallback((paths?: readonly string[]): Promise<void> => runCommitGate(paths), []);
+  const commitIfNeeded = useCallback((paths?: readonly string[], before?: number): Promise<void> =>
+    runCommitGate(paths, before), []);
   const commitRef = useRef(commitIfNeeded);
   commitRef.current = commitIfNeeded;
+
+  // A gesture that writes `path`'s working copy, recorded from its first line
+  // to its end: a document moves to another window only once every such
+  // gesture has finished, including one that still awaits a gate or a probe
+  // before its write starts.
+  const writeGesture = useCallback(<T,>(path: string, run: () => Promise<T>): Promise<T> => {
+    const working = readState().files.get(path)?.workingPath;
+    return working ? withDocumentWrite([working], run) : run();
+  }, [readState]);
 
   // Fire-and-forget variant for gates/effects/buttons: reports instead of
   // throwing. Flows that must abort on failure (save, close) await
@@ -1888,7 +1898,7 @@ function AppContent(): React.ReactElement {
     const editClass = options?.structuralConsent ? 'structural' : sequenceEditClass(method, options?.following?.map(step => step.method));
     return trackInteractive(() => executeWorkspaceOperation(filePath, method, params, readState, dispatch, {
       confirm: (path, working) => editClass === 'none' ? Promise.resolve(true) : confirmEditOfSignedDoc(path, working, editClass),
-      commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
+      commit: (paths, before) => commitRef.current(paths, before), read: file.readBuffer, write: file.writeBuffer,
       remove: file.remove, index: readPublishedBytes, transaction: pageCommit,
       callStaged: callRaw,
       track: async (name, values, run) => isTrackableMethod(name) ? await trackOperation(name, values, run) as Awaited<ReturnType<typeof run>> : run(),
@@ -1931,14 +1941,14 @@ function AppContent(): React.ReactElement {
     );
   }, [showActionConfirm, showNotice]);
 
-  const offerRedactionResidue = useCallback(async (path: string, result: unknown) => {
+  const offerRedactionResidue = useCallback((path: string, result: unknown) => writeGesture(path, async () => {
     const residue = residueOf(result);
     if (!residue || !(await askRedactionResidue(result)) || !residueRemovable(residue)) return;
     await performOperation(path, 'remove_redaction_residue', {
       ...residueRequest(residue),
       font_dir: await app.getEditFontPath(),
     }, { intent: gestureIntent(path) });
-  }, [askRedactionResidue, performOperation, gestureIntent]);
+  }), [askRedactionResidue, performOperation, gestureIntent, writeGesture]);
 
   const handleRedactFile = useCallback(
     (path: string, marks: readonly RedactionMark[], seen: AppState): Promise<boolean> =>
@@ -1993,7 +2003,7 @@ function AppContent(): React.ReactElement {
   // field's scripts say, and the `javascript` action kind is reported by name
   // in the case below rather than run.
   const handleWidgetAction = useCallback(
-    async (path: string, fieldName: string, action: WidgetAction | null) => {
+    (path: string, fieldName: string, action: WidgetAction | null) => writeGesture(path, async () => {
       if (!action) {
         await showNotice(
           tChrome('app.formButton.title'),
@@ -2144,7 +2154,7 @@ function AppContent(): React.ReactElement {
             tChrome('app.formButton.unsupported', { field: fieldName }),
           );
       }
-    },
+    }),
     [
       state.files,
       call,
@@ -2156,6 +2166,7 @@ function AppContent(): React.ReactElement {
       openByPaths,
       copyToClipboard,
       readState,
+      writeGesture,
     ],
   );
 
@@ -2186,7 +2197,7 @@ function AppContent(): React.ReactElement {
       requireCapabilities(path, ['fill']);
       const filled = await trackInteractive(() => fillFormValues(path, values, readState, dispatch, {
         confirm: (source, policyPath, targets, typed, flatten) => confirmEditOfSignedDoc(source, policyPath, flatten ? 'structural' : 'form-fill', targets, typed),
-        commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
+        commit: (paths, before) => commitRef.current(paths, before), read: file.readBuffer, write: file.writeBuffer,
         remove: file.remove, index: readPublishedBytes, fontDirectory: app.getEditFontPath,
         callStaged: callRaw, transaction: pageCommit,
         track: async run => { await trackOperation('fill_form_fields', { file: readState().files.get(path)?.workingPath }, run); },
@@ -2203,7 +2214,7 @@ function AppContent(): React.ReactElement {
       requireCapabilities(path, ['formAuthoring']);
       const created = await createFormFields(path, specs, readState, dispatch, {
         confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
-        commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
+        commit: (paths, before) => commitRef.current(paths, before), read: file.readBuffer, write: file.writeBuffer,
         remove: file.remove, index: readPublishedBytes, fontDirectory: app.getEditFontPath,
         // Private staging, within the already gated/locked transaction. A
         // normal call would recursively enter the workspace publication lane.
@@ -2229,7 +2240,7 @@ function AppContent(): React.ReactElement {
   // tool that refuses to clean a file before it is sent out has failed at the
   // job it exists for.
   const handleSanitizeDocument = useCallback(
-    async (path: string, request: SanitizeRequest): Promise<boolean> => {
+    (path: string, request: SanitizeRequest): Promise<boolean> => writeGesture(path, async (): Promise<boolean> => {
       const intent = gestureIntent(path);
       const signed = request.signatures.count + request.signatures.document_timestamps;
       if (signed > 0) {
@@ -2246,8 +2257,8 @@ function AppContent(): React.ReactElement {
         hidden_text_ocr: request.includeOcrLayer,
       }, { intent });
       return true;
-    },
-    [gestureIntent, performOperation, showProceedConfirm],
+    }),
+    [gestureIntent, performOperation, showProceedConfirm, writeGesture],
   );
 
   // The preparer's half of field locking: the seed an UNSIGNED signature field
@@ -2315,13 +2326,7 @@ function AppContent(): React.ReactElement {
   );
 
   const handleEditText = useCallback(
-    async (
-      path: string,
-      page: number,
-      index: number,
-      newText: string,
-      opts?: { convert?: boolean },
-    ): Promise<string | void> => {
+    (path: string, page: number, index: number, newText: string, opts?: { convert?: boolean }): Promise<string | void> => writeGesture(path, async (): Promise<string | void> => {
       const intent = gestureIntent(path);
       if (opts?.convert) {
         // Render the replacement in the bundled fallback
@@ -2341,8 +2346,8 @@ function AppContent(): React.ReactElement {
       }
       const r = await performOperation(path, 'replace_text_run', { page, index, new_text: newText }, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
-    },
-    [gestureIntent, performOperation],
+    }),
+    [gestureIntent, performOperation, writeGesture],
   );
 
   // Run-scoped size/color restyle — same signed-doc gate, text unchanged.
@@ -2367,14 +2372,7 @@ function AppContent(): React.ReactElement {
   );
 
   const handleEditParagraph = useCallback(
-    async (
-      path: string,
-      page: number,
-      para: { index: number; runs: number[]; text: string },
-      newText: string,
-      spans: { start: number; end: number; run: number }[],
-      opts?: ParagraphEditOpts,
-    ): Promise<string | void> => {
+    (path: string, page: number, para: { index: number; runs: number[]; text: string }, newText: string, spans: { start: number; end: number; run: number }[], opts?: ParagraphEditOpts): Promise<string | void> => writeGesture(path, async (): Promise<string | void> => {
       const intent = gestureIntent(path);
       // The fingerprint (member runs + logical text) makes the engine
       // re-derive its grouping and REFUSE if the page changed underneath —
@@ -2424,29 +2422,19 @@ function AppContent(): React.ReactElement {
       params.font_path = await app.getEditFontPath();
       const r = await performOperation(path, 'replace_paragraph_text', params, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
-    },
-    [gestureIntent, performOperation],
+    }),
+    [gestureIntent, performOperation, writeGesture],
   );
 
   // merge: one engine op, one undo step; both fingerprints ride so the
   // engine refuses a stale view. Structural-class like every content edit.
   const handleMergeParagraph = useCallback(
-    async (
-      path: string,
-      page: number,
-      prev: { index: number; runs: number[]; text: string },
-      cur: { index: number; runs: number[]; text: string },
-      // `withNext` merges cur (the NEXT paragraph) into prev (the
-      // SELECTED one — prev is always the anchor slot); an edited editor
-      // rides its text in as the selected side's override with the span
-      // map the replace path would have sent.
-      opts?: {
+    (path: string, page: number, prev: { index: number; runs: number[]; text: string }, cur: { index: number; runs: number[]; text: string }, opts?: {
         withNext?: boolean;
         overrideText?: string;
         overrideSpans?: { start: number; end: number; run: number }[];
         restyle?: import('./lib/edit-paragraphs').MergeRestyle;
-      },
-    ): Promise<string | void> => {
+      }): Promise<string | void> => writeGesture(path, async (): Promise<string | void> => {
       const intent = gestureIntent(path);
       const r = await performOperation(path, 'merge_paragraph_with_previous', {
         page,
@@ -2477,8 +2465,8 @@ function AppContent(): React.ReactElement {
         font_path: await app.getEditFontPath(),
       }, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
-    },
-    [gestureIntent, performOperation],
+    }),
+    [gestureIntent, performOperation, writeGesture],
   );
 
   // Add Text: author a NEW text object at `rect` (PDF user-space points,
@@ -2487,12 +2475,7 @@ function AppContent(): React.ReactElement {
   // re-editable by the run and paragraph editors with no special case. Undoable via performOperation;
   // refuses on a signed doc like every other content edit.
   const handleAddText = useCallback(
-    async (
-      path: string,
-      page: number,
-      rect: [number, number, number, number],
-      text: string,
-      opts?: {
+    (path: string, page: number, rect: [number, number, number, number], text: string, opts?: {
         size?: number;
         color?: [number, number, number];
         family?: 'serif' | 'sans' | 'mono';
@@ -2521,8 +2504,7 @@ function AppContent(): React.ReactElement {
         /** Writing mode — `vertical` derives its column direction from the
          * text; horizontal is the engine default and never travels. */
         writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
-      },
-    ): Promise<string | void> => {
+      }): Promise<string | void> => writeGesture(path, async (): Promise<string | void> => {
       const intent = gestureIntent(path);
       const params: Record<string, unknown> = {
         page,
@@ -2545,26 +2527,20 @@ function AppContent(): React.ReactElement {
       }
       const r = await performOperation(path, 'add_text_box', params, { intent });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
-    },
-    [gestureIntent, performOperation],
+    }),
+    [gestureIntent, performOperation, writeGesture],
   );
 
   // Delete, transform (move/resize/rotate), or restyle (recolour /
   // line-width) one vector path object. Same undoable snapshot/commit-gate flow
   // as an image edit (structural-class), just a different engine op.
   const handleEditVector = useCallback(
-    async (
-      kind: 'delete' | 'transform' | 'restyle',
-      path: string,
-      page: number,
-      index: number,
-      opts?: {
+    (kind: 'delete' | 'transform' | 'restyle', path: string, page: number, index: number, opts?: {
         matrix?: number[];
         fill?: [number, number, number];
         stroke?: [number, number, number];
         lineWidth?: number;
-      },
-    ): Promise<string | void> => {
+      }): Promise<string | void> => writeGesture(path, async (): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (kind === 'transform') {
@@ -2584,8 +2560,8 @@ function AppContent(): React.ReactElement {
       }
       const r = await performOperation(path, 'delete_page_vector', { page, index });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
-    },
-    [state.files, performOperation],
+    }),
+    [state.files, performOperation, writeGesture],
   );
 
   // --- Edit ▸ Images ----------------------------------------------------
@@ -2596,19 +2572,14 @@ function AppContent(): React.ReactElement {
   const performImageEdit = useCallback((path: string, edit: ImageEdit) => trackInteractive(() =>
     editWorkspaceImage(path, edit, readState, dispatch, {
       confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
-      commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
+      commit: (paths, before) => commitRef.current(paths, before), read: file.readBuffer, write: file.writeBuffer,
       remove: file.remove, index: readPublishedBytes, transaction: pageCommit, callStaged: callRaw,
       pick: dialog.pickImageFile, readSource: batch.readFileBuffer, decode: decodeToRawSource,
       track: async (method, working, run) => { await trackOperation(method, { file: working }, run); },
     })), [readState, dispatch, confirmEditOfSignedDoc, callRaw, trackOperation]);
 
   const handleEditImage = useCallback(
-    async (
-      kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity',
-      path: string,
-      page: number,
-      index: number,
-      opts?: {
+    (kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity', path: string, page: number, index: number, opts?: {
         source?: ReplacementSource;
         outputPrefix?: string;
         matrix?: number[];
@@ -2616,8 +2587,7 @@ function AppContent(): React.ReactElement {
         opacity?: number;
         blend?: string;
         mask?: EditImageMaskParam;
-      },
-    ) => {
+      }) => writeGesture(path, async () => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
 
@@ -2706,8 +2676,8 @@ function AppContent(): React.ReactElement {
         const out = (r as unknown as { output?: string }).output;
         return out ? `Saved ${out.split(/[\\/]/).pop()}` : undefined;
       }
-    },
-    [state.files, call, performOperation, performImageEdit, gestureIntent, readState],
+    }),
+    [state.files, call, performOperation, performImageEdit, gestureIntent, readState, writeGesture],
   );
 
   // Multi-select: group transform/delete over N placements on one page —
@@ -2715,12 +2685,7 @@ function AppContent(): React.ReactElement {
   // engine's multi ops; N single calls would churn N undo entries and N page
   // rebuilds for one gesture).
   const handleEditImagesGroup = useCallback(
-    async (
-      kind: 'transform' | 'delete',
-      path: string,
-      page: number,
-      opts: { targets?: { index: number; matrix: number[] }[]; indexes?: number[] },
-    ): Promise<string | void> => {
+    (kind: 'transform' | 'delete', path: string, page: number, opts: { targets?: { index: number; matrix: number[] }[]; indexes?: number[] }): Promise<string | void> => writeGesture(path, async (): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (kind === 'transform') {
@@ -2732,8 +2697,8 @@ function AppContent(): React.ReactElement {
       if (!opts.indexes?.length) throw new Error('group delete requires indexes');
       const r = await performOperation(path, 'delete_page_images', { page, indexes: opts.indexes });
       if (r === EDIT_DECLINED) return EDIT_DECLINED;
-    },
-    [state.files, performOperation],
+    }),
+    [state.files, performOperation, writeGesture],
   );
 
   // Raster/vector placement and replacement share one private-stage gesture.
@@ -3075,9 +3040,10 @@ function AppContent(): React.ReactElement {
           const beforeCommit = readState().files.get(path);
           if (!beforeCommit || beforeCommit.importOnly) return false;
           // The working copy written back over the user's file must hold every
-          // write asked for before the move: the move waits for those, and a
-          // write asked for while the document leaves refuses at once.
-          return whileDocumentLeaves(beforeCommit.workingPath, async () => {
+          // write asked for before the move: the move waits for those. A
+          // gesture asked for while the document leaves refuses at once and
+          // keeps the document here, until the hand-over itself.
+          return whileDocumentLeaves(beforeCommit.workingPath, async (cancelled) => {
             if (!(await commitOrAbort([beforeCommit.workingPath]))) return false;
             const held = await reserve();
             const handed = readState().files.get(path);
@@ -3095,6 +3061,11 @@ function AppContent(): React.ReactElement {
             handOffsInFlight.current.set(path, flight);
             let moved: TabDragResult;
             try {
+              if (cancelled()) {
+                handOffsInFlight.current.delete(path);
+                await tabDrag.release(held.token).catch(() => {});
+                return false;
+              }
               if (plan.saveFirst) {
                 // A failed write gives the document back BEFORE it is reported:
                 // the notice waits on the user, and the reservation must not.
@@ -3108,6 +3079,11 @@ function AppContent(): React.ReactElement {
                   return false;
                 }
                 dispatch({ type: 'MARK_SAVED', path });
+              }
+              if (cancelled()) {
+                handOffsInFlight.current.delete(path);
+                await tabDrag.release(held.token).catch(() => {});
+                return false;
               }
               moved = await tabDrag.commit(held.token);
             } catch (e) {

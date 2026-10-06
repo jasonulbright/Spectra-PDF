@@ -2,6 +2,7 @@ import type { AppAction, AppState, PdfBuffer } from '../state/types';
 import { tChrome } from '../i18n';
 import { withFileLock, withWriteChain } from './engine-lock';
 import { announceWorkspacePublication, serializeWorkspacePublication } from './workspace-publication';
+import { beginDocumentWrite } from './document-writes';
 import { hasPendingPageCommit, publishPageCommit, recoverPendingPageCommit, type PageCommitIo } from './page-commit-transaction';
 import type { ReadPublishedBytes } from './workspace-settle';
 
@@ -32,9 +33,19 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
   // then its lock, and enters the lane again: a lane holder never waits for a
   // chain or a file lock. The chain is claimed (not awaited) inside the first
   // turn, so repeated keypresses keep their order on it, and a staged rewrite
-  // of the path that holds the chain publishes first. The first turn replaces
-  // no bytes, so it names no path; the disk step names its working path from
-  // its claim on.
+  // of the path that holds the chain publishes first. The first turn names
+  // the working path that is active when the key is pressed, so a gate of that
+  // path asked for after the key waits for the undo; the disk step names the
+  // path it restores from its claim on. The whole undo is recorded as a write
+  // of that path, so a move of the document waits for it.
+  const pressed = getState();
+  const pressedWorking = pressed.activeFileId ? pressed.files.get(pressed.activeFileId)?.workingPath : undefined;
+  let written: () => void;
+  try {
+    written = pressedWorking ? beginDocumentWrite(pressedWorking) : () => {};
+  } catch (error) {
+    return Promise.reject(error);
+  }
   const look = serializeWorkspacePublication(async () => {
     await recoverPendingPageCommit();
     const selected = getState();
@@ -50,8 +61,8 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
     const restored = withWriteChain([working], () => withFileLock([working],
       () => serializeWorkspacePublication(() => restoreDisk(path, working), [working])));
     return { restored: restored.finally(done) };
-  }, []);
-  return look.then(next => next?.restored);
+  }, pressedWorking ? [pressedWorking] : []);
+  return look.then(next => next?.restored).finally(written);
 
   async function restoreDisk(path: string, working: string): Promise<void> {
     await recoverPendingPageCommit();

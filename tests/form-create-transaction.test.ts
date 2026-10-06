@@ -74,7 +74,7 @@ describe('form creation publication', () => {
     const callback = app.slice(app.indexOf('const handleAddFormFields ='), app.indexOf('const handleAddFormField ='));
     expect(callback).toContain('createFormFields(path, specs, readState, dispatch');
     expect(callback).toContain("confirmEditOfSignedDoc(source, working, 'structural')");
-    expect(callback).toContain('commit: (paths) => commitRef.current(paths)');
+    expect(callback).toContain('commit: (paths, before) => commitRef.current(paths, before)');
     expect(callback).toContain('callStaged: callRaw');
     expect(callback).not.toContain('file.snapshot(');
     expect(callback).not.toContain('file.writeBuffer(');
