@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Az indítási beállítások nem voltak olvashatók, ezért az alkalmazás az alapértelmezett beállításokkal indult el.",
   "app.unreadableRecord.startupTitle": "Az indítási beállítások nem lettek alkalmazva",
   "app.window.claimTitle": "Másik ablakban van megnyitva",
+  "app.window.moveRefusedAction": "Ez a művelet nem futott le, mert a dokumentum éppen egy másik ablakba került át.",
+  "app.window.moveCancelled": "A dokumentum ebben az ablakban maradt, mert az áthelyezés közben műveletet kértek rajta. Helyezze át újra, ha a művelet befejeződött.",
   "app.window.focusOther": "Az adott ablak megjelenítése",
   "app.window.outputOpenTitle": "A fájl meg van nyitva",
   "app.window.outputOpenHere": "„{{name}}” meg van nyitva ebben az ablakban. Zárja be, vagy válasszon másik nevet.",

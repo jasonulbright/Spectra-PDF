@@ -161,6 +161,8 @@
   "app.unreadableRecord.startupInPlace": "Nastavenia spúšťania sa nepodarilo prečítať, takže sa aplikácia spustila s predvolenými nastaveniami.",
   "app.unreadableRecord.startupTitle": "Nastavenia spúšťania neboli použité",
   "app.window.claimTitle": "Otvorené v inom okne",
+  "app.window.moveRefusedAction": "Táto akcia sa nevykonala, pretože sa dokument presúval do iného okna.",
+  "app.window.moveCancelled": "Dokument zostal v tomto okne, pretože počas presunu bola naň vyžiadaná akcia. Po dokončení akcie ho presuňte znova.",
   "app.window.focusOther": "Zobraziť toto okno",
   "app.window.outputOpenTitle": "Súbor je otvorený",
   "app.window.outputOpenHere": "„{{name}}“ je otvorený v tomto okne. Zatvorte ho alebo zvoľte iný názov.",

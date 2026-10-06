@@ -11,7 +11,7 @@
  */
 import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBridge, type StoreCertificateAnswer } from './lib/tauri-bridge';
 import { emit } from '@tauri-apps/api/event';
-import { runCommitGate } from './lib/commit-gate';
+import { gatesWaitingFor, runCommitGate } from './lib/commit-gate';
 import { holdRewriteEngineSteps } from './lib/workspace-rewrite';
 
 let rewriteHold: ReturnType<typeof holdRewriteEngineSteps> | null = null;
@@ -1549,6 +1549,8 @@ export interface TestHarness {
   holdRewriteEngineSteps: () => void;
   releaseRewriteEngineSteps: () => void;
   rewriteEngineStepsWaiting: () => number;
+  /** How many commit gates naming `workingPath` wait for a publication now. */
+  commitGatesWaiting: (workingPath: string) => number;
   /** Override platform capability flags; unnamed flags keep their value.
    * Surfaces read the flags on render, so the change shows on the next one.
    * Returns the full record in force afterwards. */
@@ -2686,6 +2688,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       rewriteHold = null;
     },
     rewriteEngineStepsWaiting: () => rewriteHold?.waiting() ?? 0,
+    commitGatesWaiting: (workingPath) => gatesWaitingFor(workingPath),
     sendToEmailStage: async () => {
       const snap = deps.getStateSnapshot();
       if (!snap.activeFile) {

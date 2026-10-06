@@ -155,6 +155,8 @@
   "app.unreadableRecord.startupInPlace": "無法讀取啟動設定，因此本次啟動使用了預設設定。",
   "app.unreadableRecord.startupTitle": "未套用啟動設定",
   "app.window.claimTitle": "已在其他視窗中開啟",
+  "app.window.moveRefusedAction": "文件正在移動到另一個視窗，因此未執行此動作。",
+  "app.window.moveCancelled": "移動期間要求了對此文件的動作，因此文件仍留在此視窗中。請在動作完成後再次移動。",
   "app.window.focusOther": "顯示該視窗",
   "app.window.outputOpenTitle": "檔案已開啟",
   "app.window.outputOpenHere": "「{{name}}」已在此視窗中開啟。請關閉它，或選擇其他名稱。",

@@ -9,6 +9,10 @@ type Gate = () => Promise<void>;
 
 let gate: Gate | null = null;
 let inflight: Promise<void> | null = null;
+/** Gates waiting for publications, each with the paths it names (`null`:
+ * every path). Read by the end-to-end harness, which must see a gated call
+ * blocked in its gate before it lets the publication it waits for go on. */
+const waitingGates = new Set<{ paths: readonly string[] | null }>();
 
 /** Registers the page commit. It commits every dirty file (cross-file moves
  * entangle them) and resolves at once when nothing is dirty, no page commit is
@@ -62,6 +66,19 @@ export function commitPendingPageEdits(): Promise<void> {
 export async function runCommitGate(paths?: readonly string[], before = Infinity): Promise<void> {
   await commitShared();
   if (!hasWorkspacePublication(paths, before)) return;
-  await workspacePublicationsSettled(paths, before);
+  const waiting = { paths: paths ?? null };
+  waitingGates.add(waiting);
+  try {
+    await workspacePublicationsSettled(paths, before);
+  } finally {
+    waitingGates.delete(waiting);
+  }
   await commitShared();
+}
+
+/** How many gates naming `path` (or every path) wait for a publication now. */
+export function gatesWaitingFor(path: string): number {
+  let count = 0;
+  for (const gate of waitingGates) if (!gate.paths || gate.paths.includes(path)) count++;
+  return count;
 }

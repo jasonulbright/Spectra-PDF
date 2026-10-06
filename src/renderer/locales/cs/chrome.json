@@ -161,6 +161,8 @@
   "app.unreadableRecord.startupInPlace": "Nastavení spouštění se nepodařilo přečíst, takže se aplikace spustila s výchozím nastavením.",
   "app.unreadableRecord.startupTitle": "Nastavení spouštění nebylo použito",
   "app.window.claimTitle": "Otevřeno v jiném okně",
+  "app.window.moveRefusedAction": "Tato akce neproběhla, protože se dokument přesouval do jiného okna.",
+  "app.window.moveCancelled": "Dokument zůstal v tomto okně, protože během přesunu byla na něm vyžádána akce. Po dokončení akce ho přesuňte znovu.",
   "app.window.focusOther": "Zobrazit toto okno",
   "app.window.outputOpenTitle": "Soubor je otevřený",
   "app.window.outputOpenHere": "„{{name}}“ je otevřený v tomto okně. Zavřete ho, nebo zvolte jiný název.",

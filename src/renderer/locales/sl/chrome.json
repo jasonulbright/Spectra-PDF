@@ -161,6 +161,8 @@
   "app.unreadableRecord.startupInPlace": "Nastavitev zagona ni bilo mogoče prebrati, zato se je program zagnal s privzetimi nastavitvami.",
   "app.unreadableRecord.startupTitle": "Nastavitve zagona niso bile uporabljene",
   "app.window.claimTitle": "Odprto v drugem oknu",
+  "app.window.moveRefusedAction": "To dejanje se ni izvedlo, ker se je dokument premikal v drugo okno.",
+  "app.window.moveCancelled": "Dokument je ostal v tem oknu, ker je bilo med premikanjem zanj zahtevano dejanje. Ko se dejanje konča, ga znova premaknite.",
   "app.window.focusOther": "Pokaži to okno",
   "app.window.outputOpenTitle": "Datoteka je odprta",
   "app.window.outputOpenHere": "»{{name}}« je odprta v tem oknu. Zaprite jo ali izberite drugo ime.",

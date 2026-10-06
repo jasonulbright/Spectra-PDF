@@ -324,6 +324,13 @@ export const WORKBENCH_STRINGS = {
   // Document ownership across windows. A file is live in at most one window,
   // so the refusal names what it stopped and offers the window that holds it.
   'app.window.claimTitle': 'Open in Another Window',
+  // A document moving to another window waits for the writes asked for
+  // before the move; an action asked for during the move does not run, and
+  // the move stops unless it has already handed the document over.
+  'app.window.moveRefusedAction':
+    'This action did not run because the document was being moved to another window.',
+  'app.window.moveCancelled':
+    'The document stayed in this window because an action on it was asked for during the move. Move it again once the action has finished.',
   'app.window.openElsewhere':
     'Already open in another window: {{names}}. A file can be edited in one window at a time.',
   'app.window.importElsewhere':

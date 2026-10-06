@@ -750,8 +750,8 @@ describe('a document that leaves this window', () => {
       // Nothing is recorded any more: a new gesture refuses before any await.
       const confirm = vi.fn(async () => true);
       w.io.confirm = confirm;
-      await expect(w.rewrite('A')).rejects.toThrow(/changed/);
-      await expect(w.call('compress', { file: 'work-A', output: 'work-A' })).rejects.toThrow(/changed/);
+      await expect(w.rewrite('A')).rejects.toThrow(/moved to another window/);
+      await expect(w.call('compress', { file: 'work-A', output: 'work-A' })).rejects.toThrow(/moved to another window/);
       expect(confirm).not.toHaveBeenCalled();
       finishLeave();
       await Promise.all([long, left]);

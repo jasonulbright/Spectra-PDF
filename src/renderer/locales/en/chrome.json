@@ -131,6 +131,8 @@
   "app.window.folderHasOpenDocument": "\"{{name}}\" is open, and this run writes to its folder: {{folder}}. Close the document, then try again.",
   "app.window.folderRunTitle": "Folder Is Being Written",
   "app.window.importElsewhere": "Pages cannot be imported from a file that is open in another window: {{names}}.",
+  "app.window.moveCancelled": "The document stayed in this window because an action on it was asked for during the move. Move it again once the action has finished.",
+  "app.window.moveRefusedAction": "This action did not run because the document was being moved to another window.",
   "app.window.openElsewhere": "Already open in another window: {{names}}. A file can be edited in one window at a time.",
   "app.window.openInRunFolder": "A run is writing to {{folder}}, so these files cannot be opened until it stops: {{names}}.",
   "app.window.outputBusy": "Another run is writing \"{{name}}\". Wait until it stops, or choose another name.",

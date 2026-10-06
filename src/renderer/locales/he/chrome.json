@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "לא ניתן היה לקרוא את הגדרות ההפעלה, ולכן היישום הופעל עם הגדרות ברירת המחדל.",
   "app.unreadableRecord.startupTitle": "הגדרות ההפעלה לא הוחלו",
   "app.window.claimTitle": "פתוח בחלון אחר",
+  "app.window.moveRefusedAction": "הפעולה לא בוצעה כי המסמך הועבר לחלון אחר.",
+  "app.window.moveCancelled": "המסמך נשאר בחלון זה כי התבקשה עליו פעולה במהלך ההעברה. העבירו אותו שוב לאחר שהפעולה תסתיים.",
   "app.window.focusOther": "הצגת החלון הזה",
   "app.window.outputOpenTitle": "הקובץ פתוח",
   "app.window.outputOpenHere": "\"{{name}}\" פתוח בחלון הזה. יש לסגור אותו או לבחור שם אחר.",

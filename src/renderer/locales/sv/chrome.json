@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Startinställningarna kunde inte läsas, så programmet startade med standardinställningarna.",
   "app.unreadableRecord.startupTitle": "Startinställningarna tillämpades inte",
   "app.window.claimTitle": "Öppen i ett annat fönster",
+  "app.window.moveRefusedAction": "Åtgärden kördes inte eftersom dokumentet höll på att flyttas till ett annat fönster.",
+  "app.window.moveCancelled": "Dokumentet blev kvar i det här fönstret eftersom en åtgärd på det begärdes under flytten. Flytta det igen när åtgärden är klar.",
   "app.window.focusOther": "Visa det fönstret",
   "app.window.outputOpenTitle": "Filen är öppen",
   "app.window.outputOpenHere": "\"{{name}}\" är öppen i det här fönstret. Stäng den, eller välj ett annat namn.",

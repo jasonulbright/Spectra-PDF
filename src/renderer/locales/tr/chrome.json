@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Başlangıç ayarları okunamadı, bu nedenle uygulama varsayılan ayarlarla başlatıldı.",
   "app.unreadableRecord.startupTitle": "Başlangıç ayarları uygulanmadı",
   "app.window.claimTitle": "Başka bir pencerede açık",
+  "app.window.moveRefusedAction": "Belge başka bir pencereye taşınırken bu işlem çalıştırılmadı.",
+  "app.window.moveCancelled": "Taşıma sırasında belge üzerinde bir işlem istendiği için belge bu pencerede kaldı. İşlem bittiğinde belgeyi yeniden taşıyın.",
   "app.window.focusOther": "O pencereyi göster",
   "app.window.outputOpenTitle": "Dosya açık",
   "app.window.outputOpenHere": "\"{{name}}\" bu pencerede açık. Kapatın veya başka bir ad seçin.",

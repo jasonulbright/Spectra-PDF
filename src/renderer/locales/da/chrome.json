@@ -157,6 +157,8 @@
   "app.unreadableRecord.startupInPlace": "Opstartsindstillingerne kunne ikke læses, så programmet startede med standardindstillingerne.",
   "app.unreadableRecord.startupTitle": "Opstartsindstillingerne blev ikke anvendt",
   "app.window.claimTitle": "Åben i et andet vindue",
+  "app.window.moveRefusedAction": "Handlingen blev ikke udført, fordi dokumentet var ved at blive flyttet til et andet vindue.",
+  "app.window.moveCancelled": "Dokumentet blev i dette vindue, fordi der blev bedt om en handling på det under flytningen. Flyt det igen, når handlingen er færdig.",
   "app.window.focusOther": "Vis det vindue",
   "app.window.outputOpenTitle": "Filen er åben",
   "app.window.outputOpenHere": "\"{{name}}\" er åben i dette vindue. Luk den, eller vælg et andet navn.",

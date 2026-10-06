@@ -165,6 +165,8 @@
   "app.unreadableRecord.startupInPlace": "تعذّرت قراءة إعدادات بدء التشغيل، لذلك بدأ التطبيق بالإعدادات الافتراضية.",
   "app.unreadableRecord.startupTitle": "لم تُطبَّق إعدادات بدء التشغيل",
   "app.window.claimTitle": "مفتوح في نافذة أخرى",
+  "app.window.moveRefusedAction": "لم يُنفَّذ هذا الإجراء لأن المستند كان يُنقل إلى نافذة أخرى.",
+  "app.window.moveCancelled": "بقي المستند في هذه النافذة لأن إجراءً عليه طُلب أثناء النقل. انقله مرة أخرى بعد انتهاء الإجراء.",
   "app.window.focusOther": "إظهار تلك النافذة",
   "app.window.outputOpenTitle": "الملف مفتوح",
   "app.window.outputOpenHere": "\"{{name}}\" مفتوح في هذه النافذة. أغلقه، أو اختر اسمًا آخر.",

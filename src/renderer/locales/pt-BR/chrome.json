@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "Não foi possível ler as configurações de inicialização, portanto o aplicativo foi iniciado com as configurações padrão.",
   "app.unreadableRecord.startupTitle": "Configurações de inicialização não aplicadas",
   "app.window.claimTitle": "Aberto em outra janela",
+  "app.window.moveRefusedAction": "Esta ação não foi executada porque o documento estava sendo movido para outra janela.",
+  "app.window.moveCancelled": "O documento permaneceu nesta janela porque uma ação foi solicitada nele durante a movimentação. Mova-o novamente quando a ação terminar.",
   "app.window.focusOther": "Mostrar essa janela",
   "app.window.outputOpenTitle": "O arquivo está aberto",
   "app.window.outputOpenHere": "\"{{name}}\" está aberto nesta janela. Feche-o ou escolha outro nome.",

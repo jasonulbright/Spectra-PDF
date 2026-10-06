@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "Non è stato possibile leggere le impostazioni di avvio, quindi l’applicazione è stata avviata con le impostazioni predefinite.",
   "app.unreadableRecord.startupTitle": "Impostazioni di avvio non applicate",
   "app.window.claimTitle": "Aperto in un’altra finestra",
+  "app.window.moveRefusedAction": "Questa azione non è stata eseguita perché il documento era in fase di spostamento in un'altra finestra.",
+  "app.window.moveCancelled": "Il documento è rimasto in questa finestra perché durante lo spostamento è stata richiesta un'azione su di esso. Spostalo di nuovo al termine dell'azione.",
   "app.window.focusOther": "Mostra quella finestra",
   "app.window.outputOpenTitle": "Il file è aperto",
   "app.window.outputOpenHere": "\"{{name}}\" è aperto in questa finestra. Chiudilo o scegli un altro nome.",

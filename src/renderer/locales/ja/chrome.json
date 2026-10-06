@@ -155,6 +155,8 @@
   "app.unreadableRecord.startupInPlace": "起動設定を読み取れなかったため、今回は既定の設定で起動しました。",
   "app.unreadableRecord.startupTitle": "起動設定が適用されませんでした",
   "app.window.claimTitle": "別のウィンドウで開いています",
+  "app.window.moveRefusedAction": "ドキュメントを別のウィンドウへ移動している途中だったため、この操作は実行されませんでした。",
+  "app.window.moveCancelled": "移動中にこのドキュメントへの操作が要求されたため、ドキュメントはこのウィンドウに残りました。操作が終わってから、もう一度移動してください。",
   "app.window.focusOther": "そのウィンドウを表示",
   "app.window.outputOpenTitle": "ファイルが開いています",
   "app.window.outputOpenHere": "\"{{name}}\" はこのウィンドウで開いています。閉じるか、別の名前を選択してください。",

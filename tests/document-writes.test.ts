@@ -156,7 +156,7 @@ describe('a gesture asked for while the document leaves', () => {
       cancelledAtEnd = cancelled();
     });
     await turn();
-    expect(() => beginDocumentWrite('work-A')).toThrow(/changed/);
+    expect(() => beginDocumentWrite('work-A')).toThrow(/moved to another window/);
     steps.resolve();
     await left;
     expect(cancelledAtEnd).toBe(true);
@@ -190,5 +190,86 @@ describe('methods that run while a write chain is held', () => {
     for (const method of ['signature_policy', 'pubkey_reseal', 'pubkey_reattach']) {
       expect(isTrackableMethod(method)).toBe(false);
     }
+  });
+});
+
+describe('a gesture refused because its document is moving says so', () => {
+  const moving = /moved to another window/;
+
+  it('a draft apply shows the move refusal in its panel and keeps the document here', async () => {
+    const w = workspace();
+    const drafts = createPageLabelDrafts(w.read);
+    const d = drafts.get(w.a)!;
+    const rows = (prefix: string): LabelRange[] => [{ start: 1, style: 'D', prefix, startAt: 5 }];
+    const reply = async () => ({ complete: true, count: 1, ranges: [{ start: 0, style: 'D', prefix: 'Old', start_at: 5 }],
+      labels: [1, 2, 3].map(i => previewLabel(rows('Old'), i)) }) as never;
+    await drafts.load(d, reply);
+    drafts.change(d, d.buffer, () => rows('New'));
+    let stays: boolean | null = null;
+    await whileDocumentLeaves('work-A', async (cancelled) => {
+      await drafts.apply(d, w.operation, reply, async () => {});
+      stays = cancelled();
+    });
+    expect(d.error).toMatch(moving);
+    expect(w.events).toEqual([]);
+    expect(stays).toBe(true);
+  });
+
+  it('an owned panel run does not begin and keeps the document here; the move reports it', async () => {
+    const w = workspace();
+    const runs = createOwnedOperationRuns(w.read);
+    let stays: boolean | null = null;
+    await whileDocumentLeaves('work-A', async (cancelled) => {
+      expect(runs.begin(w.a)).toBeNull();
+      stays = cancelled();
+    });
+    expect(stays).toBe(true);
+    // The panel shows nothing for a run that did not begin: the move says why.
+    const app = readFileSync(new URL('../src/renderer/App.tsx', import.meta.url), 'utf8');
+    const handOff = app.slice(app.indexOf('const handOffDocument = useCallback('), app.indexOf('const handleMoveToNewWindow'));
+    expect(handOff).toContain("tChrome(moved ? 'app.window.moveRefusedAction' : 'app.window.moveCancelled')");
+    expect(handOff).toMatch(/finally \{\s*refused = cancelled\(\);/);
+  });
+
+  it('an undo pressed during the move fails with the move refusal', async () => {
+    const w = workspace();
+    await whileDocumentLeaves('work-A', async () => {
+      await expect(restoreHistory('undo', w.read, () => {}, {} as HistoryIo)).rejects.toThrow(moving);
+    });
+  });
+
+});
+
+describe('an undo of a document that became active after the key press', () => {
+  it('records the document it restores, so a move of that document waits for it', async () => {
+    const w = workspace();
+    const b: OpenFile = { ...w.a, path: 'B', workingPath: 'work-B', buffer: new Uint8Array([2]) };
+    w.change({ files: new Map([['A', w.a], ['B', b]]) });
+    let releaseLane!: () => void;
+    const blocker = serializeWorkspacePublication(() => new Promise<void>(r => { releaseLane = r; }));
+    const reading = deferred();
+    const io: HistoryIo = {
+      read: async () => { w.events.push('restore B'); await reading.promise; w.events.push('restored B'); throw new Error('stop here'); },
+      write: async () => {}, remove: async () => {},
+      index: async () => ({ pageCount: 1, documents: [] }),
+      transaction: { publish: async () => ({}), abort: async () => ({}), acknowledge: async () => {} },
+    };
+    w.change({ files: new Map([['A', w.a], ['B', { ...b, undoStack: ['snap'] }]]) });
+    const undone = restoreHistory('undo', w.read, () => {}, io).catch(() => {});
+    // The user switches to B before the undo's turn.
+    w.change({ activeFileId: 'B' });
+    let leftB = false;
+    await turn();
+    releaseLane();
+    await blocker;
+    // The undo's turn has run once both documents are recorded.
+    for (let i = 0; i < 50 && __documentWriteCount() < 2; i++) await turn();
+    expect(__documentWriteCount()).toBe(2);
+    const left = whileDocumentLeaves('work-B', async () => { leftB = true; w.events.push('left B'); });
+    await turn();
+    expect(leftB).toBe(false);
+    reading.resolve();
+    await Promise.all([undone, left]);
+    expect(w.events).toEqual(['restore B', 'restored B', 'left B']);
   });
 });

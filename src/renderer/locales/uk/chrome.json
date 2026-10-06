@@ -161,6 +161,8 @@
   "app.unreadableRecord.startupInPlace": "Не вдалося прочитати параметри запуску, тому програму запущено з параметрами за замовчуванням.",
   "app.unreadableRecord.startupTitle": "Параметри запуску не застосовано",
   "app.window.claimTitle": "Відкрито в іншому вікні",
+  "app.window.moveRefusedAction": "Цю дію не виконано, бо документ переміщувався в інше вікно.",
+  "app.window.moveCancelled": "Документ залишився в цьому вікні, бо під час переміщення для нього було запитано дію. Перемістіть його знову, коли дію буде завершено.",
   "app.window.focusOther": "Показати те вікно",
   "app.window.outputOpenTitle": "Файл відкрито",
   "app.window.outputOpenHere": "«{{name}}» відкрито в цьому вікні. Закрийте його або виберіть інше ім’я.",

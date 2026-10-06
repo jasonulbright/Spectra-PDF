@@ -159,6 +159,8 @@
   "app.unreadableRecord.startupInPlace": "No se pudo leer la configuración de inicio, por lo que la aplicación se inició con la configuración predeterminada.",
   "app.unreadableRecord.startupTitle": "No se aplicó la configuración de inicio",
   "app.window.claimTitle": "Abierto en otra ventana",
+  "app.window.moveRefusedAction": "Esta acción no se ejecutó porque el documento se estaba moviendo a otra ventana.",
+  "app.window.moveCancelled": "El documento se quedó en esta ventana porque se pidió una acción sobre él durante el traslado. Vuelva a moverlo cuando la acción haya terminado.",
   "app.window.focusOther": "Mostrar esa ventana",
   "app.window.outputOpenTitle": "El archivo está abierto",
   "app.window.outputOpenHere": "\"{{name}}\" está abierto en esta ventana. Ciérrelo o elija otro nombre.",
