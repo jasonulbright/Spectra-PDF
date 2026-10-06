@@ -83,6 +83,15 @@ describe('user operations asked for during a rewrite see its result', () => {
     await openByPaths([source]);
     await setView('canvas');
 
+    // Save is offered only for a document with unsaved changes, so the
+    // document carries one before the redaction starts: a form field.
+    await placeNewField({ x: 0.5, y: 0.5, w: 0.3, h: 0.05 });
+    await start('field', 'createPlacedField', { name: 'kept', type: 'text' });
+    await browser.waitUntil(async () => (await settled('field'))?.done === true, { timeoutMsg: 'the field was never created' });
+    expect((await settled('field'))!.error).toBeNull();
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === true,
+      { timeoutMsg: 'the field left the document clean' });
+
     await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
     await hold();
     await start('redact', 'applyRedactions');
@@ -102,29 +111,38 @@ describe('user operations asked for during a rewrite see its result', () => {
     expect(text).toContain('KEEP ME BOTTOM');
   });
 
-  it('a second form field placed during the first one is created on the first one\'s result', async () => {
-    source = resolve(tmp, 'two-fields.pdf');
+  // The canvas creates one field at a time (its create button is disabled
+  // while one is created), so the second write here is a field placed and
+  // created while a redaction of the same document is held.
+  it('a form field created during a redaction is created on the redacted result', async () => {
+    source = resolve(tmp, 'redact-then-field.pdf');
     const doc = await PDFDocument.create();
-    doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText('SECRET TOP LINE', { x: 50, y: 700, size: 24, font });
+    page.drawText('KEEP ME BOTTOM', { x: 50, y: 100, size: 24, font });
     writeFileSync(source, await doc.save());
     await closeAllFiles();
     await openByPaths([source]);
     await setView('canvas');
     const working = (await getState()).activeFile!.workingPath;
 
+    await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
     await hold();
-    await placeNewField({ x: 0.1, y: 0.1, w: 0.3, h: 0.05 });
-    await start('first', 'createPlacedField', { name: 'first', type: 'text' });
-    await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the first field never reached its engine step' });
-    await placeNewField({ x: 0.1, y: 0.3, w: 0.3, h: 0.05 });
-    await start('second', 'createPlacedField', { name: 'second', type: 'text' });
+    await start('redact', 'applyRedactions');
+    await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the redaction never reached its engine step' });
+    await placeNewField({ x: 0.1, y: 0.5, w: 0.3, h: 0.05 });
+    await start('field', 'createPlacedField', { name: 'second', type: 'text' });
 
     await release();
-    await browser.waitUntil(async () => (await settled('first'))?.done === true && (await settled('second'))?.done === true,
-      { timeoutMsg: 'the two field creations never settled' });
-    expect((await settled('first'))!.error).toBeNull();
-    expect((await settled('second'))!.error).toBeNull();
-    const names = (await PDFDocument.load(readFileSync(working))).getForm().getFields().map((f) => f.getName()).sort();
-    expect(names).toEqual(['first', 'second']);
+    await browser.waitUntil(async () => (await settled('redact'))?.done === true && (await settled('field'))?.done === true,
+      { timeoutMsg: 'the redaction and the field creation never settled' });
+    expect((await settled('redact'))!.error).toBeNull();
+    expect((await settled('field'))!.error).toBeNull();
+    const names = (await PDFDocument.load(readFileSync(working))).getForm().getFields().map((f) => f.getName());
+    expect(names).toEqual(['second']);
+    const text = await pageText(working);
+    expect(text).not.toContain('SECRET TOP LINE');
+    expect(text).toContain('KEEP ME BOTTOM');
   });
 });

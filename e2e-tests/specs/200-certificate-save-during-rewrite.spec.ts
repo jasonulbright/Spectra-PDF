@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -15,7 +16,9 @@ import {
   addRedactionMark,
   invokeAppCommand,
   closeAllFiles,
+  placeNewField,
 } from '../support/harness.js';
+import { VENV_PYTHON } from '../support/app-data.js';
 
 const require = createRequire(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
@@ -26,8 +29,31 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 // save reseals that copy under the document's recipient lists. A save asked
 // for while a rewrite of the copy runs must reseal the rewritten bytes.
 
-const signerCert = resolve(__dirname, '../fixtures/test-signer.crt.pem');
-const signerPfx = resolve(__dirname, '../fixtures/test-signer.pfx');
+// A recipient certificate needs the key-encipherment usage bit, which the
+// signing fixture does not carry, so the spec makes its own identity.
+let signerCert = '';
+let signerPfx = '';
+
+const MAKE_RECIPIENT = `
+import datetime, sys
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs12
+key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "Spectra Test Recipient")])
+now = datetime.datetime.now(datetime.timezone.utc)
+cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+    .public_key(key.public_key()).serial_number(x509.random_serial_number())
+    .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=36500))
+    .add_extension(x509.KeyUsage(digital_signature=False, content_commitment=False,
+        key_encipherment=True, data_encipherment=True, key_agreement=False,
+        key_cert_sign=False, crl_sign=False, encipher_only=False, decipher_only=False), critical=False)
+    .sign(key, hashes.SHA256()))
+open(sys.argv[1], "wb").write(cert.public_bytes(serialization.Encoding.DER))
+open(sys.argv[2], "wb").write(pkcs12.serialize_key_and_certificates(
+    b"recipient", key, cert, None, serialization.BestAvailableEncryption(b"testpw")))
+`;
 
 async function pageText(path: string): Promise<string> {
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
@@ -67,6 +93,9 @@ describe('a certificate-encrypted document saved during a rewrite', () => {
 
   before(async () => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-certificate-save-'));
+    signerCert = resolve(tmp, 'recipient.cer');
+    signerPfx = resolve(tmp, 'recipient.pfx');
+    execFileSync(VENV_PYTHON, ['-c', MAKE_RECIPIENT, signerCert, signerPfx]);
     const plain = resolve(tmp, 'plain.pdf');
     source = resolve(tmp, 'sealed.pdf');
     const doc = await PDFDocument.create();
@@ -92,6 +121,18 @@ describe('a certificate-encrypted document saved during a rewrite', () => {
   it('reseals the rewritten bytes, still under the recipient list', async () => {
     await openWithCertificate(source);
     await setView('canvas');
+
+    // Save is offered only for a document with unsaved changes, so the
+    // document carries one before the redaction starts: a form field.
+    await placeNewField({ x: 0.5, y: 0.5, w: 0.3, h: 0.05 });
+    const field = await browser.executeAsync((done: (r: string | null) => void) => {
+      (window as any).__SPECTRA_TEST__.createPlacedField({ name: 'kept', type: 'text' })
+        .then(() => done(null)).catch((e: unknown) => done(String(e)));
+    });
+    expect(field).toBeNull();
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === true,
+      { timeoutMsg: 'the field left the document clean' });
+
     await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
 
     await hold();
