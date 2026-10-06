@@ -71,10 +71,10 @@ const waiting = () => browser.execute(() => (window as any).__SPECTRA_TEST__.rew
 async function openWithCertificate(path: string): Promise<void> {
   await browser.execute((p: string) => {
     const w = window as any;
-    w.__p43Open = { done: false, error: null as string | null };
+    w.__certificateOpen = { done: false, error: null as string | null };
     w.__SPECTRA_TEST__.openByPaths([p])
-      .then(() => { w.__p43Open.done = true; })
-      .catch((e: unknown) => { w.__p43Open = { done: true, error: String(e) }; });
+      .then(() => { w.__certificateOpen.done = true; })
+      .catch((e: unknown) => { w.__certificateOpen = { done: true, error: String(e) }; });
   }, path);
   const pick = await browser.$('[data-testid="certunlock-pick"]');
   await pick.waitForDisplayed({ timeoutMsg: 'the certificate prompt never opened' });
@@ -82,9 +82,9 @@ async function openWithCertificate(path: string): Promise<void> {
   await pick.click();
   await (await browser.$('[data-testid="certunlock-password"]')).setValue('testpw');
   await (await browser.$('[data-testid="certunlock-submit"]')).click();
-  await browser.waitUntil(async () => (await browser.execute(() => (window as any).__p43Open)).done === true,
+  await browser.waitUntil(async () => (await browser.execute(() => (window as any).__certificateOpen)).done === true,
     { timeoutMsg: 'the certificate-encrypted document never opened' });
-  expect((await browser.execute(() => (window as any).__p43Open)).error).toBeNull();
+  expect((await browser.execute(() => (window as any).__certificateOpen)).error).toBeNull();
 }
 
 describe('a certificate-encrypted document saved during a rewrite', () => {
@@ -138,19 +138,19 @@ describe('a certificate-encrypted document saved during a rewrite', () => {
     await hold();
     await browser.execute(() => {
       const w = window as any;
-      w.__p43Redact = { done: false, error: null as string | null };
+      w.__rewriteRedact = { done: false, error: null as string | null };
       w.__SPECTRA_TEST__.applyRedactions()
-        .then(() => { w.__p43Redact.done = true; })
-        .catch((e: unknown) => { w.__p43Redact = { done: true, error: String(e) }; });
+        .then(() => { w.__rewriteRedact.done = true; })
+        .catch((e: unknown) => { w.__rewriteRedact = { done: true, error: String(e) }; });
     });
     await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the redaction never reached its engine step' });
     const before = readFileSync(source);
     expect(await invokeAppCommand('file.save')).toBe(true);
 
     await release();
-    await browser.waitUntil(async () => (await browser.execute(() => (window as any).__p43Redact)).done === true,
+    await browser.waitUntil(async () => (await browser.execute(() => (window as any).__rewriteRedact)).done === true,
       { timeoutMsg: 'the redaction never settled' });
-    expect((await browser.execute(() => (window as any).__p43Redact)).error).toBeNull();
+    expect((await browser.execute(() => (window as any).__rewriteRedact)).error).toBeNull();
     await browser.waitUntil(async () => (await getState()).activeFile?.dirty === false,
       { timeoutMsg: 'the save never wrote the rewritten document' });
     const saved = readFileSync(source);

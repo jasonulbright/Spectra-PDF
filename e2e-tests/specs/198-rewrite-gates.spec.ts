@@ -46,14 +46,14 @@ const waiting = () => browser.execute(() => (window as any).__SPECTRA_TEST__.rew
 async function start(name: string, call: string, ...args: unknown[]): Promise<void> {
   await browser.execute((n: string, c: string, a: unknown[]) => {
     const w = window as any;
-    w.__p43 = w.__p43 ?? {};
-    w.__p43[n] = { done: false, error: null as string | null };
+    w.__rewriteRuns = w.__rewriteRuns ?? {};
+    w.__rewriteRuns[n] = { done: false, error: null as string | null };
     Promise.resolve(w.__SPECTRA_TEST__[c](...a))
-      .then(() => { w.__p43[n].done = true; })
-      .catch((e: unknown) => { w.__p43[n] = { done: true, error: String(e) }; });
+      .then(() => { w.__rewriteRuns[n].done = true; })
+      .catch((e: unknown) => { w.__rewriteRuns[n] = { done: true, error: String(e) }; });
   }, name, call, args);
 }
-const settled = (name: string) => browser.execute((n: string) => (window as any).__p43?.[n] ?? null, name) as
+const settled = (name: string) => browser.execute((n: string) => (window as any).__rewriteRuns?.[n] ?? null, name) as
   Promise<{ done: boolean; error: string | null } | null>;
 
 describe('user operations asked for during a rewrite see its result', () => {
@@ -70,6 +70,39 @@ describe('user operations asked for during a rewrite see its result', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
   afterEach(async () => { await release(); });
+
+  it('a gated reader asked for during a redaction reads the redacted bytes', async () => {
+    source = resolve(tmp, 'redact-then-export.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText('SECRET TOP LINE', { x: 50, y: 700, size: 24, font });
+    page.drawText('KEEP ME BOTTOM', { x: 50, y: 100, size: 24, font });
+    writeFileSync(source, await doc.save());
+    await closeAllFiles();
+    await openByPaths([source]);
+    await setView('canvas');
+
+    await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
+    await hold();
+    await start('redact', 'applyRedactions');
+    await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the redaction never reached its engine step' });
+
+    // A text export reads the working copy through the gated engine call.
+    // Its gate names the working copy, so it waits for the held redaction;
+    // without that wait it would read the copy under the shared lock the
+    // redaction's engine step holds, and write the secret line.
+    const exported = resolve(tmp, 'during-redaction.txt');
+    await start('export', 'exportActiveAs', exported, 'txt');
+    await release();
+    await browser.waitUntil(async () => (await settled('redact'))?.done === true && (await settled('export'))?.done === true,
+      { timeoutMsg: 'the redaction and the export never settled' });
+    expect((await settled('redact'))!.error).toBeNull();
+    expect((await settled('export'))!.error).toBeNull();
+    const body = readFileSync(exported, 'utf8');
+    expect(body).not.toContain('SECRET TOP LINE');
+    expect(body).toContain('KEEP ME BOTTOM');
+  });
 
   it('a save asked for during a redaction writes the redacted bytes', async () => {
     source = resolve(tmp, 'redact-then-save.pdf');
