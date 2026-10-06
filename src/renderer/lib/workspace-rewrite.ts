@@ -54,7 +54,9 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
   if (!current?.buffer || current.importOnly || current.workingPath !== initial.workingPath
       || expected.pageDirtyPaths.length) throw changed();
   let publication: OpenFile | undefined;
-  const publish = () => serializeWorkspacePublication(() => withFileLock([current.workingPath], async () => {
+  // The working path's lock before the lane: a commit or disk undo holding
+  // that lock waits for the lane, so taking the lane first deadlocks them.
+  const publish = () => withFileLock([current.workingPath], () => serializeWorkspacePublication(async () => {
     await recoverPendingPageCommit();
     const requireCurrent = () => {
       options.assertActive?.();

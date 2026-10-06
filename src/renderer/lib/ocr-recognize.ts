@@ -16,7 +16,9 @@ import { app } from './tauri-bridge';
 import { requireGsPath } from './gs-capability';
 import type { OcrResult } from '../ocr/types';
 
-/** The engine caller shape both consumers already hold (`useEngine().callRaw`). */
+/** The engine caller shape `useEngine()` returns as `call` and `callRaw`. A
+ * working copy is recognized through `call`, which locks it; a path outside
+ * the workspace through `callRaw`. */
 export type RawEngineCall = (
   op: string,
   params: Record<string, unknown>,
@@ -42,13 +44,13 @@ export function tesseractPath(): Promise<string> {
  * unchanged.
  */
 export async function recognizePage(
-  callRaw: RawEngineCall,
+  engineCall: RawEngineCall,
   file: string,
   pageIndex: number,
   lang: string,
 ): Promise<OcrResult> {
   const [tesseract, gs] = await Promise.all([tesseractPath(), requireGsPath()]);
-  const res = (await callRaw('recognize', {
+  const res = (await engineCall('recognize', {
     file,
     page: pageIndex + 1,
     lang,

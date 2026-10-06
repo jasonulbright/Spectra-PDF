@@ -198,6 +198,51 @@ describe('atomic disk history', () => {
     expect(f.disk.get('work')).toEqual(new Uint8Array([2]));
     expect(f.store.getState().files.get('source')!.undoStack).toEqual(['s1', 's2']);
   });
+  it('a page-tier undo does not wait for a held shared lock on the active file', async () => {
+    const f = fixture();
+    let reading!: () => void;
+    const reader = withFileLock([{ key: 'work', mode: 'shared' }], () => new Promise<void>(r => { reading = r; }));
+    const state = { ...f.store.getState(), pageUndoStack: [{}] } as unknown as AppState;
+    const actions: AppAction[] = [];
+    await restoreHistory('undo', () => state, a => { actions.push(a); }, f.io);
+    expect(actions.map(a => a.type)).toEqual(['UNDO_PAGE_OP']);
+    expect(f.events).toEqual([]);
+    reading();
+    await reader;
+  });
+  it('a disk undo waits for a held shared lock on the active file, outside the publication lane', async () => {
+    const f = fixture();
+    let reading!: () => void;
+    const reader = withFileLock([{ key: 'work', mode: 'shared' }], () => new Promise<void>(r => { reading = r; }));
+    const undo = f.run();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(f.events).toEqual([]);
+    // The lane is free while the undo waits: another publication completes.
+    let published = false;
+    await serializeWorkspacePublication(async () => { published = true; });
+    expect(published).toBe(true);
+    expect(f.events).toEqual([]);
+    reading();
+    await Promise.all([reader, undo]);
+    expect(f.events.slice(0, 4)).toEqual(['read', 'validate', 'stage', 'publish']);
+    expect(f.store.getState().files.get('source')!.undoStack).toEqual(['s1']);
+  });
+  it('undo then redo keep their order when both wait for the file lock', async () => {
+    const f = fixture();
+    let release!: () => void;
+    const engine = withFileLock(['work'], () => new Promise<void>(r => { release = r; }));
+    const undo = f.run('undo');
+    const redo = f.run('redo');
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    release();
+    await Promise.all([engine, undo, redo]);
+    const after = f.store.getState().files.get('source')!;
+    // A redo that ran first would find no redo history and restore nothing.
+    expect(f.actions.map(a => a.type)).toEqual(['RESTORE_HISTORY', 'RESTORE_HISTORY']);
+    expect(after.undoStack).toHaveLength(2);
+    expect(after.redoStack).toEqual([]);
+    expect(after.buffer).toEqual(new Uint8Array([2]));
+  });
   it('the reducer refuses stale expected history without any partial buffer/stack update', () => {
     const f = fixture();
     const expected = f.store.getState();

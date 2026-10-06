@@ -171,7 +171,7 @@ describe('page-tier commit routing', () => {
 
   it('App hands the commit the ungated engine transport', async () => {
     const app = rendererCode('App.tsx');
-    const start = app.indexOf('return commitPageEdits({');
+    const start = app.indexOf('commit: state => commitPageEdits({');
     const end = app.indexOf('if (!outcome) throw', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);

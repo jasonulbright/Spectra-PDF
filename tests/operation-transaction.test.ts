@@ -9,7 +9,9 @@ import { createAppStore } from '../src/renderer/state/store';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppAction, OpenFile } from '../src/renderer/state/types';
 import { hasPendingPageCommit, recoverPendingPageCommit } from '../src/renderer/lib/page-commit-transaction';
-import { withFileLock } from '../src/renderer/lib/engine-lock';
+import { withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
+import { serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
+import { runPageCommit } from '../src/renderer/lib/page-commit-run';
 import { captureOperationIntent } from '../src/renderer/lib/operation-intent';
 import { readingWith } from './helpers/published-bytes';
 
@@ -292,5 +294,31 @@ describe('whole-file operation publication', () => {
     const f = await fixture(); const external = new Uint8Array([7, 8, 9]); const call = f.io.callStaged;
     f.io.callStaged = async (m, p) => { const r = await call(m, p); f.disk.set('work', external); return r; };
     await expect(f.run()).rejects.toThrow('revision mismatch'); expect(f.disk.get('work')).toEqual(external); expect(f.actions).toEqual([]);
+  });
+});
+
+describe('lock order between a rewrite and a page commit', () => {
+  it('a rewrite queued for the lane and a commit of its working path both settle', async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const blocker = serializeWorkspacePublication(() => new Promise<void>(r => { release = r; }));
+    const rewrite = f.run();
+    // The rewrite claims its working path before it queues for the lane.
+    for (let i = 0; i < 500 && __lockedCount() === 0; i++) await Promise.resolve();
+    expect(__lockedCount()).toBe(1);
+    const order: string[] = [];
+    const commit = runPageCommit<string>({
+      read: () => ({ ...f.store.getState(), pageDirtyPaths: ['source'] }),
+      recover: async () => {},
+      settle: async () => {},
+      clean: 'clean',
+      commit: async () => { order.push(`commit after ${f.events.filter(e => e === 'publish').length} publish`); return 'committed'; },
+    });
+    release();
+    await blocker;
+    await rewrite;
+    await expect(commit).resolves.toEqual({ value: 'committed' });
+    expect(order).toEqual(['commit after 1 publish']);
+    expect(__lockedCount()).toBe(0);
   });
 });

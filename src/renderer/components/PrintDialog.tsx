@@ -68,7 +68,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile } = useActiveFile();
-  const { call, callRaw } = useEngine();
+  const { call } = useEngine();
 
   const [printers, setPrinters] = useState<string[] | null>(null);
   const [printerError, setPrinterError] = useState<string | null>(null);
@@ -167,9 +167,10 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   // Re-render the preview (debounced) whenever anything that changes a
   // SHEET changes. The engine runs the real prepass and renders the
   // prepared sheets — preview and job share one pipeline, so they cannot
-  // disagree. `callRaw`, deliberately: a read-only render of the working
-  // copy whose bytes this dialog already gated on open; the gated `call`
-  // would queue a visible operation per keystroke.
+  // disagree. `print_preview` is an internal method: `call` runs no gate and
+  // queues no visible operation for it (this dialog gated on open), and takes
+  // only its locks — the working copy shared, the folder it deletes
+  // exclusive, so the unmount cleanup of that folder waits for this render.
   useEffect(() => {
     if (!gated || !workingPath || !sheet) return;
     if (rangeMode === 'custom' &&
@@ -201,7 +202,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
           params.dpi = 72;
           params.max_pages = PREVIEW_MAX;
           if (previewDirRef.current) params.cleanup_dir = previewDirRef.current;
-          const r = (await callRaw('print_preview', params)) as unknown as {
+          const r = (await call('print_preview', params)) as unknown as {
             preview_dir: string;
             pages: string[];
             sheets: number;
@@ -232,14 +233,14 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
     }, 350);
     return () => clearTimeout(timer);
   }, [gated, workingPath, docPageCount, sheet, opts, rangeMode, rangeText,
-      scaleText, posterScaleText, overlapText, callRaw]);
+      scaleText, posterScaleText, overlapText, call]);
 
   // Unmount: revoke the blob URLs and delete the engine-side scratch.
   useEffect(() => {
     return () => {
       for (const u of previewUrlsRef.current) URL.revokeObjectURL(u);
       const dir = previewDirRef.current;
-      if (dir) void callRaw('print_preview_cleanup', { directory: dir }).catch(() => {});
+      if (dir) void call('print_preview_cleanup', { directory: dir }).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
