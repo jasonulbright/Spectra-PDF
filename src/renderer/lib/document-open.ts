@@ -13,6 +13,7 @@
 // app's private working folder, and every save of it is resealed under the
 // original recipient lists (`saveWorkingCopy`).
 import { tChrome } from '../i18n';
+import { withWriteChain } from './engine-lock';
 import {
   UNRESTRICTED,
   isRecipientOpened,
@@ -248,25 +249,31 @@ export async function saveWorkingCopy(
   resealStage += 1;
   const stage = `${workingPath}.${Date.now()}-${resealStage}.sealed`;
   try {
-    let breakSignatures = false;
-    let reattached = false;
-    for (;;) {
-      const raw = await io.call('pubkey_reseal', { path: workingPath, output: stage, break_signatures: breakSignatures });
-      const reply = raw && typeof raw === 'object' ? (raw as Reply) : null;
-      if (reply?.output === stage) break;
-      if (reply?.output === null && reply.needs_certificate === true && !reattached) {
-        if (!(await io.reattach())) return false;
-        reattached = true;
-        continue;
+    // The reseal reads the working copy, so it holds the copy's write chain:
+    // a staged rewrite of the copy publishes first, as it does before an
+    // unsealed save (`withFileSave`). The stage it writes has no other writer.
+    const resealed = await withWriteChain([workingPath], async () => {
+      let breakSignatures = false;
+      let reattached = false;
+      for (;;) {
+        const raw = await io.call('pubkey_reseal', { path: workingPath, output: stage, break_signatures: breakSignatures });
+        const reply = raw && typeof raw === 'object' ? (raw as Reply) : null;
+        if (reply?.output === stage) return true;
+        if (reply?.output === null && reply.needs_certificate === true && !reattached) {
+          if (!(await io.reattach())) return false;
+          reattached = true;
+          continue;
+        }
+        if (reply?.output === null && typeof reply.signatures === 'number' && !breakSignatures) {
+          if (!io.confirmSignatureBreak) throw new Error(tChrome('app.save.signedCertificateImplicit'));
+          if (!(await io.confirmSignatureBreak())) return false;
+          breakSignatures = true;
+          continue;
+        }
+        throw new Error(tChrome('app.save.invalidReply'));
       }
-      if (reply?.output === null && typeof reply.signatures === 'number' && !breakSignatures) {
-        if (!io.confirmSignatureBreak) throw new Error(tChrome('app.save.signedCertificateImplicit'));
-        if (!(await io.confirmSignatureBreak())) return false;
-        breakSignatures = true;
-        continue;
-      }
-      throw new Error(tChrome('app.save.invalidReply'));
-    }
+    });
+    if (!resealed) return false;
     await io.saveAs(stage, dest);
     return true;
   } finally {

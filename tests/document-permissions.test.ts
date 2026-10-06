@@ -29,6 +29,7 @@ import {
   type SaveWorkingCopyIo,
   type PrepareDocumentIo,
 } from '../src/renderer/lib/document-open';
+import * as locks from '../src/renderer/lib/engine-lock';
 import { droppedCredentials, releaseDocumentCredentials } from '../src/renderer/lib/credential-release';
 import { documentPassword, rememberDocumentPassword } from '../src/renderer/lib/document-passwords';
 import { releaseStageCredential, setStageCredentialCaller, shareStageCredential } from '../src/renderer/lib/stage-credentials';
@@ -582,6 +583,27 @@ describe('a certificate-encrypted document', () => {
     expect(saveAs).toHaveBeenCalledWith(stage, PATH);
     expect(saveAs).not.toHaveBeenCalledWith('scratch/w.pdf', PATH);
     expect(remove).toHaveBeenCalledWith(stage);
+  });
+
+  it('reseals only after a writer that holds the write chain of the working copy has finished', async () => {
+    const order: string[] = [];
+    let finish: () => void = () => {};
+    const writer = locks.withWriteChain(['scratch/w.pdf'], async () => {
+      await new Promise<void>((r) => { finish = r; });
+      order.push('rewrite published');
+    });
+    const security = parseDocumentSecurity({ opener: 'recipient', permissions: PRINT_ONLY });
+    const saved = saveWorkingCopy('scratch/w.pdf', security, PATH, {
+      call: async (method, params) => { order.push(method); return { output: params.output }; },
+      saveAs: async () => { order.push('saveAs'); },
+      remove: async () => {},
+      reattach: async () => false,
+    });
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(order).toEqual([]);
+    finish();
+    await Promise.all([writer, saved]);
+    expect(order).toEqual(['rewrite published', 'pubkey_reseal', 'saveAs']);
   });
 
   it('writes nothing over the file when the reseal is refused', async () => {
