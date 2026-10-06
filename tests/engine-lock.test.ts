@@ -50,14 +50,44 @@ describe('lockKeysFor', () => {
     expect(lockKeysFor('add_user_dictionary', { aff: 'a.aff', dic: 'a.dic', user_dictionary_dir: 'u' })).toEqual([X('u')]);
     expect(lockKeysFor('transplant_incremental', { original: 'w.pdf', modified: 't.pdf', output: 't.pdf' }))
       .toEqual([X('t.pdf'), S('w.pdf')]);
+    expect(lockKeysFor('transplant_incremental', { original: 'w.pdf', modified: 'm.pdf', output: 't.pdf' }))
+      .toEqual([S('m.pdf'), X('t.pdf'), S('w.pdf')]);
   });
 
-  it('a folder run is exclusive on its source only when it rewrites in place', () => {
-    for (const method of ['batch_ocr', 'run_action', 'run_preflight_sweep']) {
-      expect(lockKeysFor(method, { source: 'in', dest: 'out', in_place: true })).toEqual([X('in'), X('out')]);
-      expect(lockKeysFor(method, { source: 'in', dest: 'out', in_place: false })).toEqual([S('in'), X('out')]);
+  it('a folder run is exclusive on its source only under an option that rewrites, moves or deletes sources', () => {
+    const writers: Record<string, string[]> = {
+      batch_ocr: ['in_place', 'moved_root', 'error_root', 'remove_empty_folders', 'replace_repaired_originals'],
+      run_action: ['in_place', 'move_processed_root'],
+      run_preflight_sweep: ['in_place', 'move_processed_root'],
+    };
+    for (const [method, options] of Object.entries(writers)) {
       expect(lockKeysFor(method, { source: 'in', dest: 'out' })).toEqual([S('in'), X('out')]);
+      expect(lockKeysFor(method, { source: 'in', dest: 'out', in_place: false, move_processed_root: '', moved_root: '' }))
+        .toEqual([S('in'), X('out')]);
+      for (const option of options) {
+        const value = option.endsWith('_root') ? 'done' : true;
+        const claims = lockKeysFor(method, { source: 'in', dest: 'out', [option]: value });
+        expect(claims.find(c => c.key === 'in')).toEqual(X('in'));
+      }
     }
+  });
+
+  it('a writer with no output is exclusive on the input it rewrites', () => {
+    expect(lockKeysFor('emit_trapping_setup', { file: 'job.ps' })).toEqual([X('job.ps')]);
+    expect(lockKeysFor('emit_trapping_setup', { file: 'job.ps', output: '' })).toEqual([X('job.ps')]);
+    expect(lockKeysFor('emit_trapping_setup', { file: 'job.ps', output: 'out.ps' })).toEqual([S('job.ps'), X('out.ps')]);
+  });
+
+  it('a plan writes nothing and a composite writes into its plate folder', () => {
+    expect(lockKeysFor('split_plan', { file: 'w.pdf', destination_dir: 'parts' })).toEqual([S('parts'), S('w.pdf')]);
+    expect(lockKeysFor('composite_separations', { dir: 'plates' })).toEqual([X('plates')]);
+  });
+
+  it('never keys a value that is not a path', () => {
+    expect(lockKeysFor('alias_ink', { file: 'w.pdf', output: 'o.pdf', source: 'PANTONE 123 C', target: 'Cyan' }))
+      .toEqual([X('o.pdf'), S('w.pdf')]);
+    expect(lockKeysFor('check_spelling', { file: 'w.pdf', sources: ['text', 'comments'] })).toEqual([S('w.pdf')]);
+    expect(lockKeysFor('create_pdf_folders', { source: 'in', dest: 'out', sources: 'images' })).toEqual([S('in'), X('out')]);
   });
 
   it('reads source rows by their path and never keys base64 data or tool paths', () => {
@@ -104,7 +134,7 @@ describe('the lock table covers the engine and the renderer', () => {
     };
     walk(fileURLToPath(root));
     const sent = new Set<string>();
-    const caller = /\b(?:call|callRaw|rawCall|engineCall|engineCallRaw|callStaged|dispatchEngineRequest)\(\s*'([a-z][a-z_0-9]*)'/g;
+    const caller = /\b(?:call|callLocked|callRaw|rawCall|engineCall|engineCallRaw|callStaged|dispatchEngineRequest)\(\s*'([a-z][a-z_0-9]*)'/g;
     for (const file of files) for (const m of readFileSync(file, 'utf8').matchAll(caller)) sent.add(m[1]);
     expect(sent.size).toBeGreaterThan(100);
     expect([...sent].filter(method => !Object.prototype.hasOwnProperty.call(ENGINE_LOCK_TABLE, method))).toEqual([]);
@@ -175,19 +205,19 @@ describe('withFileLock', () => {
     expect(order).toEqual(['compress:start', 'compress:end', 'grayscale']);
   });
 
-  it('shared holders of one key run together', async () => {
+  it('shared holders of one key run together and both exclude a writer of that key', async () => {
     const order: string[] = [];
     const one = deferred();
     const two = deferred();
     const a = withFileLock([S('w.pdf')], async () => { order.push('a:start'); await one.promise; order.push('a:end'); });
     const b = withFileLock([S('w.pdf')], async () => { order.push('b:start'); await two.promise; order.push('b:end'); });
-    await flush();
-    expect(order).toEqual(['a:start', 'b:start']);
+    const write = withFileLock(['w.pdf'], async () => { order.push('write'); });
+    // `a` is released last and late: a `b` that waited for `a` would start
+    // after `a:end`, and a writer that ignored the readers would run first.
     two.resolve();
-    await b;
-    expect(order).toEqual(['a:start', 'b:start', 'b:end']);
-    one.resolve();
-    await a;
+    setTimeout(one.resolve, 20);
+    await Promise.all([a, b, write]);
+    expect(order).toEqual(['a:start', 'b:start', 'b:end', 'a:end', 'write']);
     expect(__lockedCount()).toBe(0);
   });
 
@@ -228,14 +258,16 @@ describe('withFileLock', () => {
     expect(__lockedCount()).toBe(0);
   });
 
-  it('a shared holder does not wait for a holder of another key', async () => {
+  it('a shared holder waits for a writer of its own key and not for a writer of another', async () => {
+    const order: string[] = [];
     const hold = deferred();
-    const a = withFileLock([X('a.pdf')], () => hold.promise);
-    let ran = false;
-    await withFileLock([S('b.pdf')], async () => { ran = true; });
-    expect(ran).toBe(true);
-    hold.resolve();
-    await a;
+    const writeA = withFileLock(['a.pdf'], async () => { await hold.promise; order.push('write-a'); });
+    const readA = withFileLock([S('a.pdf')], async () => { order.push('read-a'); });
+    await withFileLock([S('b.pdf')], async () => { order.push('read-b'); });
+    setTimeout(hold.resolve, 20);
+    await Promise.all([writeA, readA]);
+    expect(order).toEqual(['read-b', 'write-a', 'read-a']);
+    expect(__lockedCount()).toBe(0);
   });
 
   it('one acquisition claims every key at once, whatever its modes', async () => {
@@ -279,10 +311,19 @@ describe('withFileLock', () => {
   });
 
   it('a failed shared holder releases its key for the exclusive holder behind it', async () => {
-    const r = withFileLock([S('a.pdf')], async () => { throw new Error('read failed'); });
-    const w = withFileLock([X('a.pdf')], async () => 'written');
+    const order: string[] = [];
+    const failing = deferred();
+    const r = withFileLock([S('a.pdf')], async () => {
+      order.push('read');
+      await failing.promise;
+      order.push('read failed');
+      throw new Error('read failed');
+    });
+    const w = withFileLock(['a.pdf'], async () => { order.push('write'); return 'written'; });
+    setTimeout(failing.resolve, 20);
     await expect(r).rejects.toThrow('read failed');
     await expect(w).resolves.toBe('written');
+    expect(order).toEqual(['read', 'read failed', 'write']);
     expect(__lockedCount()).toBe(0);
   });
 

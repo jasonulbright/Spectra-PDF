@@ -4,7 +4,8 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { logRenderError } from './raster';
 import { ZOOM_SETTLE_MS } from '../../canvas/reading-page';
 import { tChrome } from '../../i18n';
-import { recognizeRaster, type RawEngineCall } from '../../lib/ocr-recognize';
+import { recognizeRaster } from '../../lib/ocr-recognize';
+import type { EngineCall } from '../../lib/engine-call';
 import { textLayerScaleVars } from '../../lib/text-layer-scale';
 import { applyReadingOrder } from '../../lib/text-layer-order';
 import {
@@ -48,7 +49,7 @@ const SETTLE_MS = ZOOM_SETTLE_MS;
  *  what the preference turns it back into. */
 export interface OcrSelectionContext {
   /** Non-workspace engine door — see `lib/ocr-recognize.recognizeRaster`. */
-  callRaw: RawEngineCall;
+  callRaw: EngineCall;
   /** '+'-joined Tesseract language string. */
   lang: string;
 }

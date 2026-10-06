@@ -1,23 +1,5 @@
-import { readFileSync } from 'node:fs';
-import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
-import type { EngineCall } from '../src/renderer/lib/engine-call';
-
-// Run the actual hook's call closure with controllable gate/lock/queue waits.
-// A test of a hand-copied closure would not prove where production checks run.
-const path = 'src/renderer/hooks/useEngine.ts';
-const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let callback: ts.Expression | undefined;
-function visit(node: ts.Node) {
-  if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'call'
-      && node.initializer && ts.isCallExpression(node.initializer)) callback = node.initializer.arguments[0];
-  ts.forEachChild(node, visit);
-}
-visit(source);
-if (!callback) throw new Error('Production engine-call closure missing');
-const code = ts.transpileModule(`const call = ${callback.getText(source)};`, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
-}).outputText;
+import { engineClosures } from './helpers/engine-closures';
 
 describe('engine dispatch ownership', () => {
   it.each(['entry', 'recovery', 'gate', 'lock', 'queue', 'read-lock', 'read-current', 'current'])('checks the actual dispatch boundary: %s', async boundary => {
@@ -38,7 +20,7 @@ describe('engine dispatch ownership', () => {
         return run();
       }, rawCall: raw,
     };
-    const call = new Function(...Object.keys(env), `${code}; return call;`)(...Object.values(env)) as EngineCall;
+    const { call } = engineClosures(env);
     const result = call('grayscale', { file: 'work.pdf' }, { assertCurrent: () => {
       if (!current) throw new Error('owner changed');
     } });

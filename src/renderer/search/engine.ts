@@ -201,11 +201,12 @@ export function createSearchEngine({
       ocrInFlight++;
       reportProgress();
       const jobGen = genOf(job.key); // raster generation this pass ran against
-      // Native Tesseract via the engine. `callRaw` (no commit gate) is
-      // deliberate and matches what the WASM recognizer did: it rasterised the
-      // in-memory buffer, and the working copy's bytes equal that buffer until
-      // a commit. Gating here would side-effect-commit the user's pending page
-      // edits during a BACKGROUND index.
+      // Native Tesseract via the engine, through the hook's `callLocked`. No
+      // commit gate, deliberately, as the WASM recognizer had none: it
+      // rasterised the in-memory buffer, and the working copy's bytes equal
+      // that buffer until a commit. Gating here would side-effect-commit the
+      // user's pending page edits during a BACKGROUND index. A failed page is
+      // logged and skipped.
       recognize(job.path, job.pageIndex, lang)
         .then(({ text, words }) => {
           // Discard if the page closed OR the file's bytes changed under this

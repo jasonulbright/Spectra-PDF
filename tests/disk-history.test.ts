@@ -198,17 +198,25 @@ describe('atomic disk history', () => {
     expect(f.disk.get('work')).toEqual(new Uint8Array([2]));
     expect(f.store.getState().files.get('source')!.undoStack).toEqual(['s1', 's2']);
   });
-  it('a page-tier undo does not wait for a held shared lock on the active file', async () => {
+  it('a page-tier undo is not held behind a disk undo that waits for the file lock', async () => {
     const f = fixture();
-    let reading!: () => void;
-    const reader = withFileLock([{ key: 'work', mode: 'shared' }], () => new Promise<void>(r => { reading = r; }));
-    const state = { ...f.store.getState(), pageUndoStack: [{}] } as unknown as AppState;
-    const actions: AppAction[] = [];
-    await restoreHistory('undo', () => state, a => { actions.push(a); }, f.io);
-    expect(actions.map(a => a.type)).toEqual(['UNDO_PAGE_OP']);
+    let release!: () => void;
+    const engine = withFileLock(['work'], () => new Promise<void>(r => { release = r; }));
+    const diskUndo = f.run();
+    const pageState = { ...f.store.getState(), pageUndoStack: [{}] } as unknown as AppState;
+    const pageActions: AppAction[] = [];
+    let pageDone = false;
+    const pageUndo = restoreHistory('undo', () => pageState, a => { pageActions.push(a); }, f.io)
+      .then(() => { pageDone = true; });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    // The disk undo waits for the lock outside the lane, so the lane is free.
+    expect(pageDone).toBe(true);
+    expect(pageActions.map(a => a.type)).toEqual(['UNDO_PAGE_OP']);
     expect(f.events).toEqual([]);
-    reading();
-    await reader;
+    release();
+    await Promise.all([engine, diskUndo, pageUndo]);
+    expect(f.events.slice(0, 4)).toEqual(['read', 'validate', 'stage', 'publish']);
+    expect(f.store.getState().files.get('source')!.undoStack).toEqual(['s1']);
   });
   it('a disk undo waits for a held shared lock on the active file, outside the publication lane', async () => {
     const f = fixture();
