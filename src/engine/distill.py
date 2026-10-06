@@ -29,7 +29,7 @@ from engine.credentials import open_pdf
 
 from engine import budget
 from engine.acroform import adopt_orphan_widget_fields
-from engine.inplace import finish_staged
+from engine.inplace import finish_staged, staged_write_if
 from engine.pdf_save import save_pdf
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
@@ -182,58 +182,62 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") 
                     break
                 dst.write(chunk)
         gs_input = Path(stripped_tmp)
-    # '%' is a TEMPLATE character in -sOutputFile (%d splits per page into
-    # renamed files while the literal name never appears, the dialog's own
-    # default naming included); escape it so the user's path is literal.
-    cmd.extend([f"-sOutputFile={str(output_path).replace('%', '%%')}", str(gs_input)])
+    # The bytes land in a stage beside the output and replace it only once
+    # they are a complete, validated PDF: a run that is killed or fails leaves
+    # the previous file whole and no partial file under the requested name.
+    with staged_write_if(False, output_path) as staged:
+        # '%' is a TEMPLATE character in -sOutputFile (%d splits per page into
+        # renamed files while the literal name never appears, the dialog's own
+        # default naming included); escape it so the path is literal.
+        cmd.extend([f"-sOutputFile={str(staged).replace('%', '%%')}", str(gs_input)])
 
-    # stdin=DEVNULL is LOAD-BEARING, not hygiene: without it gs inherits
-    # the ENGINE'S JSON-RPC stdin pipe, and -dSAFER does not sandbox the
-    # standard streams — a hostile PostScript program reads the next RPC
-    # request's bytes off the wire (and can write them out through gs
-    # stderr), which both leaks data and permanently hangs that request's
-    # caller. EOF from DEVNULL closes the class.
-    # The budget is DERIVED from the input (budget.run keeps the
-    # stdin isolation the paragraph above is about).
-    try:
-        result = budget.gs(cmd, what="Ghostscript (distill)", path=gs_input)
-    finally:
-        if stripped_tmp is not None and os.path.exists(stripped_tmp):
-            os.unlink(stripped_tmp)
-    if result.returncode != 0:
-        raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or 'no diagnostics'}")
+        # stdin=DEVNULL is LOAD-BEARING, not hygiene: without it gs inherits
+        # the ENGINE'S JSON-RPC stdin pipe, and -dSAFER does not sandbox the
+        # standard streams — a hostile PostScript program reads the next RPC
+        # request's bytes off the wire (and can write them out through gs
+        # stderr), which both leaks data and permanently hangs that request's
+        # caller. EOF from DEVNULL closes the class.
+        # The budget is DERIVED from the input (budget.run keeps the
+        # stdin isolation the paragraph above is about).
+        try:
+            result = budget.gs(cmd, what="Ghostscript (distill)", path=gs_input)
+        finally:
+            if stripped_tmp is not None and os.path.exists(stripped_tmp):
+                os.unlink(stripped_tmp)
+        if result.returncode != 0:
+            raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or 'no diagnostics'}")
 
-    # Post-validate: the result must be a PDF pikepdf can open. In the same
-    # pass, register any form-field pdfmarks: gs lands /ANN Widget
-    # pdfmarks on the page with their field keys intact but never
-    # writes /AcroForm — without adoption a distilled form renders dead.
-    adopted = 0
-    adopted_tmp: str | None = None
-    try:
-        with open_pdf(output_path) as pdf:
-            pages = len(pdf.pages)
-            if pages > 0:
-                adopted = adopt_orphan_widget_fields(pdf)
-                if adopted:
-                    fd, adopted_tmp = tempfile.mkstemp(
-                        suffix=".pdf", dir=str(output_path.parent)
-                    )
-                    os.close(fd)
-                    save_pdf(pdf, adopted_tmp)
-        # The replace happens after the reading handle closes — Windows
-        # refuses to replace a file the process still holds open.
-        if adopted_tmp is not None:
-            finish_staged(Path(adopted_tmp), Path(output_path))
-            adopted_tmp = None
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(f"Ghostscript produced an unreadable PDF: {exc}") from exc
-    finally:
-        if adopted_tmp is not None and os.path.exists(adopted_tmp):
-            os.unlink(adopted_tmp)
-    if pages == 0:
-        raise RuntimeError("Ghostscript produced a PDF with no pages")
+        # Post-validate: the result must be a PDF pikepdf can open. In the same
+        # pass, register any form-field pdfmarks: gs lands /ANN Widget
+        # pdfmarks on the page with their field keys intact but never
+        # writes /AcroForm — without adoption a distilled form renders dead.
+        adopted = 0
+        adopted_tmp: str | None = None
+        try:
+            with open_pdf(staged) as pdf:
+                pages = len(pdf.pages)
+                if pages > 0:
+                    adopted = adopt_orphan_widget_fields(pdf)
+                    if adopted:
+                        fd, adopted_tmp = tempfile.mkstemp(
+                            suffix=".pdf", dir=str(output_path.parent)
+                        )
+                        os.close(fd)
+                        save_pdf(pdf, adopted_tmp)
+            # The replace happens after the reading handle closes — Windows
+            # refuses to replace a file the process still holds open.
+            if adopted_tmp is not None:
+                finish_staged(Path(adopted_tmp), Path(staged))
+                adopted_tmp = None
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Ghostscript produced an unreadable PDF: {exc}") from exc
+        finally:
+            if adopted_tmp is not None and os.path.exists(adopted_tmp):
+                os.unlink(adopted_tmp)
+        if pages == 0:
+            raise RuntimeError("Ghostscript produced a PDF with no pages")
 
     result_dict = {
         "output": str(output_path),
