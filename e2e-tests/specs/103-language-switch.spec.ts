@@ -32,6 +32,13 @@ describe('language switch', () => {
     // are the same fact and must not be able to disagree.
     expect(await browser.execute(() => document.documentElement.lang)).toBe('es');
 
+    // The saved confirmation speaks the language the dialog now shows.
+    const confirmation = '[data-app-modal] [data-testid="status-bar"]';
+    await browser.waitUntil(
+      async () => (await $(confirmation).getText()) === 'Configuración guardada',
+      { timeout: 10_000, timeoutMsg: 'the saved confirmation stayed in the previous language' },
+    );
+
     // And back — the rest of the suite depends on English.
     await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
     await browser.waitUntil(
@@ -39,6 +46,10 @@ describe('language switch', () => {
       { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
     );
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    await browser.waitUntil(
+      async () => (await $(confirmation).getText()) === 'Settings saved',
+      { timeout: 10_000, timeoutMsg: 'the saved confirmation stayed in Spanish' },
+    );
     await $('[data-testid="prefs-close"]').click();
   });
 
