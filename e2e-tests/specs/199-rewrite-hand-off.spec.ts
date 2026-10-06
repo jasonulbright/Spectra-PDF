@@ -72,10 +72,10 @@ describe('a document moved to a new window during an operation on it', () => {
     await hold();
     await browser.execute(() => {
       const w = window as any;
-      w.__p43Redact = { done: false, error: null as string | null };
+      w.__rewriteRedact = { done: false, error: null as string | null };
       w.__SPECTRA_TEST__.applyRedactions()
-        .then(() => { w.__p43Redact.done = true; })
-        .catch((e: unknown) => { w.__p43Redact = { done: true, error: String(e) }; });
+        .then(() => { w.__rewriteRedact.done = true; })
+        .catch((e: unknown) => { w.__rewriteRedact = { done: true, error: String(e) }; });
     });
     await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the redaction never reached its engine step' });
 
@@ -88,7 +88,7 @@ describe('a document moved to a new window during an operation on it', () => {
     await release();
     await browser.waitUntil(async () => (await browser.getWindowHandles()).length === 2,
       { timeoutMsg: 'the document never moved to a new window' });
-    const redact = await browser.execute(() => (window as any).__p43Redact) as { done: boolean; error: string | null };
+    const redact = await browser.execute(() => (window as any).__rewriteRedact) as { done: boolean; error: string | null };
     expect(redact.done).toBe(true);
     expect(redact.error).toBeNull();
     await browser.waitUntil(async () => (await getState()).fileCount === 0,
