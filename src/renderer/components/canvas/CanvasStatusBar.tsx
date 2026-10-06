@@ -15,6 +15,7 @@ import {
   type DocumentHealthSegmentProps,
 } from './DocumentHealthSegment';
 import { statusPageFieldWidth } from './status-page-width';
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
 
 // The docked status bar.
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
@@ -69,16 +70,10 @@ function SnapSegment({
     const onDown = (e: MouseEvent): void => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
     window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
+    return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
+  useDismissOnEscape(open, () => setOpen(false));
   return (
     <div className="canvas-status-snap" ref={wrapRef}>
       <button

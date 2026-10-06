@@ -17,6 +17,8 @@ import {
   signActiveFile,
   placeSignature,
   buildSignatureAppearance,
+  invokeAppCommand,
+  getState,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -146,6 +148,43 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     expect(widget!.rect[1]).toBeCloseTo(ey0, 0);
     expect(widget!.rect[2]).toBeCloseTo(ex1, 0);
     expect(widget!.rect[3]).toBeCloseTo(ey1, 0);
+  });
+
+  it('the visible-stamp card closes on Escape and on a tool change', async () => {
+    const card = '[data-testid="sign-canvas-form"]';
+    await setView('canvas');
+    expect(await invokeAppCommand('tools.signature')).toBe(true);
+
+    // One press closes the card and nothing else: the mode stays armed.
+    await placeSignature({ x: 0.1, y: 0.7, w: 0.5, h: 0.15 });
+    await $(card).waitForDisplayed({ timeout: 10_000 });
+    await $(`${card} input[type="text"]`).click();
+    await browser.keys(['Escape']);
+    await $(card).waitForExist({ reverse: true, timeout: 5_000, timeoutMsg: 'Escape left the visible-stamp card open' });
+    expect((await getState()).tool).toBe('signature');
+
+    // Focus goes back to the control that held it when the card opened. The
+    // placement above waited for the index to settle, so no reading-view
+    // remount takes focus from the strip after it is parked.
+    const opener = await browser.execute(() => {
+      const b = document.querySelector('[data-testid="secondary-toolbar"] button') as HTMLElement | null;
+      b?.focus();
+      return document.activeElement === b ? b?.getAttribute('data-testid') ?? null : null;
+    });
+    expect(opener).not.toBeNull();
+    await placeSignature({ x: 0.1, y: 0.7, w: 0.5, h: 0.15 });
+    await $(card).waitForDisplayed({ timeout: 10_000 });
+    await $(`${card} input[type="text"]`).click();
+    await browser.keys(['Escape']);
+    await $(card).waitForExist({ reverse: true, timeout: 5_000, timeoutMsg: 'Escape left the visible-stamp card open' });
+    expect(await browser.execute(() => document.activeElement?.getAttribute('data-testid') ?? null)).toBe(opener);
+
+    // The card belongs to its tool: opening another one closes it.
+    await placeSignature({ x: 0.1, y: 0.7, w: 0.5, h: 0.15 });
+    await $(card).waitForDisplayed({ timeout: 10_000 });
+    expect(await invokeAppCommand('tools.open.edit')).toBe(true);
+    await $(card).waitForExist({ reverse: true, timeout: 5_000, timeoutMsg: 'the visible-stamp card outlived its tool' });
+    expect(await invokeAppCommand('tools.close')).toBe(true);
   });
 
   it('signs with the PAdES profile and the CLI verifies subfilter + user trust anchor', async () => {
