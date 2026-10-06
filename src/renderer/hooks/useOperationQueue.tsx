@@ -265,11 +265,11 @@ const INTERNAL_METHODS = new Set([
   // for every open document (the read_form_fields case exactly). It reads the
   // working copy and writes nothing; gating it would flush the user's pending
   // page edits to disk merely because a document was opened, and queueing it
-  // would put a passive check in front of the user's actual work in the
-  // serial engine queue. The collection itself runs in the engine's idle lane
-  // (`lib/engine-idle-lane.ts`), which is what keeps it out of the FIFO ahead
-  // of an interactive request; the row here holds if anything ever reaches it
-  // through the gated path.
+  // would list a passive check among the user's operations. The collection
+  // itself runs in the health engine process, one run at a time through the
+  // idle lane (`lib/engine-idle-lane.ts`), never in a window's engine
+  // process; the row here holds if anything ever reaches it through the gated
+  // path.
   'document_health',
   // The stepped spelling of the same collection: begin, one bounded batch per
   // step, end. Same reasoning, and the one the renderer actually calls.
@@ -281,14 +281,14 @@ const INTERNAL_METHODS = new Set([
   'get_page_labels',
   // Enumerating the machine's installed fonts touches no document at
   // all — it names no file, so the commit gate and the per-file lock have
-  // nothing to gate, and running it through them would put a font-picker
-  // open in front of the user's actual work in the serial engine queue.
+  // nothing to gate, and running it through the gate would make a font-picker
+  // open wait for, or force, a page commit and list it as an operation.
   'list_system_fonts',
   // The spell checker's reads. Three of them name no file at all — the
   // dictionary listing, the editor's per-keystroke text check and a single
   // word's suggestions — so there is nothing for the gate or the per-file
   // lock to act on, and routing the editor's debounced check through the
-  // serial queue would put a squiggle in front of the user's actual work.
+  // gate would make each squiggle wait for, or force, a page commit.
   // Adding a user dictionary copies the user's own files and never touches a
   // document (the extract_attachment case). Reading /Lang seeds the panel's
   // default language on open, where gating would flush pending page edits

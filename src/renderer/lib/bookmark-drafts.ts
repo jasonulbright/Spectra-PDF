@@ -89,7 +89,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
     d.nodes = edit(d.nodes); d.dirty = !sameBookmarkTree(d.nodes, d.baseline);
     d.preview = null; d.previewToken = null; d.error = ''; d.status = ''; notify();
   };
-  const prepare = async (d: BookmarkDraft, call: EngineCall, commit: () => Promise<void>) => {
+  const prepare = async (d: BookmarkDraft, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!at(d)) throw changed();
     const before = readState(), buffer = d.buffer;
     const sourceIds = new Map<number, string[]>();
@@ -97,7 +97,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
     for (const doc of before.workspace.documents) if (doc.buffer === buffer) for (const p of doc.pages) {
       if (p.sourceDocId === d.path) sourceIds.set(p.sourcePageIndex + 1, [...(sourceIds.get(p.sourcePageIndex + 1) ?? []), p.id]);
     }
-    await commit();
+    await commit([d.workingPath]);
     if (!live(d) || readState().pageDirtyPaths.includes(d.path)) throw changed();
     const current = readState().files.get(d.path)!;
     if (current.buffer === buffer) return;
@@ -124,7 +124,7 @@ export function createBookmarkDrafts(readState: () => AppState) {
     d.baseline = post.nodes; d.nodes = nodes; d.queue = queue; d.buffer = current.buffer;
     d.dirty = !sameBookmarkTree(nodes, post.nodes); d.preview = null; d.previewToken = null; notify();
   };
-  const flush = (d: BookmarkDraft, operation: PerformOperation, call: EngineCall, commit: () => Promise<void>): Promise<void> => {
+  const flush = (d: BookmarkDraft, operation: PerformOperation, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>): Promise<void> => {
     // Returning to the pre-save baseline is still a new gesture when an older
     // replacement is in flight. Compare against the queued tail, not dirty.
     if (!editable(d) || !d.dirty && !d.busy) return d.running ?? Promise.resolve();
@@ -150,16 +150,16 @@ export function createBookmarkDrafts(readState: () => AppState) {
     // Set the owner promise before any await can run a competing flush.
     d.running = Promise.resolve().then(run); return d.running;
   };
-  const reload = async (d: BookmarkDraft, commit: () => Promise<void>) => {
+  const reload = async (d: BookmarkDraft, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(d) || d.busy || d.deriving) return;
     const nodes = d.nodes; d.busy = true; notify();
-    try { await commit(); if (!live(d) || d.nodes !== nodes) return;
+    try { await commit([d.workingPath]); if (!live(d) || d.nodes !== nodes) return;
       d.loaded = false; d.buffer = null; d.nodes = []; d.baseline = []; d.dirty = false; d.blocked = false;
       d.readOnly = false; d.error = ''; d.saveRefused = false; d.status = ''; d.loading = null; d.preview = null; d.previewToken = null; d.queue = [];
     } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
-  const preview = async (d: BookmarkDraft, call: EngineCall, commit: () => Promise<void>) => {
+  const preview = async (d: BookmarkDraft, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!editable(d) || d.busy || d.dirty) return;
     d.deriving = true; d.error = ''; d.status = tChrome('nav.bookmarks.derive.reading'); const token = {}; d.previewToken = token; notify();
     try {

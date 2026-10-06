@@ -161,11 +161,11 @@ export function createLinkDrafts(readState: () => AppState) {
     if (!live(s)) return;
     s.query = { ...s.query, ...patch }; s.found = null; notify();
   };
-  const reload = async (s: LinkSession, commit: () => Promise<void>) => {
+  const reload = async (s: LinkSession, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(s) || s.busy) return;
     const draft = s.draft; s.busy = true; notify();
     try {
-      await commit();
+      await commit([s.workingPath]);
       if (live(s) && s.draft === draft) { s.busy = false; discard(s); }
     } catch (e) { if (live(s)) s.error = errorText(e); }
     finally { if (live(s)) { s.busy = false; notify(); } }

@@ -105,3 +105,13 @@ describe('document JavaScript draft ownership', () => {
     expect(parseDocumentJsRead(reply([]))).toEqual([]); expect(f.d.error).not.toBe('');
   });
 });
+
+describe('the gate of a draft reload', () => {
+  it('names the working path of the document the draft belongs to, not of the active one', async () => {
+    const f = await fixture();
+    f.change({ activeFileId: 'B' });
+    const gate = vi.fn<(paths?: readonly string[]) => Promise<void>>(async () => {});
+    await f.drafts.reload(f.d, gate);
+    expect(gate).toHaveBeenCalledWith(['work-A']);
+  });
+});

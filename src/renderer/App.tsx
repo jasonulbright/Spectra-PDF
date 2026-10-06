@@ -3,7 +3,6 @@ import { AppStateProvider, useAppState, useAppDispatch, useReadAppState, useSubs
 import { restoreHistory } from './lib/disk-history';
 import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
-import { hasWorkspacePublication } from './lib/workspace-publication';
 import { runPageCommit } from './lib/page-commit-run';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
@@ -869,11 +868,13 @@ function AppContent(): React.ReactElement {
   // ops, close) — all dirty files commit together because cross-file moves
   // entangle them. The native page transaction owns snapshots/replacement;
   // it does not re-enter this renderer commit gate.
+  // The commit gate (`lib/commit-gate.ts`) runs this and then waits for the
+  // outstanding publications of the paths its caller names.
   const inflightCommit = useRef<Promise<void> | null>(null);
-  const commitIfNeeded = useCallback((): Promise<void> => {
+  const commitPending = useCallback((): Promise<void> => {
     // The shared run planned before this caller; edits made since stay pending.
-    if (inflightCommit.current) return inflightCommit.current.then(() => commitRef.current());
-    if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit() && !hasWorkspacePublication()
+    if (inflightCommit.current) return inflightCommit.current.then(() => pendingRef.current());
+    if (readState().pageDirtyPaths.length === 0 && !hasPendingPageCommit()
         && workspaceSettled(readState())) return Promise.resolve();
     const run = (async () => {
       try {
@@ -937,6 +938,11 @@ function AppContent(): React.ReactElement {
     callRaw,
     reportPreserveRefusals,
   ]);
+  const pendingRef = useRef(commitPending);
+  pendingRef.current = commitPending;
+  // The commit gate: every dirty file, then every outstanding publication of
+  // `paths`, or of any path without them.
+  const commitIfNeeded = useCallback((paths?: readonly string[]): Promise<void> => runCommitGate(paths), []);
   const commitRef = useRef(commitIfNeeded);
   commitRef.current = commitIfNeeded;
 
@@ -959,7 +965,7 @@ function AppContent(): React.ReactElement {
   // Register the commit gate so panel operations (which snapshot the working
   // file before mutating it) flush pending canvas edits first.
   useEffect(() => {
-    setCommitGate(() => commitRef.current());
+    setCommitGate(() => pendingRef.current());
     return () => setCommitGate(null);
   }, []);
 
@@ -1365,7 +1371,8 @@ function AppContent(): React.ReactElement {
               // `prepareFileBytes` can't be relied on for this: its only
               // engine call is `check_encrypted`, which is an INTERNAL_METHOD
               // and so deliberately ungated.
-              await runCommitGate();
+              const ghost = readState().files.get(filePath)?.workingPath;
+              await runCommitGate(ghost ? [ghost] : undefined);
             }
             // THE REFUSAL SEAM. `prepareFileBytes` mints the working copy and
             // runs the engine's first reads; anything the file is too broken
@@ -1878,7 +1885,7 @@ function AppContent(): React.ReactElement {
     const editClass = options?.structuralConsent ? 'structural' : sequenceEditClass(method, options?.following?.map(step => step.method));
     return trackInteractive(() => executeWorkspaceOperation(filePath, method, params, readState, dispatch, {
       confirm: (path, working) => editClass === 'none' ? Promise.resolve(true) : confirmEditOfSignedDoc(path, working, editClass),
-      commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+      commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
       remove: file.remove, index: readPublishedBytes, transaction: pageCommit,
       callStaged: callRaw,
       track: async (name, values, run) => isTrackableMethod(name) ? await trackOperation(name, values, run) as Awaited<ReturnType<typeof run>> : run(),
@@ -2176,7 +2183,7 @@ function AppContent(): React.ReactElement {
       requireCapabilities(path, ['fill']);
       const filled = await trackInteractive(() => fillFormValues(path, values, readState, dispatch, {
         confirm: (source, policyPath, targets, typed, flatten) => confirmEditOfSignedDoc(source, policyPath, flatten ? 'structural' : 'form-fill', targets, typed),
-        commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+        commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
         remove: file.remove, index: readPublishedBytes, fontDirectory: app.getEditFontPath,
         callStaged: callRaw, transaction: pageCommit,
         track: async run => { await trackOperation('fill_form_fields', { file: readState().files.get(path)?.workingPath }, run); },
@@ -2193,7 +2200,7 @@ function AppContent(): React.ReactElement {
       requireCapabilities(path, ['formAuthoring']);
       const created = await createFormFields(path, specs, readState, dispatch, {
         confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
-        commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+        commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
         remove: file.remove, index: readPublishedBytes, fontDirectory: app.getEditFontPath,
         // Private staging, within the already gated/locked transaction. A
         // normal call would recursively enter the workspace publication lane.
@@ -2586,7 +2593,7 @@ function AppContent(): React.ReactElement {
   const performImageEdit = useCallback((path: string, edit: ImageEdit) => trackInteractive(() =>
     editWorkspaceImage(path, edit, readState, dispatch, {
       confirm: (source, working) => confirmEditOfSignedDoc(source, working, 'structural'),
-      commit: () => commitRef.current(), read: file.readBuffer, write: file.writeBuffer,
+      commit: (paths) => commitRef.current(paths), read: file.readBuffer, write: file.writeBuffer,
       remove: file.remove, index: readPublishedBytes, transaction: pageCommit, callStaged: callRaw,
       pick: dialog.pickImageFile, readSource: batch.readFileBuffer, decode: decodeToRawSource,
       track: async (method, working, run) => { await trackOperation(method, { file: working }, run); },
@@ -2670,7 +2677,8 @@ function AppContent(): React.ReactElement {
         // page/index address the gesture's revision: only its own authored
         // commit may replace it, and nothing may replace it during the picker.
         const intent = gestureIntent(path);
-        await runCommitGate();
+        const gatedWorking = readState().files.get(path)?.workingPath;
+        await runCommitGate(gatedWorking ? [gatedWorking] : undefined);
         const committed = readState().files.get(path);
         if (!committed || readState().pageDirtyPaths.includes(path)) throw new Error(tChrome('app.history.changed'));
         assertOperationGateResult(committed, intent);

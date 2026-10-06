@@ -106,13 +106,13 @@ export function createPageLabelDrafts(readState: () => AppState) {
     if (!editable(d) || d.buffer !== buffer) return;
     d.ranges = edit(d.ranges); d.dirty = !sameLabelRanges(d.ranges, d.baseline); d.error = ''; d.status = ''; notify();
   };
-  const prepare = async (d: PageLabelDraft, submitted: LabelRange[], call: EngineCall, commit: () => Promise<void>) => {
+  const prepare = async (d: PageLabelDraft, submitted: LabelRange[], call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!at(d)) throw changed();
     const buffer = d.buffer, before = readState(), pageById = new Map<string, number>();
     for (const doc of before.workspace.documents) if (doc.buffer === buffer) for (const p of doc.pages) if (p.sourceDocId === d.path) {
       if (pageById.has(p.id)) throw changed(); pageById.set(p.id, p.sourcePageIndex);
     }
-    await commit();
+    await commit([d.workingPath]);
     if (!live(d) || readState().pageDirtyPaths.includes(d.path)) throw changed();
     const file = readState().files.get(d.path)!;
     if (file.buffer === buffer) return submitted;
@@ -134,7 +134,7 @@ export function createPageLabelDrafts(readState: () => AppState) {
     d.ranges = current; d.baseline = baseline; d.pages = file.pageCount; d.buffer = file.buffer;
     d.dirty = !sameLabelRanges(current, baseline); notify(); return next;
   };
-  const apply = async (d: PageLabelDraft, operation: PerformOperation, call: EngineCall, commit: () => Promise<void>) => {
+  const apply = async (d: PageLabelDraft, operation: PerformOperation, call: EngineCall, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!editable(d) || !d.dirty || d.busy) return;
     if (new Set(d.ranges.map(r => r.start)).size !== d.ranges.length) { d.error = tChrome('panel.pageLabels.duplicateStart'); notify(); return; }
     if (!validLabelRanges(d.ranges, d.pages)) { d.error = tChrome('panel.pageLabels.invalid'); notify(); return; }
@@ -150,10 +150,10 @@ export function createPageLabelDrafts(readState: () => AppState) {
     } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; if (d.error || d.dirty) d.status = ''; notify(); } }
   };
-  const reload = async (d: PageLabelDraft, commit: () => Promise<void>) => {
+  const reload = async (d: PageLabelDraft, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(d) || d.busy) return;
     const rows = d.ranges; d.busy = true; notify();
-    try { await commit(); if (!live(d) || d.ranges !== rows) return;
+    try { await commit([d.workingPath]); if (!live(d) || d.ranges !== rows) return;
       d.loaded = false; d.buffer = null; d.ranges = []; d.baseline = []; d.dirty = false; d.loading = null; d.error = ''; d.status = '';
     } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }

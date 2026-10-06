@@ -82,10 +82,10 @@ export function createDocumentJsDrafts(readState: () => AppState) {
     } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }
   };
-  const reload = async (d: DocumentJsDraft, commit: () => Promise<void>) => {
+  const reload = async (d: DocumentJsDraft, commit: (paths: readonly string[]) => Promise<void>) => {
     if (!live(d) || d.busy) return;
     const scripts = d.scripts; d.busy = true; notify();
-    try { await commit(); if (!live(d) || d.scripts !== scripts) return;
+    try { await commit([d.workingPath]); if (!live(d) || d.scripts !== scripts) return;
       d.scripts = []; d.baseline = []; d.buffer = null; d.loaded = false; d.dirty = false; d.loading = null; d.error = ''; d.selected = 0;
     } catch (e) { if (live(d)) d.error = errorText(e); }
     finally { if (live(d)) { d.busy = false; notify(); } }

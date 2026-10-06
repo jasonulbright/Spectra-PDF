@@ -1,7 +1,7 @@
 import type { AppAction, AppState, PdfBuffer } from '../state/types';
 import { tChrome } from '../i18n';
-import { withFileLock } from './engine-lock';
-import { serializeWorkspacePublication } from './workspace-publication';
+import { withFileLock, withWriteChain } from './engine-lock';
+import { announceWorkspacePublication, serializeWorkspacePublication } from './workspace-publication';
 import { hasPendingPageCommit, publishPageCommit, recoverPendingPageCommit, type PageCommitIo } from './page-commit-transaction';
 import type { ReadPublishedBytes } from './workspace-settle';
 
@@ -28,10 +28,13 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
   // Queue BEFORE the first await. Repeated keypresses read the newest history
   // when their own turn begins, including dispatches React has not rendered.
   // A page-tier step completes in this first turn and takes no file lock. A
-  // disk step leaves the lane, waits for the working path's lock, and enters
-  // the lane again: a lane holder never waits for a file lock. The lock is
-  // claimed (not awaited) inside the first turn, so repeated keypresses keep
-  // their order on it.
+  // disk step leaves the lane, waits for the working path's write chain and
+  // then its lock, and enters the lane again: a lane holder never waits for a
+  // chain or a file lock. The chain is claimed (not awaited) inside the first
+  // turn, so repeated keypresses keep their order on it, and a staged rewrite
+  // of the path that holds the chain publishes first. The first turn replaces
+  // no bytes, so it names no path; the disk step names its working path from
+  // its claim on.
   const look = serializeWorkspacePublication(async () => {
     await recoverPendingPageCommit();
     const selected = getState();
@@ -43,8 +46,11 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
     const path = selected.activeFileId;
     const working = path && selected.files.get(path)?.workingPath;
     if (!path || !working) return null;
-    return { restored: withFileLock([working], () => serializeWorkspacePublication(() => restoreDisk(path, working))) };
-  });
+    const done = announceWorkspacePublication([working]);
+    const restored = withWriteChain([working], () => withFileLock([working],
+      () => serializeWorkspacePublication(() => restoreDisk(path, working), [working])));
+    return { restored: restored.finally(done) };
+  }, []);
   return look.then(next => next?.restored);
 
   async function restoreDisk(path: string, working: string): Promise<void> {

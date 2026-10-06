@@ -71,6 +71,49 @@ describe('runCommitGate', () => {
     expect(tier.runs()).toBe(2);
   });
 
+  it('with paths, commits every dirty file, then waits for the publications of those paths only', async () => {
+    const tier = pageTier();
+    tier.edit('E1');
+    const order: string[] = [];
+    let releaseW: () => void = () => {};
+    const publication = serializeWorkspacePublication(async () => {
+      await new Promise<void>(r => { releaseW = r; });
+      order.push('publish W');
+    }, ['work-W']);
+    const gateW = runCommitGate(['work-W']).then(() => { order.push('gate W'); });
+    const gateD = runCommitGate(['work-D']).then(() => { order.push('gate D'); });
+    try {
+      await tier.completeWrites();
+      await gateD;
+      expect(tier.committed).toEqual(['E1']);
+      expect(order).toEqual(['gate D']);
+    } finally {
+      releaseW();
+    }
+    await publication;
+    await gateW;
+    expect(order).toEqual(['gate D', 'publish W', 'gate W']);
+  });
+
+  it('without paths, waits for every outstanding publication', async () => {
+    pageTier();
+    const order: string[] = [];
+    let releaseW: () => void = () => {};
+    const publication = serializeWorkspacePublication(async () => {
+      await new Promise<void>(r => { releaseW = r; });
+      order.push('publish W');
+    }, ['work-W']);
+    const gate = runCommitGate().then(() => { order.push('gate'); });
+    try {
+      await flush();
+      expect(order).toEqual([]);
+    } finally {
+      releaseW();
+    }
+    await Promise.all([publication, gate]);
+    expect(order).toEqual(['publish W', 'gate']);
+  });
+
   it('a failed shared run rejects the joining caller', async () => {
     setCommitGate(() => Promise.reject(new Error('blocked')));
     const first = runCommitGate();
@@ -134,7 +177,9 @@ describe('page commit locks', () => {
     const commit = commitRun({ state: stateOf(['A', 'B'], ['A']) }, events);
     await flush();
     expect(events).toEqual([]);
-    expect(hasWorkspacePublication()).toBe(false);
+    // Announced for its locked set only, before it reaches the lane.
+    expect(hasWorkspacePublication(['work-A'])).toBe(true);
+    expect(hasWorkspacePublication(['work-B'])).toBe(false);
     // Another document publishes while the commit waits.
     await serializeWorkspacePublication(async () => { events.push('publish B'); });
     expect(events).toEqual(['publish B']);

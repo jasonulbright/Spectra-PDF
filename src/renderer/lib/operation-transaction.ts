@@ -23,7 +23,8 @@ export interface OperationOptions {
   /** Revision-derived parameters must not survive a gate rebuild. */
   expectedBuffer?: PdfBuffer;
   /** Derive page addresses from the accepted post-commit revision, inside
-   * the publication/file lock. Any concurrent edit still aborts the write. */
+   * the write chain and the shared file lock. Any concurrent edit of the file
+   * still aborts the write. */
   prepareParams?: (state: AppState) => Promise<Record<string, unknown>>;
   structuralConsent?: boolean;
   /** One user edit that needs several engine calls: all run on the same private
