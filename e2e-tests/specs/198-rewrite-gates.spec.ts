@@ -94,6 +94,12 @@ describe('user operations asked for during a rewrite see its result', () => {
     // redaction's engine step holds, and write the secret line.
     const exported = resolve(tmp, 'during-redaction.txt');
     await start('export', 'exportActiveAs', exported, 'txt');
+    // The export first resolves its tool paths; the redaction goes on only
+    // once the export is seen blocked in its gate on the working copy.
+    const working = (await getState()).activeFile!.workingPath;
+    await browser.waitUntil(async () => (await browser.execute(
+      (path: string) => (window as any).__SPECTRA_TEST__.commitGatesWaiting(path) as number, working)) >= 1,
+    { timeoutMsg: 'the export never waited in its gate for the held redaction' });
     await release();
     await browser.waitUntil(async () => (await settled('redact'))?.done === true && (await settled('export'))?.done === true,
       { timeoutMsg: 'the redaction and the export never settled' });
