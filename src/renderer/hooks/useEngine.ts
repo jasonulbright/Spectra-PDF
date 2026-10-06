@@ -241,6 +241,20 @@ export function useEngine() {
   ): Promise<EngineResult> =>
     trackInteractive(() => dispatch(method, params, options)), [dispatch]);
 
+  // The per-method file locks and nothing else: no commit gate, no queue
+  // entry, no credential recovery. Background reads and the credential
+  // prompts themselves use it. Recovery here would open a password prompt
+  // from a background read, and again after each cancel, with no user action.
+  const callLocked = useCallback((
+    method: string,
+    params: Record<string, unknown> = {},
+    options?: EngineCallOptions,
+  ): Promise<EngineResult> =>
+    withFileLock(lockKeysFor(method, params), () => {
+      options?.assertCurrent?.();
+      return rawCall(method, params);
+    }), [rawCall]);
+
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}, options?: EngineCallOptions): Promise<EngineResult> => {
     options?.assertCurrent?.();
     await restoreLostCredentials(params);
@@ -275,14 +289,12 @@ export function useEngine() {
       }
     }
     // Read-only is not handle-free: qpdf can hold the working file while an
-    // index is built. These readers hold their paths shared, so they run
-    // together and still exclude Undo/Save/publication, without running the
-    // commit gate or creating an operation-queue entry.
-    return withFileLock(lockKeysFor(method, params), () => {
-      options?.assertCurrent?.();
-      return rawCall(method, params);
-    });
-  }, [rawCall, track]);
+    // index is built. Internal methods take the per-method locks of their
+    // paths, so readers of one file run together and still exclude
+    // Undo/Save/publication, without running the commit gate or creating an
+    // operation-queue entry.
+    return callLocked(method, params, options);
+  }, [callLocked, rawCall, track]);
 
   // Background work nobody asked for: a passive, read-only sweep driven by a
   // document changing rather than by a user. It runs in the health worker, one
@@ -311,5 +323,5 @@ export function useEngine() {
   // exists to prevent. Batch reads ORIGINAL paths (not working copies), so
   // neither concern applies — and gating there would side-effect-commit the
   // user's unrelated pending page edits mid-batch.
-  return { call, callRaw: rawCall, collectHealth, openFiles, saveFile, ready };
+  return { call, callLocked, callRaw: rawCall, collectHealth, openFiles, saveFile, ready };
 }

@@ -15,14 +15,7 @@
 import { app } from './tauri-bridge';
 import { requireGsPath } from './gs-capability';
 import type { OcrResult } from '../ocr/types';
-
-/** The engine caller shape `useEngine()` returns as `call` and `callRaw`. A
- * working copy is recognized through `call`, which locks it; a path outside
- * the workspace through `callRaw`. */
-export type RawEngineCall = (
-  op: string,
-  params: Record<string, unknown>,
-) => Promise<unknown>;
+import type { EngineCall } from './engine-call';
 
 // Resolved once per session — the vendored paths cannot change at runtime, and
 // asking Rust per PAGE would add a round trip to every OCR job in a batch.
@@ -44,7 +37,7 @@ export function tesseractPath(): Promise<string> {
  * unchanged.
  */
 export async function recognizePage(
-  engineCall: RawEngineCall,
+  engineCall: EngineCall,
   file: string,
   pageIndex: number,
   lang: string,
@@ -76,7 +69,7 @@ export async function recognizePage(
  * visible operation or run the commit gate for a selection gesture.
  */
 export async function recognizeRaster(
-  callRaw: RawEngineCall,
+  callRaw: EngineCall,
   png: Uint8Array,
   lang: string,
 ): Promise<OcrResult> {

@@ -34,11 +34,13 @@ export type LockMode = 'shared' | 'exclusive';
 export interface LockClaim { key: string; mode: LockMode }
 
 /**
- * `S` shared, `X` exclusive, `X:in_place` exclusive only when the call's
- * `in_place` parameter is `true` (a folder run that rewrites its sources),
- * shared otherwise.
+ * `S` shared, `X` exclusive. `X:` followed by `|`-separated terms is exclusive
+ * when any term holds and shared otherwise: `name` holds when the call's
+ * `name` parameter is truthy, `!name` when it is falsy or absent. A folder run
+ * rewrites, moves or deletes its sources only under such options, and a
+ * writer with no output rewrites its input.
  */
-type TableMode = 'S' | 'X' | 'X:in_place';
+type TableMode = 'S' | 'X' | `X:${string}`;
 
 /**
  * Every engine method -> every path parameter it takes -> its lock mode. A
@@ -47,13 +49,14 @@ type TableMode = 'S' | 'X' | 'X:in_place';
  * `data` carries base64 bytes and is never a key. A folder key gives string
  * identity only; exclusion over a folder tree comes from the Rust claim
  * state. tests/test_engine_lock_table.py checks this table against every
- * registered handler signature; keep one row per line.
+ * registered handler signature and against the paths each handler writes,
+ * moves or deletes; keep one row per line.
  */
 export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, TableMode>>>> = {
   ping: {},
   merge: { files: 'S', output: 'X' },
   split: { file: 'S', output_dir: 'X', output: 'X', output_paths: 'X' },
-  split_plan: { file: 'S', destination_dir: 'X' },
+  split_plan: { file: 'S', destination_dir: 'S' },
   rotate: { file: 'S', output: 'X' },
   delete: { file: 'S', output: 'X' },
   compress: { file: 'S', output: 'X' },
@@ -102,13 +105,13 @@ export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, 
   list_preflight_profiles: {},
   validate_preflight_profile: {},
   apply_preflight_fixups: { file: 'S', output: 'X', profile_path: 'S' },
-  run_preflight_sweep: { source: 'X:in_place', dest: 'X', profile_path: 'S', log_dir: 'X', move_processed_root: 'X' },
+  run_preflight_sweep: { source: 'X:in_place|move_processed_root', dest: 'X', profile_path: 'S', log_dir: 'X', move_processed_root: 'X' },
   list_inks: { file: 'S' },
   render_separations: { file: 'S' },
-  composite_separations: { dir: 'S', output: 'X' },
+  composite_separations: { dir: 'X', output: 'X' },
   list_simulation_profiles: { file: 'S' },
   inspect_point: { file: 'S', plates_dir: 'S' },
-  alias_ink: { file: 'S', output: 'X', source: 'S' },
+  alias_ink: { file: 'S', output: 'X' },
   compare_ink_transforms: { file: 'S' },
   spot_to_process: { file: 'S', output: 'X' },
   ink_settings_defaults: { file: 'S' },
@@ -124,14 +127,14 @@ export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, 
   validate_trap_preset: {},
   assign_trap_presets: { file: 'S', output: 'X' },
   list_trap_presets: { file: 'S' },
-  emit_trapping_setup: { file: 'S', output: 'X' },
+  emit_trapping_setup: { file: 'X:!output', output: 'X' },
   export_postscript: { file: 'S', output: 'X' },
   get_struct_tree: { file: 'S' },
-  set_struct_props: { file: 'S', output: 'X', path: 'S' },
-  set_table_headers: { file: 'S', output: 'X', path: 'S' },
+  set_struct_props: { file: 'S', output: 'X' },
+  set_table_headers: { file: 'S', output: 'X' },
   tag_page_content: { file: 'S', output: 'X' },
-  move_struct_node: { file: 'S', output: 'X', path: 'S' },
-  delete_struct_node: { file: 'S', output: 'X', path: 'S' },
+  move_struct_node: { file: 'S', output: 'X' },
+  delete_struct_node: { file: 'S', output: 'X' },
   add_struct_node: { file: 'S', output: 'X' },
   list_links: { file: 'S' },
   set_link_url: { file: 'S', output: 'X' },
@@ -216,10 +219,10 @@ export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, 
   recognize_raster: {},
   analyze_scan: { file: 'S' },
   enhance_scan: { file: 'S', output: 'X' },
-  batch_ocr: { source: 'X:in_place', dest: 'X', moved_root: 'X', error_root: 'X', log_dir: 'X' },
+  batch_ocr: { source: 'X:in_place|moved_root|error_root|remove_empty_folders|replace_repaired_originals', dest: 'X', moved_root: 'X', error_root: 'X', log_dir: 'X' },
   ocr_file: { file: 'S', output: 'X' },
   remove_empty_folders: { root: 'X', protected: 'S' },
-  run_action: { source: 'X:in_place', dest: 'X', log_dir: 'X', move_processed_root: 'X' },
+  run_action: { source: 'X:in_place|move_processed_root', dest: 'X', log_dir: 'X', move_processed_root: 'X' },
   autotag: { file: 'S', output: 'X' },
   list_page_images: { file: 'S' },
   summarize_image_resolution: { file: 'S' },
@@ -245,15 +248,15 @@ export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, 
   replace_paragraph_text: { file: 'S', output: 'X', font_path: 'S' },
   merge_paragraph_with_previous: { file: 'S', output: 'X', font_path: 'S' },
   list_dictionaries: { user_dictionary_dir: 'S' },
-  check_spelling: { file: 'S', user_dictionary_dir: 'S', sources: 'S' },
+  check_spelling: { file: 'S', user_dictionary_dir: 'S' },
   check_text: { user_dictionary_dir: 'S' },
   document_language: { file: 'S' },
   spelling_suggestions: { user_dictionary_dir: 'S' },
   add_user_dictionary: { user_dictionary_dir: 'X' },
   distill: { file: 'S', output: 'X' },
   create_pdf: { sources: 'S', output: 'X' },
-  list_source_folders: { source: 'S', sources: 'S' },
-  create_pdf_folders: { source: 'S', dest: 'X', sources: 'S', log_dir: 'X' },
+  list_source_folders: { source: 'S' },
+  create_pdf_folders: { source: 'S', dest: 'X', log_dir: 'X' },
   list_system_fonts: {},
   add_text_box: { file: 'S', output: 'X', font_path: 'S' },
   measure_text_box: { file: 'S', font_path: 'S' },
@@ -267,7 +270,7 @@ export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, 
   list_pkcs11_certificates: {},
   list_csc_credentials: {},
   preview_stamp_appearance: {},
-  transplant_incremental: { original: 'S', modified: 'X', output: 'X' },
+  transplant_incremental: { original: 'S', modified: 'S', output: 'X' },
   signature_policy: { path: 'S' },
   save_redaction_marks: { file: 'S', output: 'X' },
   list_redact_annotations: { file: 'S' },
@@ -275,6 +278,22 @@ export const ENGINE_LOCK_TABLE: Readonly<Record<string, Readonly<Record<string, 
 
 /** Parameter names a method missing from the table is locked on, all exclusive. */
 const UNKNOWN_METHOD_KEYS = ['file', 'output', 'source', 'dest', 'path', 'output_path', 'files', 'inputs', 'sources'] as const;
+
+/** Truthiness as the engine's handlers test it: an empty list or object is
+ * false, as are `''`, `0`, `false`, `null` and an absent parameter. */
+function engineTruthy(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return Boolean(value);
+}
+
+/** Whether a table mode is exclusive for a call with `params`. */
+function isExclusive(mode: TableMode, params: Record<string, unknown>): boolean {
+  if (mode === 'X') return true;
+  if (mode === 'S') return false;
+  return mode.slice(2).split('|').some(term =>
+    term.startsWith('!') ? !engineTruthy(params[term.slice(1)]) : engineTruthy(params[term]));
+}
 
 /** A path value: a string, a list of strings, or a list of `{ path }` source rows. */
 function pathsOf(value: unknown): string[] {
@@ -309,7 +328,7 @@ export function lockKeysFor(method: string, params: Record<string, unknown>): Lo
   };
   if (row) {
     for (const [param, mode] of Object.entries(row)) {
-      const exclusive = mode === 'X' || (mode === 'X:in_place' && params.in_place === true);
+      const exclusive = isExclusive(mode, params);
       for (const key of pathsOf(params[param])) add(key, exclusive ? 'exclusive' : 'shared');
     }
   } else {

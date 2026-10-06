@@ -47,16 +47,18 @@ export function useSearchIndex(
   // recognizer, shared with the CLI and every scheduled run. Behind a ref so
   // the engine is constructed once while still calling the current bridge.
   //
-  // `recognize` is an internal method: `call` runs no commit gate for it, which
-  // would side-effect-commit the user's pending page edits during a BACKGROUND
-  // index, and takes only a shared lock on the working copy, so a publication
-  // of that copy waits for the read and the read waits for the publication.
-  const { call } = useEngine();
+  // `callLocked` takes only a shared lock on the working copy, so a
+  // publication of that copy waits for the read and the read waits for the
+  // publication. It runs no commit gate, which would side-effect-commit the
+  // user's pending page edits during a BACKGROUND index, and no credential
+  // recovery, which would open a password prompt per scanned page with no
+  // user action; a page whose credential is lost fails and is skipped.
+  const { callLocked } = useEngine();
   const recognizeRef = useRef<
     (path: string, pageIndex: number, lang: string) => Promise<{ text: string; words: OcrWord[] }>
   >(null!);
   recognizeRef.current = (path, pageIndex, lang) =>
-    recognizePage(call, path, pageIndex, lang);
+    recognizePage(callLocked, path, pageIndex, lang);
 
   const engineRef = useRef<SearchEngine | null>(null);
   if (!engineRef.current) {

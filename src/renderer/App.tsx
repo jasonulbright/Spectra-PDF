@@ -422,7 +422,7 @@ function AppContent(): React.ReactElement {
   const [extractPage, setExtractPage] = useState<CanvasTextRequest | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const recentFiles = state.ui.recentFiles;
-  const { call, callRaw, openFiles, saveFile } = useEngine();
+  const { call, callLocked, callRaw, openFiles, saveFile } = useEngine();
   useWorkspaceIndexer();
 
   // Confirm dialog state — 3-choice unsaved (Save / Don't Save / Cancel),
@@ -1024,8 +1024,11 @@ function AppContent(): React.ReactElement {
     setCredentialUnlocker(async (workingPath) => {
       const record = [...readState().files.values()].find((f) => f.workingPath === workingPath);
       if (!record) return true;
+      // Locked, never gated or recovered: this runs inside a call's credential
+      // recovery, and `open_document_attempt` can decrypt the working copy in
+      // place, so it waits for a commit or a reader that holds that copy.
       return unlockLostDocument(record, {
-        call: callRaw,
+        call: callLocked,
         askPassword: showPasswordPrompt,
         askCertificate: showCertUnlockPrompt,
         wrongPassword: () => tChrome('app.open.incorrectPassword'),
@@ -1043,7 +1046,7 @@ function AppContent(): React.ReactElement {
       stop?.();
       setCredentialUnlocker(null);
     };
-  }, [callRaw, readState, showPasswordPrompt, showCertUnlockPrompt]);
+  }, [callLocked, readState, showPasswordPrompt, showCertUnlockPrompt]);
 
   const stateRef = useRef(state);
   stateRef.current = state;
