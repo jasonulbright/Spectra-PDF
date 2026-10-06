@@ -13,6 +13,7 @@ import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
 import { showableFile, tabFiles, unsavedAmong } from '../../state/selectors';
 import { useDocumentHealth } from '../../hooks/useDocumentHealth';
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
 import { factsFor, isCollecting, verdictFor } from '../../lib/doc-health';
 import { useFlipReorder } from '../../hooks/useFlipReorder';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
@@ -3301,6 +3302,36 @@ export function WorkspaceCanvasView({
     return docs.some((d) => d.pages.some((p) => p.id === sigPlacement.pageId)) ? sigPlacement : null;
   }, [sigPlacement, docs]);
 
+  // Escape and a tool change close a card the way its Cancel does; the sign
+  // card's Cancel also drops the typed password from state.
+  const cancelSignCard = useCallback(() => {
+    setSigPlacement(null);
+    setSigFieldTarget(null);
+    setSigPassword('');
+    setSignError(null);
+  }, []);
+  const cancelNewFieldCard = useCallback(() => {
+    setNewFieldPlacement(null);
+    setNfError(null);
+  }, []);
+  useDismissOnEscape(liveSigPlacement !== null || sigFieldTarget !== null, cancelSignCard);
+  useDismissOnEscape(liveNewFieldPlacement !== null, cancelNewFieldCard);
+  useDismissOnEscape(liveAddTextPlacement !== null, onClearAddTextPlacement);
+  // A card belongs to the tool it was drawn under. Left open across a tool
+  // change it stacks under the next tool's card at the same anchor. Layout
+  // effect: the clear lands in the commit that changes the tool, before any
+  // later placement can be set against the new tool.
+  const activeToolId = state.ui.activeToolId;
+  const cardToolRef = useRef(activeToolId);
+  useLayoutEffect(() => {
+    if (cardToolRef.current === activeToolId) return;
+    cardToolRef.current = activeToolId;
+    cancelSignCard();
+    cancelNewFieldCard();
+    onClearAddTextPlacement();
+    setRecalTarget(null);
+  }, [activeToolId, cancelSignCard, cancelNewFieldCard, onClearAddTextPlacement]);
+
   // Can the card's target still take a certification? A certification must be
   // a document's FIRST signature, so this is a structural read of what is
   // already there.
@@ -5454,6 +5485,9 @@ export function WorkspaceCanvasView({
       rect,
       rotationAtDraw: page.rotation,
     });
+    setSigPlacement(null);
+    setNewFieldPlacement(null);
+    setSigFieldTarget(null);
     return true;
   };
   useEffect(() => {
@@ -5609,6 +5643,8 @@ export function WorkspaceCanvasView({
       rect,
       rotationAtDraw: page.rotation,
     });
+    setSigPlacement(null);
+    setAddTextPlacement(null);
     return true;
   };
   // Sign-into-field for the harness: the same engine call the sign
@@ -6627,6 +6663,9 @@ export function WorkspaceCanvasView({
       rect,
       rotationAtDraw: page.rotation,
     });
+    setNewFieldPlacement(null);
+    setAddTextPlacement(null);
+    setSigFieldTarget(null);
     return true;
   };
   // The crop band, driven the way the gesture drives it — through the
@@ -7875,12 +7914,7 @@ export function WorkspaceCanvasView({
           <div className="flex justify-end gap-2">
             <button
               data-testid="canvas-sign-cancel"
-              onClick={() => {
-                setSigPlacement(null);
-                setSigFieldTarget(null);
-                setSigPassword('');
-                setSignError(null);
-              }}
+              onClick={cancelSignCard}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
               {tChrome('canvas.common.cancel')}
@@ -8064,10 +8098,7 @@ export function WorkspaceCanvasView({
           {nfError && <div data-testid="new-field-error" className="text-xs text-red-400">{nfError}</div>}
           <div className="flex justify-end gap-2">
             <button
-              onClick={() => {
-                setNewFieldPlacement(null);
-                setNfError(null);
-              }}
+              onClick={cancelNewFieldCard}
               className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded font-medium"
             >
               {tChrome('canvas.common.cancel')}
@@ -8107,12 +8138,6 @@ export function WorkspaceCanvasView({
               // Character positions drift under edits — clear spans
               // visibly rather than let them silently mis-bind.
               if (atSpans.length > 0) setAtSpans([]);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                onClearAddTextPlacement();
-              }
             }}
             className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500 resize-y"
           />

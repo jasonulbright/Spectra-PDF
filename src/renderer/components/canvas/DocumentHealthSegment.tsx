@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { tChrome } from '../../i18n';
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
 import {
   groupByBoundary,
   HEALTH_GLYPHS,
@@ -80,16 +81,10 @@ export function DocumentHealthSegment(props: DocumentHealthSegmentProps): React.
     const onDown = (e: MouseEvent): void => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
     window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
+    return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
+  useDismissOnEscape(open, () => setOpen(false));
 
   const { verdict, facts } = props;
   const groups = groupByBoundary(facts);
