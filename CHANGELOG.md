@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.1007.154
+
+*Released 2026-10-07*
+
+**Drop files between page thumbnails**
+
+### Fixed
+- Dropping an image, Office file or text file onto the Pages panel now converts it and inserts the new pages at the gap under the pointer, with an insertion marker while you drag.
+- Image, Office and text files dropped anywhere in the window now reach Create PDF instead of being silently ignored.
+
 ## 2026.1005.153
 
 *Released 2026-10-05*
