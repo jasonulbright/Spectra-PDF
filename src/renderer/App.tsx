@@ -118,6 +118,7 @@ import { WorkspaceCanvasView } from './components/canvas/WorkspaceCanvasView';
 import { PresentationView } from './components/canvas/PresentationView';
 import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
+import { getExternalDropSurface } from './lib/external-drop-surface';
 import { commitPageEdits } from './lib/workspace-commit';
 import { awaitSettledWorkspace, indexError, retryFailedIndexes, workspaceSettled } from './lib/workspace-settle';
 import { hasPendingPageCommit, recoverPendingPageCommit } from './lib/page-commit-transaction';
@@ -1613,14 +1614,21 @@ function AppContent(): React.ReactElement {
   // The canvas publishes its drop resolver here.
   const dropResolverRef = useRef<CanvasDropResolver | null>(null);
 
+  // Where a Create PDF opened by a drop ONTO a document puts its result: the
+  // drop point, so converted pages land where they were dropped (#42). Null
+  // for every other way the dialog opens; cleared when it closes.
+  const createPdfInsertRef = useRef<{ docId: string; index: number } | null>(null);
+
   // Only PDFs enter the page tier. Images and other convertible sources
-  // dropped on a page open the Create PDF dialog instead of failing inside the
-  // import.
+  // dropped on a page open the Create PDF dialog (whose result is then
+  // inserted at the drop point) instead of failing inside the import; a kind
+  // nothing converts is ignored.
   const dropOntoDoc = useCallback(
     async (paths: string[], docId: string, index: number) => {
       const convertible = paths.filter((p) => classifySource(p) !== '' && classifySource(p) !== 'pdf');
-      const importable = paths.filter((p) => !convertible.includes(p));
+      const importable = paths.filter((p) => /\.pdfx?$/i.test(p));
       if (convertible.length > 0) {
+        createPdfInsertRef.current = { docId, index };
         setCreatePdfSeed(convertible);
         setCreatePdfOutputMode(null);
         setShowCreatePdf(true);
@@ -1629,6 +1637,45 @@ function AppContent(): React.ReactElement {
     },
     [importFilesIntoDoc],
   );
+
+  // The Create PDF result: inserted at the drop point when the dialog came
+  // from a drop onto a still-open document, else opened as before. Asking for
+  // OCR on the result is asking for it as its own document, so that opens.
+  const openOrInsertCreatedPdf = useCallback(
+    async (path: string, options?: { recognize?: boolean }) => {
+      const at = createPdfInsertRef.current;
+      if (at && !options?.recognize && readState().workspace.documents.some((d) => d.id === at.docId)) {
+        await importFilesIntoDoc([path], at.docId, at.index);
+        return;
+      }
+      await openCreatedPdf(path, options);
+    },
+    [importFilesIntoDoc, openCreatedPdf, readState],
+  );
+  const openOrInsertAllCreated = useCallback(
+    async (paths: string[]) => {
+      const at = createPdfInsertRef.current;
+      if (at && readState().workspace.documents.some((d) => d.id === at.docId)) {
+        await importFilesIntoDoc(paths, at.docId, at.index);
+        return;
+      }
+      await openByPaths(paths);
+    },
+    [importFilesIntoDoc, openByPaths, readState],
+  );
+
+  // A native drag hovering over the window: the Pages panel draws its
+  // insertion marker under the pointer (and clears it off the panel).
+  const handleDragHover = useCallback((position?: { x: number; y: number }) => {
+    const surface = getExternalDropSurface();
+    if (!surface) return;
+    if (!position) {
+      surface.hover(null);
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    surface.hover({ x: position.x / dpr, y: position.y / dpr });
+  }, []);
 
   const handleFilesDropped = useCallback(
     async (paths: string[], position?: { x: number; y: number }) => {
@@ -1640,8 +1687,20 @@ function AppContent(): React.ReactElement {
       // dialog, nothing at all for an unsupported kind), and a notice naming an
       // outcome fires only on the branch that actually produces it.
       let refusedZoom = false;
-      if (inDocTab && position && dropResolverRef.current) {
-        const dpr = window.devicePixelRatio || 1;
+      // A drop over the Pages panel is the panel's: between two thumbnails it
+      // imports there; anywhere else on the panel it falls through to opening,
+      // and never to the canvas resolver, which would map the point to
+      // whatever board position lies under the pane (#42).
+      const surface = position ? getExternalDropSurface() : null;
+      const dpr = window.devicePixelRatio || 1;
+      const overSurface = !!(position && surface?.contains(position.x / dpr, position.y / dpr));
+      if (position && surface && overSurface) {
+        const target = surface.resolve(position.x / dpr, position.y / dpr);
+        if (target) {
+          await dropOntoDoc(paths, target.docId, target.index);
+          return;
+        }
+      } else if (inDocTab && position && dropResolverRef.current) {
         const target = dropResolverRef.current(position.x / dpr, position.y / dpr);
         if (target && 'docId' in target) {
           await dropOntoDoc(paths, target.docId, target.index);
@@ -1669,6 +1728,7 @@ function AppContent(): React.ReactElement {
       const convertible = paths.filter((p) => classifySource(p) !== '' && classifySource(p) !== 'pdf');
       const pdfs = paths.filter((p) => classifySource(p) === 'pdf');
       if (convertible.length > 0) {
+        createPdfInsertRef.current = null;
         setCreatePdfSeed(convertible);
         setCreatePdfOutputMode(null);
         setShowCreatePdf(true);
@@ -3864,6 +3924,7 @@ function AppContent(): React.ReactElement {
     >
     <DropZone
       onFilesDropped={handleFilesDropped}
+      onDragHover={handleDragHover}
       onUrlDropped={(url) => setOpenWebUrl(url)}
     >
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
@@ -4083,13 +4144,14 @@ function AppContent(): React.ReactElement {
           initialOutputMode={createPdfOutputMode}
           autoStart={createPdfAutoStart}
           onClose={() => {
+            createPdfInsertRef.current = null;
             setShowCreatePdf(false);
             setCreatePdfSeed([]);
             setCreatePdfOutputMode(null);
             setCreatePdfAutoStart(null);
           }}
-          onOpenResult={openCreatedPdf}
-          onOpenAll={async (paths) => { await openByPaths(paths); }}
+          onOpenResult={openOrInsertCreatedPdf}
+          onOpenAll={openOrInsertAllCreated}
         />
       )}
       {showCombine && (

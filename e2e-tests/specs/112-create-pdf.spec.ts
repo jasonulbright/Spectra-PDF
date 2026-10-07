@@ -436,4 +436,35 @@ describe('Create PDF from any file', () => {
     await $('[data-testid="create-pdf-close"]').click();
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
   });
+
+  it('inserts the converted pages at the drop point rather than opening a tab (#42)', async function () {
+    this.timeout(120_000);
+    const docs = await getCanvasDocs(1);
+    const target = docs.find((d) => d.path.includes('ocr-me.pdf')) ?? docs[0];
+    expect(target).toBeDefined();
+    const before = target.pages;
+    const pathBefore = (await getState()).activeFile?.path;
+
+    await dropFilesOntoDoc([pngPath], target.id, 1);
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    const built = await browser.executeAsync<CreatePdfRunResult | null, [string]>(
+      function (o, done) {
+        (window as any).__SPECTRA_TEST__.createPdfConvertCurrent(o)
+          .then((r: CreatePdfRunResult | null) => done(r))
+          .catch(() => done(null));
+      },
+      resolve(tmp, 'dropped-insert.pdf'),
+    );
+    expect(built).not.toBe(null);
+    await $('[data-testid="create-pdf-open"]').waitForDisplayed({ timeout: 30_000 });
+    await $('[data-testid="create-pdf-open"]').click();
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 30_000 });
+
+    await browser.waitUntil(
+      async () => (await getCanvasDocs(1)).find((d) => d.id === target.id)?.pages === before + built!.pages,
+      { timeout: 30_000, timeoutMsg: 'the converted pages were not imported into the drop target' },
+    );
+    // Inserted, not opened: the focused document is still the drop target.
+    expect((await getState()).activeFile?.path).toBe(pathBefore);
+  });
 });

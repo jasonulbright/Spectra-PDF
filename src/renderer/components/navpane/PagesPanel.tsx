@@ -22,6 +22,7 @@ import type { PageRef } from '../../state/types';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../../i18n';
 import { pointerScope } from '../../lib/pointer-scope';
+import { registerExternalDropSurface } from '../../lib/external-drop-surface';
 
 // Pages (thumbnails) panel. Small renders of the active
 // file's pages through the same pdf.js proxy the board uses (one per file via
@@ -270,6 +271,42 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       itemsRef.current.length,
     );
   }, []);
+
+  // ── External file drop ───────────────────────────────────────────────────
+  // Files dragged in from outside the app (the window-wide native drop) land
+  // at the gap under the pointer: App asks this surface before the canvas, so
+  // a drop between two thumbnails imports there instead of opening the files
+  // as tabs (#42). The same gap math and indicator as the reorder drag.
+  useEffect(() => {
+    const inside = (x: number, y: number): boolean => {
+      const el = scrollerRef.current;
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+    };
+    return registerExternalDropSurface({
+      contains: inside,
+      resolve: (x, y) => {
+        if (!inside(x, y) || !dropGateRef.current.ok) return null;
+        // No pages moving: computeReorderTarget then maps the flat gap to the
+        // (doc, index) of the page it sits before — or after the last page.
+        const target = computeReorderTarget(
+          itemsRef.current.map((it) => ({ docId: it.docId, pageId: it.page.id })),
+          [],
+          flatIndexAt(x, y),
+        );
+        return target ? { docId: target.toDocId, index: target.toIndex } : null;
+      },
+      hover: (point) => {
+        if (dragRef.current) return; // an internal reorder owns the indicator
+        if (!point || !inside(point.x, point.y) || !dropGateRef.current.ok || itemsRef.current.length === 0) {
+          setDropGap(null);
+          return;
+        }
+        setDropGap(flatIndexAt(point.x, point.y));
+      },
+    });
+  }, [flatIndexAt]);
 
   const dragMove = useCallback(
     (e: PointerEvent): void => {

@@ -6,7 +6,12 @@ import { tChrome } from '../i18n';
 interface DropZoneProps {
   // position is the Tauri physical drop point — undefined on platforms
   // that don't report one; the handler falls back to appending when absent.
+  // Every dropped path is forwarded: the handler classifies them (PDFs import
+  // or open, convertible sources go to Create PDF, the rest are ignored).
   onFilesDropped: (paths: string[], position?: { x: number; y: number }) => void;
+  /** A native file drag moving over the window (Tauri physical position), or
+   * undefined when it leaves or drops — drives insertion markers. */
+  onDragHover?: (position?: { x: number; y: number }) => void;
   /**
    * A web address dragged in from a browser. It arrives as HTML5 drop data
    * (`text/uri-list`), NOT through Tauri's native file drop, which carries
@@ -33,25 +38,31 @@ export function firstWebUri(data: string): string | null {
   return null;
 }
 
-export function DropZone({ onFilesDropped, onUrlDropped, children }: DropZoneProps): React.ReactElement {
+export function DropZone({ onFilesDropped, onDragHover, onUrlDropped, children }: DropZoneProps): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [dragging, setDragging] = useState(false);
   const callbackRef = useRef(onFilesDropped);
   callbackRef.current = onFilesDropped;
+  const hoverRef = useRef(onDragHover);
+  hoverRef.current = onDragHover;
 
   useEffect(() => {
     const appWindow = getCurrentWebviewWindow();
     const unlisten = appWindow.onDragDropEvent((event) => {
       if (event.payload.type === 'enter' || event.payload.type === 'over') {
         setDragging(true);
+        hoverRef.current?.(event.payload.position as { x: number; y: number } | undefined);
       } else if (event.payload.type === 'leave') {
         setDragging(false);
+        hoverRef.current?.(undefined);
       } else if (event.payload.type === 'drop') {
         setDragging(false);
-        const paths = event.payload.paths.filter((p) =>
-          /\.pdfx?$/i.test(p)
-        );
+        hoverRef.current?.(undefined);
+        // NOT filtered to PDFs here: a PDF-only filter silently swallowed
+        // images and Office files before App's Create PDF routing could see
+        // them (#42).
+        const paths = event.payload.paths;
         // Tauri reports the physical drop position; forward it so a drop onto a
         // canvas document imports there. Absent → append fallback.
         const position = event.payload.position as { x: number; y: number } | undefined;
