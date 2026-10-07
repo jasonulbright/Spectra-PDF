@@ -55,7 +55,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
   return (
     <div className="border-t border-neutral-800 bg-neutral-850 shrink-0">
       <div
-        className="flex items-center justify-between px-4 py-1.5 cursor-pointer select-none"
+        className="flex items-center justify-between px-4 py-1.5 cursor-default select-none"
         onClick={() => setCollapsed((prev) => !prev)}
       >
         <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">

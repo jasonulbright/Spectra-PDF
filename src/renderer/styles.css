@@ -686,7 +686,7 @@ input:not([type]) {
   color: var(--danger-fg);
   font-size: 12px;
   font-weight: 500;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
 }
 .danger-action:hover:not(:disabled) {
@@ -723,7 +723,7 @@ input:not([type]) {
   background: transparent;
   color: var(--text-dim);
   font-size: inherit;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
 }
 .quiet-action:hover:not(:disabled) {
@@ -743,7 +743,7 @@ input:not([type]) {
   font-size: inherit;
   color: var(--accent-text, var(--accent, #4cc2ff));
   text-decoration: underline;
-  cursor: pointer;
+  cursor: default;
 }
 
 /* ONE disabled treatment, product-wide. It has to be legible: a control dimmed
@@ -809,7 +809,7 @@ input:not([type]) {
   box-shadow: inset 0 0 0 1px var(--swatch-edge);
   outline: 2px solid transparent;
   outline-offset: 2px;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   border: none;
 }
@@ -1002,7 +1002,7 @@ input:not([type]) {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  cursor: pointer;
+  cursor: default;
   padding: 4px 0;
 }
 .thumb-row:hover { background: #1f1f1f; }
@@ -1180,7 +1180,7 @@ input:not([type]) {
   padding-block: 4px;
   padding-inline: 16px 10px;
   text-align: start;
-  cursor: pointer;
+  cursor: default;
 }
 .search-hit:hover { background: #1f1f1f; }
 .search-hit-page { font-size: 12px; color: #d4d4d4; }
@@ -1651,7 +1651,7 @@ input:not([type]) {
   border: none;
   background: transparent;
   color: var(--ink-soft);
-  cursor: pointer;
+  cursor: default;
 }
 
 .canvas-view .icon-btn:hover:not(:disabled) {
@@ -1692,7 +1692,7 @@ input:not([type]) {
   color: rgba(255, 255, 255, 0.35);
   font-size: 22px;
   font-weight: 300;
-  cursor: pointer;
+  cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1710,7 +1710,7 @@ input:not([type]) {
   border-radius: 10px;
   box-shadow: var(--page-shadow);
   overflow: hidden;
-  cursor: pointer;
+  cursor: grab;
   transition:
     opacity 0.15s ease,
     filter 0.15s ease;
@@ -1773,7 +1773,7 @@ input:not([type]) {
   border: none;
   border-radius: 10px;
   overflow: hidden;
-  cursor: pointer;
+  cursor: default;
 }
 
 .add-label {
@@ -1800,7 +1800,7 @@ input:not([type]) {
   padding: 52px 22px 14px;
   background: transparent;
   border: none;
-  cursor: pointer;
+  cursor: default;
 }
 
 .add-doc-row:hover .dashed-border rect {
@@ -1818,6 +1818,13 @@ input:not([type]) {
 /* Suppressed mid-drag so it never collides with the between-document ghost. */
 .canvas-view.dragging .add-doc-row {
   display: none;
+}
+
+/* A page is held while it is dragged: the closed hand, over the page and over
+   wherever it is carried. */
+.canvas-view.dragging,
+.canvas-view.dragging .page {
+  cursor: grabbing;
 }
 
 .ghost-doc {
@@ -1951,7 +1958,7 @@ input:not([type]) {
   background: rgba(20, 20, 24, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 50%;
-  cursor: pointer;
+  cursor: default;
   opacity: 0;
   transition: opacity 0.15s ease;
   pointer-events: auto;
@@ -1986,7 +1993,7 @@ input:not([type]) {
   height: 9px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.4);
-  cursor: pointer;
+  cursor: default;
   padding: 0;
 }
 
@@ -2021,7 +2028,7 @@ input:not([type]) {
   border: 1.5px dashed rgba(120, 170, 255, 0.55);
   border-radius: 2px;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
 }
 .page-editimg:hover {
   border-color: rgba(120, 170, 255, 0.95);
@@ -2057,7 +2064,7 @@ input:not([type]) {
   background: transparent;
   border: none;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
 }
 .page-editvec-del {
   position: absolute;
@@ -2072,7 +2079,7 @@ input:not([type]) {
   color: #fff;
   font-size: 14px;
   font-weight: 700;
-  cursor: pointer;
+  cursor: default;
   z-index: 20; /* above the reused image transform overlay */
 }
 .page-editvec-del:hover {
@@ -2107,7 +2114,7 @@ input:not([type]) {
   padding: 0;
   border: none;
   background: none;
-  cursor: pointer;
+  cursor: default;
 }
 .page-editvec-width {
   width: 48px;
@@ -2151,7 +2158,7 @@ input:not([type]) {
   background: #fff;
   border: 1.5px solid var(--accent, #3b82f6);
   pointer-events: auto;
-  cursor: pointer;
+  cursor: default;
   box-sizing: border-box;
 }
 .page-imgtx-handle {
@@ -2190,7 +2197,7 @@ input:not([type]) {
   border: 1.5px solid var(--accent, #3b82f6);
   transform: rotate(45deg);
   pointer-events: auto;
-  cursor: pointer;
+  cursor: default;
   box-sizing: border-box;
 }
 
@@ -2237,7 +2244,7 @@ input:not([type]) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  cursor: pointer;
+  cursor: default;
 }
 .measure-result {
   color: #fbbf24;
@@ -2661,7 +2668,7 @@ input:not([type]) {
   border-radius: 3px;
   box-shadow: inset 0 0 0 1px var(--swatch-edge);
   background: none;
-  cursor: pointer;
+  cursor: default;
 }
 .page-editpara-ctl input[type='color']::-webkit-color-swatch-wrapper {
   padding: 2px;
@@ -2769,7 +2776,7 @@ input:not([type]) {
   color: var(--text);
   font-size: 11px;
   font-weight: 700;
-  cursor: pointer;
+  cursor: default;
   line-height: 1;
 }
 .page-editpara-style-i {
@@ -2822,7 +2829,7 @@ input:not([type]) {
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: default;
 }
 .page-edittext-convert:hover {
   background: rgba(255, 255, 255, 0.3);
@@ -2974,7 +2981,7 @@ input:not([type]) {
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(16, 185, 129, 0.9);
   border-radius: 1px;
-  cursor: pointer;
+  cursor: default;
 }
 
 .page-form-check.pending {
@@ -2985,7 +2992,7 @@ input:not([type]) {
   width: 70%;
   height: 70%;
   margin: 0;
-  cursor: pointer;
+  cursor: default;
 }
 
 .page-form-radio {
@@ -2995,7 +3002,7 @@ input:not([type]) {
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(16, 185, 129, 0.9);
   border-radius: 50%;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
 }
 
@@ -3054,7 +3061,7 @@ input:not([type]) {
 }
 
 .page-form-sig.signable {
-  cursor: pointer;
+  cursor: default;
   background: rgba(139, 92, 246, 0.16);
 }
 
@@ -3091,7 +3098,7 @@ input:not([type]) {
   border-radius: 3px;
   border: 1px solid #525252;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
 }
 
 .page-edittext-colorchip.selected {
@@ -3107,7 +3114,7 @@ input:not([type]) {
   background: transparent;
   border: none;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
 }
 
 .page-form-button:hover {
@@ -3778,7 +3785,7 @@ input:not([type]) {
   color: #d9d9de;
   background: #232327;
   border: 1px solid #333338;
-  cursor: pointer;
+  cursor: default;
   transition: background 120ms, border-color 120ms;
 }
 .home-action:hover {
@@ -3831,7 +3838,7 @@ input:not([type]) {
 .home-section-action {
   font-size: 12px;
   color: var(--text-dim);
-  cursor: pointer;
+  cursor: default;
 }
 .home-section-action:hover {
   color: #d9d9de;
@@ -3874,7 +3881,7 @@ input:not([type]) {
   padding-block: 9px;
   padding-inline: 10px 14px;
   text-align: start;
-  cursor: pointer;
+  cursor: default;
 }
 .home-recent-remove {
   display: flex;
@@ -3886,7 +3893,7 @@ input:not([type]) {
   margin-inline-end: 8px;
   border-radius: 5px;
   color: var(--text-dim);
-  cursor: pointer;
+  cursor: default;
 }
 .home-recent-remove:hover {
   color: #e7e7ea;
@@ -3972,7 +3979,7 @@ input:not([type]) {
   text-align: center;
   border-radius: 3px;
   color: #9c9ca4;
-  cursor: pointer;
+  cursor: default;
   font-size: 13px;
 }
 .tool-dock-btn:hover {
@@ -4103,7 +4110,7 @@ input:not([type]) {
   font-weight: 500;
   padding: 2px 10px;
   border-radius: 3px;
-  cursor: pointer;
+  cursor: default;
 }
 .canvas-status-action:disabled {
   opacity: 0.6;
@@ -4198,7 +4205,7 @@ input:not([type]) {
   border: 1px solid #3a3a3a;
   border-radius: 3px;
   padding: 1px 8px;
-  cursor: pointer;
+  cursor: default;
 }
 .properties-bar-action:hover {
   background: #333;
@@ -4211,7 +4218,7 @@ input:not([type]) {
   line-height: 16px;
   text-align: center;
   color: var(--text-dim, #a0a0a8);
-  cursor: pointer;
+  cursor: default;
   border-radius: 3px;
 }
 .properties-bar-close:hover {
@@ -4532,7 +4539,7 @@ input:not([type]) {
   border-radius: 4px;
   padding: 3px 8px;
   font-size: 12px;
-  cursor: pointer;
+  cursor: default;
 }
 .recal-popover button:disabled {
   opacity: 0.6;
@@ -5146,7 +5153,7 @@ input:not([type]) {
   background: rgba(20, 160, 150, 0.9);
   border: none;
   border-radius: 2px;
-  cursor: pointer;
+  cursor: default;
 }
 /* A row is drawn evidence, not a control: it takes no pointer at all. */
 .page-table-row {
@@ -5225,7 +5232,7 @@ input:not([type]) {
   background: rgba(251, 191, 36, 0.12);
   border: 1.5px dashed rgba(251, 191, 36, 0.9);
   border-radius: 2px;
-  cursor: pointer;
+  cursor: default;
   text-align: start;
 }
 .page-a11y-finding.is-selected {
@@ -5417,7 +5424,7 @@ input:not([type]) {
   background: color-mix(in srgb, #38bdf8 8%, transparent);
   border: 1px solid color-mix(in srgb, #38bdf8 55%, transparent);
   border-radius: 2px;
-  cursor: pointer;
+  cursor: default;
 }
 .page-link-region:hover {
   background: color-mix(in srgb, #38bdf8 18%, transparent);
@@ -5656,4 +5663,25 @@ input:not([type]) {
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+
+/* ── Cursor and selection policy (desktop convention) ─────────────────────────
+   The arrow is the default everywhere, including buttons, tabs, menus and
+   labels. The pointing hand is reserved for web links, so that when it does
+   appear it means "this opens a web page"; the renderer sets it nowhere
+   (tests/cursor-policy.test.ts holds the line). Pages and anything carried are the open and closed hand.
+
+   App chrome is not selectable text. Without this, a text selection that
+   starts in a page's text layer (drag, or Shift+Arrow) runs on into the tool
+   panels, tabs and toolbars around it. Content that is meant to be read or
+   copied opts back in below. Dialogs and menus render in portals outside
+   `.app-shell` and are unaffected. */
+.app-shell {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app-shell :is(input, textarea, select, [contenteditable]:not([contenteditable='false']), pre, code, .textLayer, .textLayer *, .selectable, .selectable *) {
+  user-select: text;
+  -webkit-user-select: text;
 }

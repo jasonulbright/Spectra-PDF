@@ -3595,7 +3595,7 @@ function PageCellImpl({
             // Other modes keep pointer-events:
             // none, so bands, strokes and page pickup behave exactly as before.
             ...(tool === 'select'
-              ? { pointerEvents: 'auto', cursor: isTransformable(a) ? 'move' : 'pointer' }
+              ? { pointerEvents: 'auto', cursor: isTransformable(a) ? 'move' : 'default' }
               : {}),
           }}
           onPointerDown={

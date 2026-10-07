@@ -241,7 +241,7 @@ export function FormsPanel(): React.ReactElement {
             ))}
           </fieldset>
           <div className="shrink-0 flex items-center gap-4 pt-2 border-t border-neutral-800">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-400">
+            <label className="flex items-center gap-2 cursor-default text-sm text-neutral-400">
               <input
                 data-testid="forms-flatten"
                 type="checkbox"
@@ -441,7 +441,7 @@ function FieldRow({
 
   if (field.type === 'checkbox') {
     return (
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-default">
         <input
           data-testid={testId}
           type="checkbox"

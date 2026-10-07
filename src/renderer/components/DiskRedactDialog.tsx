@@ -391,7 +391,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
             }
           />
 
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-default">
             <input
               type="checkbox"
               data-testid="disk-redact-inplace"
@@ -562,7 +562,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
           </fieldset>
 
           <div>
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 checked={includeSigned}

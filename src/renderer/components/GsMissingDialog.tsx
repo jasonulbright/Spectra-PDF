@@ -58,7 +58,7 @@ export function GsMissingDialog({ onClose }: GsMissingDialogProps): React.ReactE
         </div>
 
         <div className="px-5 pb-1">
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-default">
             <input
               type="checkbox"
               data-testid="gs-missing-dont-ask"

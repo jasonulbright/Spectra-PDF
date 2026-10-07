@@ -7975,7 +7975,7 @@ export function WorkspaceCanvasView({
           </div>
           {nfType === 'text' && (
             <>
-              <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+              <label className="flex items-center gap-2 cursor-default text-xs text-neutral-400">
                 <input
                   type="checkbox"
                   checked={nfMultiline}
@@ -7984,7 +7984,7 @@ export function WorkspaceCanvasView({
                 />
                 {tChrome('canvas.newfield.multiline')}
               </label>
-              <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+              <label className="flex items-center gap-2 cursor-default text-xs text-neutral-400">
                 <input
                   data-testid="new-field-comb"
                   type="checkbox"

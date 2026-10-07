@@ -95,7 +95,7 @@ export function StandardsAlterations({
       )}
       {notices.length > 0 && (
         <details data-testid="standards-notices">
-          <summary className="cursor-pointer text-xs text-neutral-400">
+          <summary className="cursor-default text-xs text-neutral-400">
             {tChrome('panel.standards.notices')}
           </summary>
           <ul className="mt-1 flex flex-col gap-0.5">

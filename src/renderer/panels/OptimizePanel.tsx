@@ -330,7 +330,7 @@ export function OptimizePanel(): React.ReactElement {
 
       <div className="flex flex-col gap-2">
         {checks.map((c) => (
-          <label key={c.label} className="flex items-start gap-2 cursor-pointer group">
+          <label key={c.label} className="flex items-start gap-2 cursor-default group">
             <input type="checkbox" checked={c.checked} onChange={(e) => c.set(e.target.checked)}
               className="mt-0.5 accent-blue-600" />
             <div>
