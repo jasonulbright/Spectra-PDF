@@ -66,3 +66,30 @@ describe('computeReorderTarget — multi-document file (manifest partitions)', (
     expect(computeReorderTarget(multi, ['a0'], 4)).toEqual({ toDocId: 'B', toIndex: 2 });
   });
 });
+
+// An external file drop on the Pages panel (#42) inserts at a flat gap with
+// NOTHING moving: the gap maps to the page it sits before, or after the last.
+describe('computeReorderTarget — external insert (no moving pages)', () => {
+  const parts: ReorderItem[] = [
+    { docId: 'A', pageId: 'a0' },
+    { docId: 'A', pageId: 'a1' },
+    { docId: 'B', pageId: 'b0' },
+  ];
+
+  it('between page 1 and page 2 inserts at index 1', () => {
+    expect(computeReorderTarget(single, [], 1)).toEqual({ toDocId: 'd', toIndex: 1 });
+  });
+
+  it('above the first page inserts at 0; below the last appends', () => {
+    expect(computeReorderTarget(single, [], 0)).toEqual({ toDocId: 'd', toIndex: 0 });
+    expect(computeReorderTarget(single, [], 5)).toEqual({ toDocId: 'd', toIndex: 5 });
+  });
+
+  it('a gap at a partition boundary lands at the head of the next document', () => {
+    expect(computeReorderTarget(parts, [], 2)).toEqual({ toDocId: 'B', toIndex: 0 });
+  });
+
+  it('an empty panel has nowhere to insert', () => {
+    expect(computeReorderTarget([], [], 0)).toBe(null);
+  });
+});
