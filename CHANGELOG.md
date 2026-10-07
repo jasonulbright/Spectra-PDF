@@ -4,7 +4,10 @@
 
 *Released 2026-10-07*
 
-**Drop files between page thumbnails**
+**Drop files between page thumbnails, and a loading tab while a PDF opens**
+
+### New
+- Opening a PDF now shows a loading tab with the file name and a spinner right away, instead of leaving the start screen unchanged until the document appears. Closing the tab cancels the open.
 
 ### Fixed
 - Dropping an image, Office file or text file onto the Pages panel now converts it and inserts the new pages at the gap under the pointer, with an insertion marker while you drag.
