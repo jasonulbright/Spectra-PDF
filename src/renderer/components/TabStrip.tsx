@@ -26,6 +26,8 @@ import {
 } from '../lib/tab-drag';
 import { TEST_HARNESS_ENABLED, registerTabDrag } from '../testHarness';
 import { tabDrag, type PhysicalScreenPoint } from '../lib/tauri-bridge';
+import { pendingOpens } from '../lib/pending-opens';
+import { usePendingOpens } from '../hooks/usePendingOpens';
 
 // The tab strip: Home | Tools | one tab per open
 // document. A 1:1 evolution of the old Home/Tools/Canvas switcher + the
@@ -85,6 +87,10 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
   const dispatch = useAppDispatch();
   const focused = state.ui.focusedTab;
   const docPaths = tabFilePaths(state);
+  // Opens still in flight (issue #43). While one's loading pane shows, it is
+  // the active tab and no real tab is.
+  const pending = usePendingOpens();
+  const pendingFocused = pending.focused;
 
   const isFileDirty = useCallback(
     (path: string): boolean => {
@@ -106,7 +112,7 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
     const ro = new ResizeObserver(measure);
     ro.observe(lane);
     return () => ro.disconnect();
-  }, [docPaths.length]);
+  }, [docPaths.length, pending.items.length]);
 
   // Keep the focused doc tab in view when focus changes (Ctrl+Tab, open).
   useEffect(() => {
@@ -117,7 +123,10 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [focused]);
 
-  const focus = (tab: FocusedTab) => dispatch({ type: 'UI_FOCUS_TAB', tab });
+  const focus = (tab: FocusedTab) => {
+    pendingOpens.focus(null);
+    dispatch({ type: 'UI_FOCUS_TAB', tab });
+  };
 
   // The box Rust hit-tests, republished whenever the strip can have moved
   // inside the window or the tab count relaid it out.
@@ -230,8 +239,11 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
       <button
         type="button"
         data-testid="tab-home"
-        onClick={() => invokeCommand('view.home')}
-        className={`${tabBase} ${focused === 'home' ? activeCls : idleCls}`}
+        onClick={() => {
+          pendingOpens.focus(null);
+          invokeCommand('view.home');
+        }}
+        className={`${tabBase} ${focused === 'home' && pendingFocused === null ? activeCls : idleCls}`}
       >
         <ChromeIcon icon="home" size={14} className="opacity-80" />
         {tChrome('chrome.tabs.home')}
@@ -247,7 +259,7 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
         {docPaths.map((path, i) => {
           const f = state.files.get(path);
           if (!f) return null;
-          const active = isDocTab(focused) && focused.doc === path;
+          const active = pendingFocused === null && isDocTab(focused) && focused.doc === path;
           const dirty = isFileDirty(path);
           return (
             <div
@@ -290,6 +302,41 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
             </div>
           );
         })}
+        {/* Opens in flight. No `data-tab-path`: they are not documents, so
+            they neither drag nor count in the drop-gap arithmetic. Closing
+            one cancels the open. */}
+        {pending.items.map((p) => (
+          <div
+            key={`pending:${p.path}`}
+            data-pending-path={p.path}
+            data-testid="tab-pending"
+            aria-busy="true"
+            onClick={() => pendingOpens.focus(p.path)}
+            onAuxClick={(e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                pendingOpens.cancel(p.path);
+              }
+            }}
+            title={tChrome('chrome.tabs.opening', { name: p.name })}
+            className={`${tabBase} ${pendingFocused === p.path ? activeCls : idleCls}`}
+          >
+            <span className="inline-block w-3 h-3 border-2 border-neutral-500 border-t-blue-400 rounded-full animate-spin shrink-0" />
+            <TabName name={p.name} />
+            <button
+              type="button"
+              data-testid="tab-pending-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                pendingOpens.cancel(p.path);
+              }}
+              title={tChrome('chrome.tabs.cancelOpen', { name: p.name })}
+              className="ms-1 w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-700 opacity-0 group-hover:opacity-100 shrink-0"
+            >
+              <ChromeIcon icon="close" size={11} />
+            </button>
+          </div>
+        ))}
       </div>
 
       {/* Where the tab will actually land — the gap the release honours,

@@ -78,6 +78,10 @@ export const CHROME_STRINGS = {
   'chrome.tabs.home': 'Home',
   'chrome.tabs.closeFile': 'Close {{name}}',
   'chrome.tabs.allOpenDocuments': 'All open documents',
+  // A tab whose document is still opening (issue #43): its tooltip and its
+  // loading pane, and the close × / button that cancels it.
+  'chrome.tabs.opening': 'Opening {{name}}…',
+  'chrome.tabs.cancelOpen': 'Cancel opening {{name}}',
   'chrome.toolbar.mainLabel': 'Main toolbar',
   'chrome.toolbar.titleWithShortcut': '{{title}} ({{shortcut}})',
   'chrome.toolbar.customize': 'Customize Toolbar…',

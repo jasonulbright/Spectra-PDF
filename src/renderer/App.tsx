@@ -211,6 +211,9 @@ import {
 import { claimPaths, createClaimHolds, departedImportSources, downgradeImportSourceClaims, releasePaths, retainedImportSources, soleOwner, type ClaimRefusal } from './lib/window-claims';
 import { confirmDirtySnapshots, dirtyPromptSnapshots, sameDirtyPromptSnapshot, saveListedFiles, type DirtyPromptSnapshot } from './lib/dirty-prompt';
 import { createOpenFlights, createPathOperationLock, openPathOnce } from './lib/open-flights';
+import { pendingOpens, type PendingOpenHandle } from './lib/pending-opens';
+import { usePendingOpens } from './hooks/usePendingOpens';
+import { PendingOpenPane } from './components/PendingOpenPane';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
@@ -1294,6 +1297,10 @@ function AppContent(): React.ReactElement {
     // Held from before the claim is sent until the finally: no release by
     // another flow of this window drops the claim this open works under.
     let holding: string[] = [];
+    // One placeholder tab per path this batch will actually read (issue #43):
+    // the user sees the request land before the claim, the working copy and
+    // the engine's first reads. Removed in the finally whatever happened.
+    const placeholders = new Map<string, PendingOpenHandle>();
     try {
       // THE PATH-IDENTITY GATE. File identity is the raw path string
       // app-wide (`state.files` keys, tabs, recents, activeFileId,
@@ -1319,6 +1326,20 @@ function AppContent(): React.ReactElement {
       // OPEN_FILE below — so a failed IPC here can never keep a same-window
       // web-open from routing Save to Save As, nor abort the open itself.
       const canonicalSet = [...new Set(canonical)];
+      // Not for a path already open as a document (that is a re-activation,
+      // instant) nor one another open of this window is already reading (its
+      // placeholder stands for both).
+      for (const filePath of canonicalSet) {
+        const existing = readState().files.get(filePath);
+        if (existing && !existing.importOnly) continue;
+        if (openFlights.current.pending(filePath)) continue;
+        const handle = pendingOpens.begin(filePath, filePath.split(/[\\/]/).pop() || filePath);
+        if (handle) placeholders.set(filePath, handle);
+      }
+      if (opts?.focus !== false) {
+        const first = placeholders.keys().next();
+        if (!first.done) pendingOpens.focus(first.value);
+      }
       const recoveredOrigins = opts?.webOrigin
         ? null
         : await app.webOriginsFor(canonicalSet).catch(() => ({}) as Record<string, string>);
@@ -1339,6 +1360,7 @@ function AppContent(): React.ReactElement {
       holding = canonicalSet;
       claimHolds.current.hold(holding);
       const { granted, refused } = await claimPaths(canonicalSet, 'write');
+      for (const r of refused) pendingOpens.settle(placeholders.get(r.path));
       if (refused.length > 0) void reportClaimRefusal(refused, 'window');
       unopened = new Set(granted);
       if (opts?.webOrigin) {
@@ -1374,6 +1396,10 @@ function AppContent(): React.ReactElement {
             changed = true;
           },
           open: () => sourcePathOperations.current.run([filePath], async () => {
+            // Closed while it waited its turn: nothing has been read yet, and
+            // like a cancelled password prompt it is no verdict at all.
+            const placeholder = placeholders.get(filePath);
+            if (placeholder?.cancelled) return false;
             if (readState().files.get(filePath)?.importOnly) {
               // Upgrading a ghost REPLACES bytes that other documents' pending
               // pages still point into (`PageRef.sourceDocId` + a positional
@@ -1409,6 +1435,15 @@ function AppContent(): React.ReactElement {
               return false;
             }
             if (!prepared) return false; // cancelled encrypted file
+            if (placeholder?.cancelled) {
+              // Closed while it was opening: the copy is this funnel's to
+              // throw away, exactly as a refused open's would be.
+              await discardDocumentWorkingCopy(filePath, prepared.workingPath, {
+                releaseCredentials,
+                removeWorkingCopy: file.remove,
+              }).catch(() => {});
+              return false;
+            }
             outcomes.push({ name: fileName, reason: null });
             dispatch({
               type: 'OPEN_FILE',
@@ -1417,6 +1452,13 @@ function AppContent(): React.ReactElement {
               index: opts?.index === undefined ? undefined : opts.index + inserted,
               webOrigin: originFor(filePath),
             });
+            // The placeholder becomes the document. If its loading pane was
+            // showing, the document shows now rather than at the batch's end.
+            const wasShowing = pendingOpens.snapshot().focused === filePath;
+            pendingOpens.settlePath(filePath);
+            if (wasShowing && opts?.focus !== false) {
+              dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: filePath } });
+            }
             inserted += 1;
             recent = await recordRecentOpen(recent, filePath, Date.now(), originFor(filePath));
             const recorded = recent.find((entry) => entry.path === filePath);
@@ -1427,6 +1469,7 @@ function AppContent(): React.ReactElement {
             return true;
           }),
         });
+        pendingOpens.settle(placeholders.get(filePath));
         await opts?.onPathOpenResult?.(filePath, step === 'opened' || step === 'reactivated');
         // A document holds the claim now; any other path is released in the
         // finally unless this window uses it by then.
@@ -1447,6 +1490,7 @@ function AppContent(): React.ReactElement {
       // A claim outlives only what it protects: a cancelled password prompt or
       // a file that threw mid-batch must not leave this window holding a path
       // it never opened.
+      for (const handle of placeholders.values()) pendingOpens.settle(handle);
       claimHolds.current.drop(holding);
       if (unopened.size > 0) void releasePaths([...unopened], pathInUse);
     }
@@ -1461,7 +1505,19 @@ function AppContent(): React.ReactElement {
     // can must not stay pending until they get to it.
     if (opts?.reportFailures !== false) void reportOpenSummary(summary);
     return summary;
-  }, [dispatch, readState, pathInUse, prepareFileBytes, applyInitialView, reportClaimRefusal, reportOpenSummary]);
+  }, [dispatch, readState, pathInUse, prepareFileBytes, releaseCredentials, applyInitialView, reportClaimRefusal, reportOpenSummary]);
+
+  // A loading pane stands over the content only until the user goes
+  // somewhere: any change of the focused tab takes it down (the open itself
+  // carries on, and its tab stays in the strip).
+  const pending = usePendingOpens();
+  const pendingShowing = pending.focused === null
+    ? null
+    : pending.items.find((p) => p.path === pending.focused) ?? null;
+  const focusedTabKey = isDocTab(focusedTab) ? `doc:${focusedTab.doc}` : focusedTab;
+  useEffect(() => {
+    pendingOpens.focus(null);
+  }, [focusedTabKey]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops). Each file is registered
@@ -3981,7 +4037,13 @@ function AppContent(): React.ReactElement {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-          <main className="app-content flex-1 flex flex-col overflow-hidden">
+          <main className="app-content relative flex-1 flex flex-col overflow-hidden">
+          {pendingShowing && (
+            <PendingOpenPane
+              name={pendingShowing.name}
+              onCancel={() => pendingOpens.cancel(pendingShowing.path)}
+            />
+          )}
           {focusedTab === 'home' ? (
             <HomeTab
               recentFiles={recentFiles}
