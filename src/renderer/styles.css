@@ -3114,7 +3114,7 @@ input:not([type]) {
   background: transparent;
   border: none;
   padding: 0;
-  cursor: default;
+  cursor: pointer;
 }
 
 .page-form-button:hover {
@@ -5424,7 +5424,7 @@ input:not([type]) {
   background: color-mix(in srgb, #38bdf8 8%, transparent);
   border: 1px solid color-mix(in srgb, #38bdf8 55%, transparent);
   border-radius: 2px;
-  cursor: default;
+  cursor: pointer;
 }
 .page-link-region:hover {
   background: color-mix(in srgb, #38bdf8 18%, transparent);
@@ -5669,8 +5669,9 @@ input:not([type]) {
 /* ── Cursor and selection policy (desktop convention) ─────────────────────────
    The arrow is the default everywhere, including buttons, tabs, menus and
    labels. The pointing hand is reserved for web links, so that when it does
-   appear it means "this opens a web page"; the renderer sets it nowhere
-   (tests/cursor-policy.test.ts holds the line). Pages and anything carried are the open and closed hand.
+   appear it means "this follows a link". The one place that is true is the
+   content of a PDF: link regions and form pushbuttons, listed in
+   tests/cursor-policy.test.ts, which fails if anything else takes the hand. Pages and anything carried are the open and closed hand.
 
    App chrome is not selectable text. Without this, a text selection that
    starts in a page's text layer (drag, or Shift+Arrow) runs on into the tool
