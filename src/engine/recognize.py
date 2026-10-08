@@ -41,6 +41,18 @@ from . import budget, platform_support
 # materially higher costs time for no accuracy.
 OCR_DPI = 300
 
+# A page that is ONE placed picture -- a scan, or a screenshot saved as a PDF --
+# is read at the picture's own resolution plus headroom, never above OCR_DPI.
+# Rendering such a page at a flat 300 dpi blows a low-resolution picture up far
+# past what tesseract reads best: a 96-dpi screenshot becomes 3.1x its own
+# pixels. Measured on one, 1.0-1.5x found the most text and 3x the least. A real
+# 300-dpi (or higher) scan is unaffected: 1.5x its resolution is past the cap.
+# Pages with text, vectors or several pictures keep the flat OCR_DPI.
+OCR_SOURCE_HEADROOM = 1.5
+# The floor keeps a very low-resolution picture from being rendered too small
+# to read at all; 150 dpi is 2.1x a 72-dpi source.
+OCR_MIN_DPI = 150
+
 # Tesseract TSV columns. `level` 5 is a WORD row; the coarser levels (page,
 # block, paragraph, line) describe layout and are not what we index.
 _LEVEL_WORD = 5
@@ -75,7 +87,34 @@ def _tesseract_exe(tesseract_path: str) -> Path:
     return exe
 
 
-def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
+def _ocr_dpi_for_page(file: str, page: int) -> int:
+    """The resolution to rasterise ONE page at for recognition.
+
+    A page that is a single placed picture is read at its source resolution
+    times OCR_SOURCE_HEADROOM, clamped to [OCR_MIN_DPI, OCR_DPI]; every other
+    page, and any page this cannot classify, gets OCR_DPI exactly as before.
+    Strictly best-effort: a document that cannot be opened here, an encrypted
+    file, a broken content stream -- none may stop recognition, which falls back
+    to the flat density the rest of the product assumes.
+    """
+    try:
+        from engine.credentials import open_pdf
+
+        from .mrc import _classify_page
+
+        with open_pdf(file) as pdf:
+            candidate, _why = _classify_page(pdf, pdf.pages[page - 1], page)
+    except Exception:
+        return OCR_DPI
+    if candidate is None or candidate.source_dpi <= 0:
+        return OCR_DPI
+    wanted = round(candidate.source_dpi * OCR_SOURCE_HEADROOM)
+    return max(OCR_MIN_DPI, min(OCR_DPI, wanted))
+
+
+def _render_page_png(
+    file: str, page: int, gs_path: str, out_png: Path, dpi: int = OCR_DPI
+) -> None:
     """Rasterise ONE page with the configured Ghostscript.
 
     Same device/idiom as image_export.py. -dFirstPage/-dLastPage bound the work
@@ -96,7 +135,7 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
         "-dBATCH",
         "-dSAFER",
         "-sDEVICE=png16m",
-        f"-r{OCR_DPI}",
+        f"-r{dpi}",
         "-dUseCropBox",
         f"-dFirstPage={page}",
         f"-dLastPage={page}",
@@ -403,7 +442,9 @@ def recognize(
 
     with tempfile.TemporaryDirectory(prefix="opdfs-ocr-") as tmp:
         png = Path(tmp) / "page.png"
-        _render_page_png(str(input_path), page, gs_path, png)
+        _render_page_png(
+            str(input_path), page, gs_path, png, _ocr_dpi_for_page(str(input_path), page)
+        )
         try:
             text, words = _run_tesseract(png, lang, exe, tessdata)
         except _TesseractFailure as exc:
