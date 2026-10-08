@@ -242,6 +242,25 @@ export const WORKBENCH_STRINGS = {
     'The submission was accepted by {{url}}, and the reply is {{type}} ({{bytes}} bytes). This app does not display a page it was sent. Save the reply to a file you can open yourself?',
   'app.formButton.submitFileReplyUnknown': 'a file of an unnamed type',
   'app.formButton.submitReplySaved': 'The reply was saved to:\n\n{{file}}',
+  // Following a link in the reading view (lib/link-follow.ts).
+  'app.link.title': 'Link',
+  'app.link.externalTitle': 'Link — web address',
+  'app.link.web':
+    'This link goes to:\n\n{{url}}\n\nThis app never opens web addresses itself. Copy the address to the clipboard?',
+  'app.link.webScheme':
+    'This link uses “{{scheme}}”:\n\n{{url}}\n\nOnly http, https and mailto addresses are offered. Nothing was copied or opened.',
+  'app.link.webMalformed':
+    'This link’s address cannot be shown exactly as it would be used, so it was not copied or opened:\n\n{{url}}',
+  'app.link.pageUnresolved': 'This link goes to a page this document no longer has.',
+  'app.link.namedUnresolved': 'This link goes to “{{name}}”, which this document does not declare.',
+  'app.link.openPdf': 'This link opens another PDF:\n\n{{file}}\n\nOpen it in this app?',
+  'app.link.fileNotRun':
+    'This link names a file that is not a PDF:\n\n{{file}}\n\nThis app never runs other files.',
+  'app.link.fileRemote':
+    'This link names a file on a network share or the web:\n\n{{file}}\n\nThis app does not follow it.',
+  'app.link.launch': 'This link asks the system to run:\n\n{{file}}\n\nThis app never runs programs.',
+  'app.link.unsupported': 'This link carries a “{{action}}” action, which this app does not follow.',
+  'app.link.none': 'This link goes nowhere.',
 
   'app.sanitize.title': 'Document is signed',
   'app.sanitize.signed_one':

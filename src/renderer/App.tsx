@@ -29,7 +29,8 @@ import {
   parseSignaturePolicy,
   type SignedEditDecision,
 } from './lib/signatures';
-import type { LinkSpec } from './lib/links';
+import type { LinkSpec, LinkTarget } from './lib/links';
+import { namedDestinationPage, planLinkFollow } from './lib/link-follow';
 import { toEngineFormat } from './lib/af-emit';
 import {
   toEngineAction,
@@ -2286,6 +2287,96 @@ function AppContent(): React.ReactElement {
     ],
   );
 
+  // A link the reader clicked in the reading view (`lib/link-follow.ts` holds
+  // the routing and its reasons). Read-only against the document: a jump moves
+  // the view, and everything that would leave this document asks first. A web
+  // address is never opened — this app has no path that hands an address to
+  // the system browser — so confirming copies it, as a form button's does.
+  const handleFollowLink = useCallback(
+    async (link: { path: string; workingPath: string; target: LinkTarget }) => {
+      const title = tChrome('app.link.title');
+      const jump = async (page: number) => {
+        if (!(getCanvasServices()?.jumpToFilePage(link.path, page) ?? false)) {
+          await showNotice(title, tChrome('app.link.pageUnresolved'));
+        }
+      };
+      const plan = planLinkFollow(link.target, link.path);
+      switch (plan.kind) {
+        case 'page':
+          await jump(plan.page);
+          return;
+        case 'pageUnresolved':
+          await showNotice(title, tChrome('app.link.pageUnresolved'));
+          return;
+        case 'named': {
+          // Resolved at the click, not at open: a document with thousands of
+          // names pays nothing until a reader follows one.
+          let page: number | null;
+          try {
+            const listed = (await call('list_named_destinations', { file: link.workingPath })) as unknown as {
+              destinations?: { name: string; page: number | null }[];
+            };
+            page = namedDestinationPage(listed.destinations, plan.name);
+          } catch (err) {
+            await showNotice(title, errorText(err));
+            return;
+          }
+          if (page === null) {
+            await showNotice(title, tChrome('app.link.namedUnresolved', { name: plan.name }));
+            return;
+          }
+          await jump(page);
+          return;
+        }
+        case 'web': {
+          const copy = await showProceedConfirm(
+            tChrome('app.link.externalTitle'),
+            tChrome('app.link.web', { url: plan.url }),
+          );
+          if (copy) await copyToClipboard(plan.url);
+          return;
+        }
+        case 'webRefused':
+          await showNotice(
+            title,
+            plan.reason === 'scheme'
+              ? tChrome('app.link.webScheme', { url: plan.url, scheme: plan.scheme ?? '' })
+              : tChrome('app.link.webMalformed', { url: plan.url }),
+          );
+          return;
+        case 'pdf': {
+          const proceed = await showProceedConfirm(title, tChrome('app.link.openPdf', { file: plan.path }));
+          if (!proceed) return;
+          await openByPaths([plan.path], { focus: true });
+          if (plan.page === null) return;
+          const [opened] = await app.canonicalizePaths([plan.path]).catch(() => [plan.path]);
+          // The open lands over the next renders; the jump is idempotent and
+          // no-ops until the page resolves (`openPathAtPage`'s bounded shape).
+          for (let i = 0; i < 15; i++) {
+            if (getCanvasServices()?.jumpToFilePage(opened, plan.page)) return;
+            await new Promise((r) => setTimeout(r, 120));
+          }
+          return;
+        }
+        case 'fileNotRun':
+          await showNotice(title, tChrome('app.link.fileNotRun', { file: plan.path }));
+          return;
+        case 'fileRemote':
+          await showNotice(title, tChrome('app.link.fileRemote', { file: plan.path }));
+          return;
+        case 'launch':
+          await showNotice(title, tChrome('app.link.launch', { file: plan.path }));
+          return;
+        case 'unsupported':
+          await showNotice(title, tChrome('app.link.unsupported', { action: plan.action }));
+          return;
+        default:
+          await showNotice(title, tChrome('app.link.none'));
+      }
+    },
+    [call, copyToClipboard, openByPaths, showNotice, showProceedConfirm],
+  );
+
   // Link authoring writes /Link annotations, so every link method is
   // annotate-class in the roster: the incremental tier preserves it, and only
   // a certification that forbids commenting has anything to say about it.
@@ -4113,6 +4204,7 @@ function AppContent(): React.ReactElement {
                   onSaveRedactionMarks={handleSaveRedactionMarks}
                   onWidgetAction={handleWidgetAction}
                   onAddLinks={handleAddLinks}
+                  onFollowLink={handleFollowLink}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onSaveFiles={handleSaveFiles}
                   onEditImage={handleEditImage}

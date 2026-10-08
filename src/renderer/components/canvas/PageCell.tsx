@@ -66,6 +66,7 @@ import type { SignatureAsset } from '../../lib/signature-assets';
 import { placeStrokes, signatureFootprint, smoothStrokes } from '../../lib/signature-assets';
 import { signatureCssFamily, signatureFaceById } from '../../lib/signature-fonts';
 import type { LinkRegion } from '../../lib/links';
+import { followLabel } from '../../lib/link-follow';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import { shownValue } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -1070,12 +1071,15 @@ interface PageCellProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
-  // The file's existing links, projected onto THIS page, shown while the
-  // Links tool is open. A link's rectangle is invisible by design in a
-  // finished document; painting every one during ordinary reading would show
-  // the author's scaffolding to the reader.
+  // The file's existing links, projected onto THIS page. With the Links tool
+  // open they are drawn so one can be picked and edited. With `linkFollow`
+  // (reading view, Select tool) they are there to be FOLLOWED and stay
+  // invisible until hovered or focused: a link's rectangle is invisible by
+  // design in a finished document, and painting every one during ordinary
+  // reading would show the author's scaffolding to the reader.
   linkRegions?: readonly LinkRegion[];
   onPickLink?: (region: LinkRegion) => void;
+  linkFollow?: boolean;
   selectedLink?: LinkRegion | null;
   // Add-Image band release: converts + hands off to App's picker+embed.
   onAddImageRect: (
@@ -1368,6 +1372,7 @@ function PageCellImpl({
   onSetLinkRect,
   linkRegions,
   onPickLink,
+  linkFollow,
   selectedLink,
   snapshotPlacement,
   onClearSnapshotPlacement,
@@ -3350,6 +3355,48 @@ function PageCellImpl({
     else if (note !== annotation.note) onUpdateAnnotation(docId, page.id, annotation.id, note);
   };
 
+  // A link region. The region arrives already projected into the frame shown
+  // now (the seed re-reads the composed rotation), so it is placed as-is.
+  const renderLinkRegion = (region: LinkRegion) => {
+    const follow = linkFollow ? followLabel(region.target) : null;
+    const label = follow ? tChrome(follow.key, follow.vars) : tChrome('canvas.link.regionTitle');
+    return (
+      <button
+        key={`${region.page}:${region.index}`}
+        type="button"
+        data-testid={linkFollow ? 'link-follow' : 'link-region'}
+        data-link-page={region.page}
+        data-link-index={region.index}
+        data-link-kind={region.kind}
+        className={
+          'page-link-region' +
+          (linkFollow ? ' page-link-region-follow' : '') +
+          (!linkFollow && selectedLink?.path === region.path && selectedLink?.workingPath === region.workingPath
+            && selectedLink?.buffer === region.buffer && selectedLink?.page === region.page && selectedLink?.index === region.index
+            ? ' page-link-region-selected'
+            : '')
+        }
+        title={label}
+        aria-label={label}
+        style={{
+          left: `${region.rect.x * 100}%`,
+          top: `${region.rect.y * 100}%`,
+          width: `${region.rect.w * 100}%`,
+          height: `${region.rect.h * 100}%`,
+        }}
+        // Editing: the band listens on pointerdown, and a press that is picking
+        // an existing link must not also start drawing a new one over it.
+        // Following: a press on a link is the link's, not the page's — it must
+        // not also start a marquee or clear the selection under it.
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPickLink?.(region);
+        }}
+      />
+    );
+  };
+
   return (
     <div
       data-page-id={page.id}
@@ -3488,6 +3535,10 @@ function PageCellImpl({
           ocrSelection={ocrSelection}
         />
       )}
+      {/* Followed links sit just above the text layer and BELOW every overlay
+          that follows: a comment, a form field or a placement card drawn over
+          a link keeps its own press. */}
+      {linkFollow && linkRegions?.map(renderLinkRegion)}
       {(page.annotations ?? []).map((raw) => {
         // A live manipulation gesture previews through the SAME projection as
         // committed geometry — the override is stored-frame, `da` below does
@@ -4830,40 +4881,7 @@ function PageCellImpl({
           );
         })()
       )}
-      {linkRegions?.map((region) => (
-        // The region arrives already projected into the frame shown now
-        // (the seed re-reads the composed rotation), so it is placed as-is.
-        <button
-          key={`${region.page}:${region.index}`}
-          type="button"
-          data-testid="link-region"
-          data-link-page={region.page}
-          data-link-index={region.index}
-          data-link-kind={region.kind}
-          className={
-            'page-link-region' +
-            (selectedLink?.path === region.path && selectedLink?.workingPath === region.workingPath
-              && selectedLink?.buffer === region.buffer && selectedLink?.page === region.page && selectedLink?.index === region.index
-              ? ' page-link-region-selected'
-              : '')
-          }
-          title={tChrome('canvas.link.regionTitle')}
-          aria-label={tChrome('canvas.link.regionTitle')}
-          style={{
-            left: `${region.rect.x * 100}%`,
-            top: `${region.rect.y * 100}%`,
-            width: `${region.rect.w * 100}%`,
-            height: `${region.rect.h * 100}%`,
-          }}
-          // The band listens on pointerdown; a press that is picking an
-          // existing link must not also start drawing a new one over it.
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onPickLink?.(region);
-          }}
-        />
-      ))}
+      {!linkFollow && linkRegions?.map(renderLinkRegion)}
       {snapshotPlacement && (
         (() => {
           const r = projectMarkRect(snapshotPlacement, page.rotation);

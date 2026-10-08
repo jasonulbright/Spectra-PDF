@@ -28,6 +28,7 @@ import {
   type LinkRecord,
   type LinkRegion,
   type LinkSpec,
+  type LinkTarget,
 } from '../../lib/links';
 import {
   hasCustomLabels,
@@ -305,6 +306,9 @@ interface WorkspaceCanvasViewProps {
   // Author link regions from a text selection (same performOperation shape:
   // gate flush -> snapshot -> engine add_links -> reload, so it undoes).
   onAddLinks: (path: string, links: LinkSpec[]) => Promise<void>;
+  // Follow a link the reader clicked in the reading view (Select tool): a jump
+  // inside this document, or a confirmation for anything that leaves it.
+  onFollowLink: (link: { path: string; workingPath: string; target: LinkTarget }) => Promise<void>;
   // Persist OCR text layers into one file — same performOperation routing as
   // onRedactFile (gate flush -> snapshot -> engine apply_ocr_layer -> reload).
   onApplyOcrLayer: (path: string, pages: OcrApplyPage[]) => Promise<void>;
@@ -638,6 +642,7 @@ export function WorkspaceCanvasView({
   onSaveRedactionMarks,
   onWidgetAction,
   onAddLinks,
+  onFollowLink,
   onApplyOcrLayer,
   onSaveFiles,
   onEditImage,
@@ -3556,6 +3561,7 @@ export function WorkspaceCanvasView({
             index: entry.index,
             pageId: pageRef.id,
             kind: entry.kind,
+            target: entry.target_spec ?? { kind: 'none' },
             rect: pdfRectToDisplay(
               entry.rect,
               { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
@@ -3597,13 +3603,33 @@ export function WorkspaceCanvasView({
       page: region.page, index: region.index });
   }, [readState]);
 
-  // The overlays draw only while the Links tool is open. A link's rectangle is
-  // invisible by design in a finished document; painting every one during
-  // ordinary reading shows the author's scaffolding to the reader.
+  // On the BOARD the overlays draw only while the Links tool is open: a link's
+  // rectangle is invisible by design in a finished document, and a press on a
+  // board tile picks the page up, which a link button would swallow.
   const visibleLinkRegions = useMemo(
     () => (tool === 'linkdraw' ? linkRegions : NO_LINK_REGIONS),
     [tool, linkRegions],
   );
+  // In the READING view the same regions are also there under the Select tool,
+  // to be FOLLOWED rather than edited — invisible until hovered or focused
+  // (`.page-link-region-follow`). Under every other tool they are absent, so a
+  // link never takes a press from the Hand (which drags the page), a markup or
+  // edit tool that owns the pointer, or a form being filled.
+  const linkFollow = tool === 'select';
+  const readingLinkRegions = useMemo(
+    () => (tool === 'linkdraw' || tool === 'select' ? linkRegions : NO_LINK_REGIONS),
+    [tool, linkRegions],
+  );
+  const onFollowLinkRef = useRef(onFollowLink);
+  onFollowLinkRef.current = onFollowLink;
+  const onFollowRegion = useCallback((region: LinkRegion) => {
+    // A region read from bytes the file no longer has is not followed: its
+    // target may be one the current document does not carry. The re-seed for
+    // the new bytes is already queued.
+    const owner = filesRef.current.get(region.path);
+    if (owner?.buffer !== region.buffer || owner?.workingPath !== region.workingPath) return;
+    void onFollowLinkRef.current({ path: region.path, workingPath: region.workingPath, target: region.target });
+  }, []);
 
   const lastBuffersRef = useRef<Map<string, PdfBuffer | null>>(new Map());
   useEffect(() => {
@@ -7324,8 +7350,9 @@ export function WorkspaceCanvasView({
             onSetBeadRect,
             onSetSnapshotRect,
             onSetLinkRect,
-            linkRegions: visibleLinkRegions,
-            onPickLink,
+            linkRegions: readingLinkRegions,
+            linkFollow,
+            onPickLink: linkFollow ? onFollowRegion : onPickLink,
             selectedLink,
             snapshotPlacement: liveSnapshotPlacement,
             onClearSnapshotPlacement,

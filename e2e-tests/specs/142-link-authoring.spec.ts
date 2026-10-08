@@ -233,6 +233,50 @@ describe('link authoring', () => {
     expect(await $('[data-testid="link-edit-1-0-page"]').getValue()).toBe('3');
   });
 
+  it('while reading, the link is followed: invisible, the pointing hand, and a click jumps', async () => {
+    // Reading under the Select tool: the region is there to FOLLOW, not to edit.
+    expect(await invokeAppCommand('tools.select')).toBe(true);
+    await browser.waitUntil(async () => (await getState()).tool === 'select', { timeout: 10_000 });
+    await browser.waitUntil(async () => (await scrollTop()) === 0, {
+      timeout: 10_000,
+      timeoutMsg: 'the reading view is not at the link’s page',
+    });
+    const follow = $('[data-testid="link-follow"]');
+    await follow.waitForDisplayed({ timeout: 20_000 });
+    expect((await $$('[data-testid="link-region"]').getElements()).length).toBe(0);
+    // Invisible as the document draws it (a border of width 0), and the hand.
+    const look = (await browser.execute(() => {
+      const el = document.querySelector('[data-testid="link-follow"]') as HTMLElement;
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, border: cs.borderTopColor, cursor: cs.cursor, label: el.getAttribute('aria-label') };
+    })) as { bg: string; border: string; cursor: string; label: string | null };
+    expect(look.bg).toBe('rgba(0, 0, 0, 0)');
+    expect(look.border).toBe('rgba(0, 0, 0, 0)');
+    expect(look.cursor).toBe('pointer');
+    expect(look.label).toBe('Go to page 3');
+
+    await follow.click();
+    await browser.waitUntil(async () => (await scrollTop()) > 0, {
+      timeout: 10_000,
+      timeoutMsg: 'clicking the link in the reading view never jumped to page 3',
+    });
+
+    // The Hand holds the paper: no link takes its press.
+    expect(await invokeAppCommand('tools.hand')).toBe(true);
+    await browser.waitUntil(async () => (await getState()).tool === 'hand', { timeout: 10_000 });
+    expect((await $$('[data-testid="link-follow"]').getElements()).length).toBe(0);
+
+    // Back to where the next case expects to be: page 1, the link's editor open.
+    await $('[data-testid="page-nav-box"]').click();
+    await setReactInputValue('[data-testid="page-nav-box"]', '1');
+    await browser.keys(['Enter']);
+    await browser.waitUntil(async () => (await scrollTop()) === 0, { timeout: 10_000 });
+    await openLinksTool();
+    await $('[data-testid="link-region"]').waitForDisplayed({ timeout: 20_000 });
+    await $('[data-testid="link-region"]').click();
+    await $('[data-testid="link-edit-1-0-kind"]').waitForDisplayed({ timeout: 20_000 });
+  });
+
   it('retargets an existing link to a web address and asserts the /A payload', async () => {
     await setReactSelectValue('[data-testid="link-edit-1-0-kind"]', 'uri');
     await setReactInputValue('[data-testid="link-edit-1-0-url"]', 'https://retargeted.example');

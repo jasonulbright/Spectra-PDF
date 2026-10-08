@@ -5438,6 +5438,17 @@ input:not([type]) {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* Reading view: a link to FOLLOW. Invisible, as the document draws it; a faint
+   wash under the pointer and the focus ring for the keyboard say where it is.
+   The pointing hand comes from `.page-link-region` itself. */
+.page-link-region.page-link-region-follow {
+  background: transparent;
+  border-color: transparent;
+}
+.page-link-region.page-link-region-follow:hover {
+  background: color-mix(in srgb, #38bdf8 12%, transparent);
+  border-color: transparent;
+}
 
 /* Bookmarks-from-structure: the preview sits between the tree and the footer,
    so what is about to be written is read directly above the button that

@@ -17,6 +17,7 @@ import {
   emptyTarget,
   isAuthored,
   linksForPage,
+  groupLinksByPage,
   publishDrawnLink,
   publishPickedLink,
   subscribeDrawnLink,
@@ -223,12 +224,22 @@ describe('linksForPage', () => {
     index,
     pageId,
     kind: 'uri',
+    target: { kind: 'uri', url: 'https://example.com' },
     rect: { x: 0, y: 0, w: 0.1, h: 0.1 },
   });
 
   it('keeps only this page’s regions', () => {
     const all = [region('p1', 0), region('p2', 1), region('p1', 2)];
     expect(linksForPage(all, 'p1').map((r) => r.index)).toEqual([0, 2]);
+  });
+
+  it('groups once: the same page gets the same array on every look-up', () => {
+    const all = [region('p1', 0), region('p2', 1), region('p1', 2)];
+    const on = groupLinksByPage(all);
+    expect(on('p1').map((r) => r.index)).toEqual([0, 2]);
+    expect(on('p1')).toBe(on('p1'));
+    expect(on('p3')).toBe(linksForPage(undefined, 'p3'));
+    expect(groupLinksByPage(undefined)('p1')).toBe(linksForPage(undefined, 'p1'));
   });
 
   it('returns ONE shared empty array, so a page with no links does not re-render', () => {
