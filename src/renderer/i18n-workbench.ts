@@ -245,8 +245,10 @@ export const WORKBENCH_STRINGS = {
   // Following a link in the reading view (lib/link-follow.ts).
   'app.link.title': 'Link',
   'app.link.externalTitle': 'Link — web address',
-  'app.link.web':
-    'This link goes to:\n\n{{url}}\n\nThis app never opens web addresses itself. Copy the address to the clipboard?',
+  'app.link.web': 'This link goes to:\n\n{{url}}\n\nOpen it in your browser, or copy the address?',
+  'app.link.openInBrowser': 'Open in browser',
+  'app.link.copyAddress': 'Copy address',
+  'app.link.openFailed': 'The browser could not be opened for:\n\n{{url}}\n\n{{message}}',
   'app.link.webScheme':
     'This link uses “{{scheme}}”:\n\n{{url}}\n\nOnly http, https and mailto addresses are offered. Nothing was copied or opened.',
   'app.link.webMalformed':

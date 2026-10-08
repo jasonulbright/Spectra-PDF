@@ -306,9 +306,10 @@ const panels: Record<Operation, React.ComponentType> = {
 interface ConfirmRequest {
   id: number;
   message: string;
-  kind?: 'unsaved' | 'proceed' | 'notice';
+  kind?: 'unsaved' | 'proceed' | 'notice' | 'choice';
   title?: string;
   affirmLabel?: string;
+  alternateLabel?: string;
   resolve: (result: ConfirmResult) => void;
 }
 
@@ -462,6 +463,23 @@ function AppContent(): React.ReactElement {
       requestConfirm({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
     });
   }, [requestConfirm]);
+
+  /** Two named actions and Cancel. Resolves which was chosen; Cancel, Escape
+   * and closing the dialog all resolve 'cancel'. */
+  const showChoice = useCallback(
+    (title: string, message: string, affirmLabel: string, alternateLabel: string): Promise<'affirm' | 'alternate' | 'cancel'> =>
+      new Promise((resolve) => {
+        requestConfirm({
+          message,
+          kind: 'choice',
+          title,
+          affirmLabel,
+          alternateLabel,
+          resolve: (r) => resolve(r === 'save' ? 'affirm' : r === 'discard' ? 'alternate' : 'cancel'),
+        });
+      }),
+    [requestConfirm],
+  );
 
   // The submission consent dialog's state. It resolves ONE answer for ONE
   // request: there is no per-host memory to keep, deliberately, so the state
@@ -2290,8 +2308,8 @@ function AppContent(): React.ReactElement {
   // A link the reader clicked in the reading view (`lib/link-follow.ts` holds
   // the routing and its reasons). Read-only against the document: a jump moves
   // the view, and everything that would leave this document asks first. A web
-  // address is never opened — this app has no path that hands an address to
-  // the system browser — so confirming copies it, as a form button's does.
+  // address is never opened silently: the reader sees it in full and chooses
+  // to open it in the browser or only copy it.
   const handleFollowLink = useCallback(
     async (link: { path: string; workingPath: string; target: LinkTarget }) => {
       const title = tChrome('app.link.title');
@@ -2329,11 +2347,23 @@ function AppContent(): React.ReactElement {
           return;
         }
         case 'web': {
-          const copy = await showProceedConfirm(
+          // One dialog, the full address, and nothing by default: Open hands
+          // the address to the Rust command (which re-checks it before the
+          // system browser sees it); Copy never launches anything.
+          const choice = await showChoice(
             tChrome('app.link.externalTitle'),
             tChrome('app.link.web', { url: plan.url }),
+            tChrome('app.link.openInBrowser'),
+            tChrome('app.link.copyAddress'),
           );
-          if (copy) await copyToClipboard(plan.url);
+          if (choice === 'alternate') await copyToClipboard(plan.url);
+          if (choice === 'affirm') {
+            try {
+              await app.openWebLink(plan.url);
+            } catch (err) {
+              await showNotice(title, tChrome('app.link.openFailed', { url: plan.url, message: errorText(err) }));
+            }
+          }
           return;
         }
         case 'webRefused':
@@ -2374,7 +2404,7 @@ function AppContent(): React.ReactElement {
           await showNotice(title, tChrome('app.link.none'));
       }
     },
-    [call, copyToClipboard, openByPaths, showNotice, showProceedConfirm],
+    [call, copyToClipboard, openByPaths, showChoice, showNotice, showProceedConfirm],
   );
 
   // Link authoring writes /Link annotations, so every link method is
@@ -4390,6 +4420,7 @@ function AppContent(): React.ReactElement {
         kind={confirmState?.kind}
         title={confirmState?.title}
         affirmLabel={confirmState?.affirmLabel}
+        alternateLabel={confirmState?.alternateLabel}
         onResult={handleConfirmResult}
       />
       {unlockState?.kind === 'password' && (

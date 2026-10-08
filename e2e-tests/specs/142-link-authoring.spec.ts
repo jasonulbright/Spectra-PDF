@@ -6,9 +6,10 @@
  * it draws the band, completes the drag and delivers nothing. Only pointer
  * events crossing the real component tree catch that class of defect.
  *
- * A URI link is asserted through its `/A` payload rather than clicked: this
- * app opens no external address, so "the link works" is a claim about the
- * bytes, and that is what is measured. The INTERNAL jump is clicked, because
+ * A URI link is asserted through its `/A` payload rather than followed:
+ * following one ends in the system browser, outside anything a test can
+ * observe, so "the link works" is a claim about the bytes, and that is what is
+ * measured. The INTERNAL jump is clicked, because
  * that one lands inside the app and can therefore be observed.
  */
 import { resolve } from 'node:path';

@@ -11,9 +11,8 @@
  *  - A page in this document, directly or through a named destination, is a
  *    jump. It lands inside the app and changes nothing, so it asks nothing.
  *  - A web address is NEVER opened silently. Only http, https and mailto are
- *    offered at all, the full address is shown, and confirming copies it to
- *    the clipboard: this app has no path that hands an address to the system
- *    browser (the form pushbutton's `uri` action is treated the same way).
+ *    offered at all, the full address is shown, and the reader chooses to open
+ *    it in the system browser or only copy it to the clipboard.
  *  - Another PDF opens in this app once the user confirms the full path. Any
  *    other file is named and never run, a network or web location is named
  *    and never fetched, and a /Launch (a program for the system to run) is
@@ -26,17 +25,24 @@ import type { LinkTarget } from './links';
  * refused and named. */
 export const WEB_LINK_SCHEMES = ['http', 'https', 'mailto'] as const;
 export type WebLinkScheme = (typeof WEB_LINK_SCHEMES)[number];
+/** The longest address offered. The Rust command that opens one
+ * (`src-tauri/src/web_link.rs`) caps bytes at the same number. */
+export const MAX_WEB_LINK_LENGTH = 2048;
 
 export type WebLinkCheck =
   | { ok: true; url: string; scheme: WebLinkScheme }
   | { ok: false; url: string; reason: 'scheme'; scheme: string | null }
   | { ok: false; url: string; reason: 'malformed' };
 
+// The same rules are re-checked, independently, by the Rust command that opens
+// an address (`src-tauri/src/web_link.rs`): this gate decides what the reader
+// is offered, that one what the system browser is given.
+//
 // Characters that make the address the dialog SHOWS differ from the one that
 // would be used: controls and whitespace (a line break pushes the real host
 // out of view), and the bidirectional overrides that reorder what is drawn.
 // eslint-disable-next-line no-control-regex
-const DECEPTIVE = /[\u0000-\u001f\u007f-\u009f\s\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
+const DECEPTIVE = /[\u0000-\u001f\u007f-\u009f\s\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
 
 /**
  * Whether an address a link carries may be offered to the reader, and why not.
@@ -45,7 +51,9 @@ const DECEPTIVE = /[\u0000-\u001f\u007f-\u009f\s\u200b-\u200f\u202a-\u202e\u2060
  */
 export function checkWebLink(raw: string): WebLinkCheck {
   const url = raw.trim();
-  if (!url || DECEPTIVE.test(url)) return { ok: false, url, reason: 'malformed' };
+  if (!url || url.length > MAX_WEB_LINK_LENGTH || DECEPTIVE.test(url)) {
+    return { ok: false, url, reason: 'malformed' };
+  }
   const m = /^([a-z][a-z0-9+.-]*):/i.exec(url);
   if (!m) return { ok: false, url, reason: 'scheme', scheme: null };
   const scheme = m[1].toLowerCase();
@@ -58,8 +66,9 @@ export function checkWebLink(raw: string): WebLinkCheck {
       : { ok: false, url, reason: 'malformed' };
   }
   // http(s): a real authority, and no user-info. `https://bank.example@evil.example`
-  // reads as one host and goes to the other.
-  if (!/^https?:\/\//i.test(url)) return { ok: false, url, reason: 'malformed' };
+  // reads as one host and goes to the other. No backslash: WHATWG reads it as
+  // `/`, other parsers do not.
+  if (!/^https?:\/\//i.test(url) || url.includes('\\')) return { ok: false, url, reason: 'malformed' };
   let parsed: URL;
   try {
     parsed = new URL(url);

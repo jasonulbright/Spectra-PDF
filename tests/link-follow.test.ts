@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   checkWebLink,
   followLabel,
+  MAX_WEB_LINK_LENGTH,
   namedDestinationPage,
   planLinkFollow,
   resolveLinkedFile,
@@ -53,6 +54,16 @@ describe('checkWebLink — the scheme gate', () => {
     expect(checkWebLink('https:example.com')).toMatchObject({ ok: false, reason: 'malformed' });
     expect(checkWebLink('https://')).toMatchObject({ ok: false, reason: 'malformed' });
     expect(checkWebLink('mailto:')).toMatchObject({ ok: false, reason: 'malformed' });
+    expect(checkWebLink('https:\\\\evil.example')).toMatchObject({ ok: false, reason: 'malformed' });
+    expect(checkWebLink('https://example.com\\@evil.example')).toMatchObject({ ok: false, reason: 'malformed' });
+    expect(checkWebLink('https://example.com/­')).toMatchObject({ ok: false, reason: 'malformed' });
+  });
+
+  it('caps the length at the number the Rust command enforces', () => {
+    const at = `https://example.com/${'a'.repeat(MAX_WEB_LINK_LENGTH - 20)}`;
+    expect(at.length).toBe(MAX_WEB_LINK_LENGTH);
+    expect(checkWebLink(at)).toMatchObject({ ok: true });
+    expect(checkWebLink(`${at}a`)).toMatchObject({ ok: false, reason: 'malformed' });
   });
 });
 

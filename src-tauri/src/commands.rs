@@ -1383,6 +1383,25 @@ pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Opens a web address a PDF link names, in the user's default browser.
+///
+/// Reached only from the reading view's link dialog, after the reader has seen
+/// the full address and chosen "Open in browser". The webview's own check is
+/// not relied on: `web_link::validate_web_link` re-checks the address here
+/// (http/https/mailto only, no hidden characters, no user-info, bounded
+/// length) and refuses anything else with a plain message. The checked URL's
+/// canonical spelling is the only thing handed on, to the shell plugin's
+/// Rust-side `open`, which starts the system handler directly
+/// (`ShellExecuteW` on Windows, `xdg-open` with one argument on Linux) — no
+/// command line is built, so nothing is interpreted by a shell.
+#[tauri::command]
+pub async fn open_web_link(app: AppHandle, url: String) -> Result<(), String> {
+    let checked = crate::web_link::validate_web_link(&url)?;
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app.shell().open(checked, None).map_err(|e| e.to_string())
+}
+
 /// The `/select,"<path>"` argument the file manager's select switch requires:
 /// one argument, with quotes around the PATH only and never around the flag.
 ///
