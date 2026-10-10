@@ -415,7 +415,7 @@ export function FolderFormPrepDialog({
             }
           />
 
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-default">
             <input
               type="checkbox"
               data-testid="form-prep-inplace"
@@ -490,7 +490,7 @@ export function FolderFormPrepDialog({
                 className="max-h-44 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-2 gap-x-3 gap-y-1"
               >
                 {OCR_LANGUAGES.map((l) => (
-                  <label key={l.code} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <label key={l.code} className="flex items-center gap-2 text-sm cursor-default">
                     <input
                       type="checkbox"
                       data-testid={`form-prep-lang-${l.code}`}
@@ -512,7 +512,7 @@ export function FolderFormPrepDialog({
           )}
 
           <div>
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 checked={includeSigned}

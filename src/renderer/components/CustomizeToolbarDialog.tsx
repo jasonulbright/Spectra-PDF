@@ -63,7 +63,7 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
                   return (
                     <label
                       key={item.command}
-                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-neutral-800 cursor-pointer"
+                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-neutral-800 cursor-default"
                     >
                       <input
                         type="checkbox"

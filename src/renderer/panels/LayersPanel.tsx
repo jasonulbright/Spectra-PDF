@@ -48,7 +48,7 @@ export function LayersPanel(): React.ReactElement {
               <label
                 key={l.index}
                 data-testid={`layer-${l.index}`}
-                className="flex items-start gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded cursor-pointer"
+                className="flex items-start gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded cursor-default"
               >
                 <input
                   data-testid={`layer-toggle-${l.index}`}

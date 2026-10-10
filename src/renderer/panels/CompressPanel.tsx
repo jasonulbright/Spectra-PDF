@@ -320,7 +320,7 @@ export function CompressPanel(): React.ReactElement {
             <span className="block text-sm text-neutral-400 mb-1">{tChrome('panel.compress.mrcPreset')}</span>
             <div role="radiogroup" aria-label={tChrome('panel.compress.mrcPreset')} className="flex flex-col gap-1">
               {MRC_PRESETS.map((preset) => (
-                <label key={preset} className="flex items-start gap-2 cursor-pointer">
+                <label key={preset} className="flex items-start gap-2 cursor-default">
                   <input
                     type="radio"
                     name="mrc-preset"
@@ -339,11 +339,11 @@ export function CompressPanel(): React.ReactElement {
               ))}
             </div>
           </div>
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-default">
             <input type="checkbox" data-testid="mrc-pdfa-safe" checked={pdfaSafe} onChange={() => setPdfaSafe(!pdfaSafe)} />
             <span className="text-sm text-neutral-300">{tChrome('panel.compress.mrcPdfaSafe')}</span>
           </label>
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-default">
             <input type="checkbox" data-testid="mrc-verify" checked={verifyText} onChange={() => setVerifyText(!verifyText)} />
             <span className="text-sm text-neutral-300">{tChrome('panel.compress.mrcVerify')}</span>
           </label>
@@ -357,7 +357,7 @@ export function CompressPanel(): React.ReactElement {
               </span>
               <div className="max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1 max-w-md">
                 {OCR_LANGUAGES.map((l) => (
-                  <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                  <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-default">
                     <input
                       type="checkbox"
                       checked={verifyLangs.includes(l.code)}
@@ -389,7 +389,7 @@ export function CompressPanel(): React.ReactElement {
         </div>
       )}
       <div className="flex flex-col gap-1">
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-default">
           <input
             type="checkbox"
             data-testid="compress-then-optimize"

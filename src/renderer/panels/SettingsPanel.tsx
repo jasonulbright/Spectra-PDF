@@ -338,7 +338,7 @@ function GhostscriptSection(): React.ReactElement {
           {tChrome(checking ? 'panel.settings.gsChecking' : 'panel.settings.gsRecheck')}
         </button>
       </div>
-      <label className="flex items-center gap-2 cursor-pointer mt-3">
+      <label className="flex items-center gap-2 cursor-default mt-3">
         <input
           type="checkbox"
           data-testid="prefs-gs-prompt"
@@ -556,7 +556,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <option value="smallest">{tChrome('panel.compress.mrcPresetSmallest')}</option>
         </select>
       </div>
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-default">
         <input
           type="checkbox"
           data-testid="pref-single-key"
@@ -572,7 +572,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       </p>
       <div data-testid="batch-log-pref">
         <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.batchLogs')}</label>
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-default">
           <input
             type="checkbox"
             data-testid="pref-batch-log"
@@ -713,7 +713,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       {category === 'tray' && (
       <>
       {preferenceAvailable('minimizeToTray') && (
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-default">
         <input
           type="checkbox"
           checked={settings.minimizeToTray}
@@ -737,7 +737,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       )}
 
       {preferenceAvailable('startMinimized') && settings.minimizeToTray && (
-        <label className="flex items-center gap-2 cursor-pointer ms-4">
+        <label className="flex items-center gap-2 cursor-default ms-4">
           <input
             type="checkbox"
             checked={settings.startMinimized}
@@ -758,7 +758,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       )}
 
       {preferenceAvailable('startWithSystem') && (
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-default">
         <input
           type="checkbox"
           checked={startWithWindows}
@@ -777,7 +777,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       )}
 
       <div data-testid="restore-windows-pref">
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-default">
           <input
             type="checkbox"
             data-testid="pref-restore-windows"
@@ -804,7 +804,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       <>
       <div data-testid="updates-pref" className="mb-4">
         <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.updates')}</label>
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-default">
           <input
             type="checkbox"
             data-testid="pref-check-updates"
@@ -822,7 +822,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         <label className="block text-sm text-neutral-400 mb-2">
           {tChrome('panel.settings.fieldScripts')}
         </label>
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-default">
           <input
             type="checkbox"
             data-testid="pref-run-field-scripts"
@@ -921,7 +921,7 @@ function ExplorerMenuBlock(): React.JSX.Element {
   const view = status ? explorerMenuView(status, changed) : null;
   return (
     <div data-testid="explorer-menu-pref">
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-default">
         <input
           type="checkbox"
           data-testid="pref-explorer-menu"

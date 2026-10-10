@@ -19,7 +19,7 @@ import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-i
 import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
-import { linksForPage, type LinkRegion } from '../../lib/links';
+import { groupLinksByPage, type LinkRegion } from '../../lib/links';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
 import type { PageReadAloud } from '../../lib/read-aloud';
@@ -254,12 +254,15 @@ export interface DocumentViewProps {
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   /** The file's existing links, projected onto the canvas, and the pick that
-   * opens one in the panel. Shown while the Links tool is open only. */
+   * opens one in the panel (Links tool) or follows it (Select tool). */
   linkRegions: readonly LinkRegion[];
   /** View-tier scanned-page recognition for the Select tool; null when the
    *  preference is off. Reading view only — the board has no text layer. */
   ocrSelection?: import('./PageTextLayer').OcrSelectionContext | null;
   onPickLink: (region: LinkRegion) => void;
+  /** True when a press on a region FOLLOWS the link (reading, Select tool)
+   * rather than picking it for the Links tool's editor. */
+  linkFollow?: boolean;
   selectedLink: LinkRegion | null;
   /** The captured snapshot's card, and its two actions. */
   snapshotPlacement: SnapshotPlacement | null;
@@ -897,6 +900,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   const onAddGuideRef = useRef(props.onAddGuide);
   onAddGuideRef.current = props.onAddGuide;
   const viewPagesRef = useRef(viewPages);
+  const linksOnPage = useMemo(() => groupLinksByPage(props.linkRegions), [props.linkRegions]);
   viewPagesRef.current = viewPages;
 
   /** Press on a ruler → drag onto the page → a guide.
@@ -1087,8 +1091,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onSetBeadRect={props.onSetBeadRect}
           onSetSnapshotRect={props.onSetSnapshotRect}
           onSetLinkRect={props.onSetLinkRect}
-          linkRegions={linksForPage(props.linkRegions, page.id)}
+          linkRegions={linksOnPage(page.id)}
           onPickLink={props.onPickLink}
+          linkFollow={props.linkFollow}
           selectedLink={props.selectedLink}
           snapshotPlacement={props.snapshotPlacement?.pageId === page.id ? props.snapshotPlacement : null}
           onClearSnapshotPlacement={props.onClearSnapshotPlacement}

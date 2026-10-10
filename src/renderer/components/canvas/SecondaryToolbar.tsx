@@ -583,7 +583,7 @@ export function SecondaryToolbar({
             {tChrome('canvas.measure.leaveMarkup')}
           </label>
           {measureResult && (
-            <span className="secondary-toolbar-hint measure-result" data-testid="measure-result" aria-live="polite">
+            <span className="selectable secondary-toolbar-hint measure-result" data-testid="measure-result" aria-live="polite">
               {measureResult}
             </span>
           )}

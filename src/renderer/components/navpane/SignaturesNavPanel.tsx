@@ -279,7 +279,7 @@ function SignatureRow({
         </div>
       )}
       {sig.error && (
-        <div className="signature-nav-error">{tChrome('nav.sig.error', { error: sig.error })}</div>
+        <div className="selectable signature-nav-error">{tChrome('nav.sig.error', { error: sig.error })}</div>
       )}
     </div>
   );

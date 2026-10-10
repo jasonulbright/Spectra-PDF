@@ -339,7 +339,7 @@ export function FieldActionsControl({
               onChange={(e) => set({ format: { ...format, currency: e.target.value } })}
             />,
           )}
-          <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+          <label className="flex items-center gap-2 cursor-default text-xs text-neutral-400">
             <input
               type="checkbox"
               checked={format.currencyPrepend}
@@ -352,7 +352,7 @@ export function FieldActionsControl({
       )}
 
       {format?.kind === 'percent' && (
-        <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+        <label className="flex items-center gap-2 cursor-default text-xs text-neutral-400">
           <input
             type="checkbox"
             checked={format.prepend}
@@ -804,7 +804,7 @@ export function FieldDataActionsControl({
                   <option value="get">{tChrome('panel.fieldActions.actionMethodGet')}</option>
                 </select>,
               )}
-              <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+              <label className="flex items-center gap-2 cursor-default text-xs text-neutral-400">
                 <input
                   type="checkbox"
                   checked={action.includeEmpty}

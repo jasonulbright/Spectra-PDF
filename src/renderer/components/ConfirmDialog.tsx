@@ -13,16 +13,24 @@ interface ConfirmDialogProps {
    * 'proceed': a 2-choice Continue / Cancel confirmation — 'save' doubles as
    * the affirmative result (one result type, one dialog, two shapes).
    * 'notice': a one-button OK notice (errors and outcomes with no choice to
-   * make); resolves 'cancel' however dismissed. */
-  kind?: 'unsaved' | 'proceed' | 'notice';
+   * make); resolves 'cancel' however dismissed.
+   * 'choice': two named actions and Cancel — `affirmLabel` resolves 'save',
+   * `alternateLabel` resolves 'discard'. Neither is a default: focus starts on
+   * Cancel, and Escape resolves 'cancel', as in 'proceed'. */
+  kind?: 'unsaved' | 'proceed' | 'notice' | 'choice';
   /** Title override; defaults per kind. */
   title?: string;
   /** 'proceed' only: the affirmative button's own wording, for a refusal that
    * has a specific action to offer rather than a generic Continue. */
   affirmLabel?: string;
+  /** 'choice' only: the second action's wording. */
+  alternateLabel?: string;
 }
 
-export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title, affirmLabel }: ConfirmDialogProps): React.ReactElement {
+export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title, affirmLabel, alternateLabel }: ConfirmDialogProps): React.ReactElement {
+  // 'proceed' and 'choice' commit something on the affirmative press, so a
+  // reflexive Enter must land on Cancel instead.
+  const cautious = kind === 'proceed' || kind === 'choice';
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   return (
@@ -36,7 +44,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
         >
           <Dialog.Title className="text-sm font-semibold text-neutral-100 mb-1">
             {title ?? tChrome(
-              kind === 'proceed'
+              kind === 'proceed' || kind === 'choice'
                 ? 'dialog.confirm.titleProceed'
                 : kind === 'notice'
                   ? 'dialog.confirm.titleNotice'
@@ -71,10 +79,19 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               data-testid="confirm-cancel"
               onClick={() => onResult('cancel')}
               className="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors"
-              autoFocus={kind === 'proceed'}
+              autoFocus={cautious}
             >
               {tChrome('dialog.common.cancel')}
             </button>
+            {kind === 'choice' && (
+              <button
+                data-testid="confirm-alternate"
+                onClick={() => onResult('discard')}
+                className="px-3 py-1.5 text-xs font-medium text-neutral-200 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors"
+              >
+                {alternateLabel}
+              </button>
+            )}
             <button
               data-testid="confirm-affirm"
               onClick={() => onResult('save')}
@@ -82,7 +99,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               // 'unsaved': Save is the data-PRESERVING default. 'proceed':
               // Continue is the CONSEQUENTIAL choice — a reflexive Enter must
               // not commit it, so focus starts on Cancel (regression).
-              autoFocus={kind !== 'proceed'}
+              autoFocus={!cautious}
             >
               {affirmLabel ??
                 tChrome(kind === 'proceed' ? 'dialog.confirm.continue' : 'dialog.common.save')}

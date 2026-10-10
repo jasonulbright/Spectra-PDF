@@ -1,0 +1,31 @@
+{
+  "offered": [
+    ["https://example.com/a?b=1#c", "https://example.com/a?b=1#c"],
+    ["http://example.com", "http://example.com/"],
+    ["HTTPS://Example.COM/X", "https://example.com/X"],
+    ["https://example.com:443/x", "https://example.com/x"],
+    ["https://example.com/a/../b", "https://example.com/b"],
+    ["https://example.com/a^b", "https://example.com/a%5Eb"],
+    ["https://example.com/a%5Eb", "https://example.com/a%5Eb"],
+    ["https://example.com/a'b?c'd", "https://example.com/a'b?c%27d"],
+    ["https://example.com/a\"b<c>d`e{f}", "https://example.com/a%22b%3Cc%3Ed%60e%7Bf%7D"],
+    ["https://example.com/%7e", "https://example.com/%7e"],
+    ["https://\u0435xample.com/login", "https://xn--xample-2of.com/login"],
+    ["mailto:someone@example.com", "mailto:someone@example.com"],
+    ["MailTo:a@example.com?Subject=x", "mailto:a@example.com?Subject=x"],
+    ["mailto:a@example.com?subject=Hi%20there&cc=b@example.com&body=Line%0D%0ALine", "mailto:a@example.com?subject=Hi%20there&cc=b@example.com&body=Line%0D%0ALine"],
+    ["mailto:a@example.com?subject=x&", "mailto:a@example.com?subject=x&"],
+    ["mailto:a@example.com?&subject=x", "mailto:a@example.com?&subject=x"],
+    ["mailto:a@example.com?subject=a&&body=c", "mailto:a@example.com?subject=a&&body=c"]
+  ],
+  "refused": [
+    "mailto:a@example.com#",
+    "mailto:a@example.com?subject=x#",
+    "mailto:a@example.com#x",
+    "mailto:a@example.com?attach=C:/x",
+    "mailto:a@example.com?subject=x%0D%0ABcc:spy@evil.example",
+    "mailto:a\"b@example.com",
+    "https://bank.example@evil.example/",
+    "javascript:alert(1)"
+  ]
+}

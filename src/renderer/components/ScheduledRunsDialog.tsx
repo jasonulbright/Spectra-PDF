@@ -459,7 +459,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             onPick={() => void pick(tChrome('dialog.schedule.pickSource'), (p) => setEditing({ ...editing, source: p }))}
           />
           {editing.runType !== 'action' && (
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 data-testid="schedule-inplace"
@@ -498,7 +498,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 className={`max-h-28 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-3 gap-x-3 gap-y-1 ${editing.repairOnly ? 'opacity-50' : ''}`}
               >
                 {OCR_LANGUAGES.map((l) => (
-                  <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                  <label key={l.code} className="flex items-center gap-1.5 text-xs cursor-default">
                     <input
                       type="checkbox"
                       checked={langs.includes(l.code)}
@@ -519,7 +519,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
           {editing.runType !== 'action' && (
             <div className="flex flex-col gap-1">
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-default">
                 <input
                   type="checkbox"
                   data-testid="schedule-repair-only"
@@ -551,7 +551,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             </div>
           )}
           {editing.runType !== 'action' && (
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 data-testid="schedule-remove-empty-folders"
@@ -572,7 +572,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               task that carries them must be re-savable without dropping them. */}
           {editing.runType !== 'action' && !editing.repairOnly && (
             <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-default">
                 <input
                   type="checkbox"
                   data-testid="schedule-enhance"
@@ -583,7 +583,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 <span className="text-sm text-neutral-300">{tChrome('dialog.batch.enhance')}</span>
               </label>
               {editing.enhance && (
-                <label className="flex items-center gap-2 cursor-pointer ps-6">
+                <label className="flex items-center gap-2 cursor-default ps-6">
                   <input
                     type="checkbox"
                     data-testid="schedule-enhance-orientation"
@@ -598,7 +598,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                   </span>
                 </label>
               )}
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-default">
                 <input
                   type="checkbox"
                   data-testid="schedule-mrc"
@@ -626,7 +626,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                       <option value="smallest">{tChrome('panel.compress.mrcPresetSmallest')}</option>
                     </select>
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex items-center gap-2 cursor-default">
                     <input
                       type="checkbox"
                       data-testid="schedule-mrc-verify"
@@ -680,7 +680,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
 
           {!(runsAsYouOnly && (editing.runType === 'action' || editing.inPlace)) && (
           <details className="rounded border border-neutral-800 bg-neutral-950/40">
-            <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
+            <summary className="px-3 py-2 text-sm text-neutral-300 cursor-default select-none">
               {tChrome(
                 runsAsYouOnly
                   ? 'dialog.schedule.filingOnlySection'
@@ -707,7 +707,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                     onClear={() => setEditing({ ...editing, errorRoot: '' })}
                   />
                   <label
-                    className={`flex items-center gap-2 ${editing.repairOnly ? 'opacity-50' : 'cursor-pointer'}`}
+                    className={`flex items-center gap-2 ${editing.repairOnly ? 'opacity-50' : 'cursor-default'}`}
                     title={editing.repairOnly ? tChrome('dialog.batch.repairOnlyNote') : undefined}
                   >
                     <input
