@@ -226,7 +226,7 @@ def _page_box(page) -> tuple[float, float, float, float]:
 
 
 def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
-                               parent=None) -> bool:
+                               parent=None, inline_images=True) -> bool:
     """True when the page draws anything besides the one image.
 
     Invisible text (`Tr 3` — an OCR layer) does not count, and annotations are
@@ -234,7 +234,8 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
     a header the scanner's software drew, a second image — means the page is
     not a plain scan and MRC has no business rewriting it. A form runs in the
     state of the Do that draws it (ISO 32000-2 §8.10.1), so text a form draws
-    under the invoker's `3 Tr` is invisible too.
+    under the invoker's `3 Tr` is invisible too. With `inline_images` false an
+    inline image is left to the caller's placement count, like an image Do.
     """
     from .text_metrics import _child_state
 
@@ -251,7 +252,9 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
         if op in ("S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "sh"):
             return True
         if op == "INLINE IMAGE":
-            return True
+            if inline_images:
+                return True
+            continue
         if op == "Do":
             name = key_text(operands[0]) if operands else None
             xobj = _lookup_xobject(name, resources, fallback)
@@ -271,6 +274,7 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
                     resources,
                     depth + 1,
                     parent=state,
+                    inline_images=inline_images,
                 ):
                     return True
                 continue
