@@ -2305,6 +2305,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Папка назначения должна находиться вне исходной папки — выберите для собранных документов отдельную папку.",
   "engine.create_pdf_folders.unknownSourceSet": "неизвестный набор источников {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Пароль этого документа нельзя передать Ghostscript, поэтому эта операция не может прочитать документ. Откройте его с паролем владельца или сначала расшифруйте документ.",
+  "engine.credentials.heldCredentialNamesPermissions": "сохранённые учётные данные указывают свои разрешения",
+  "engine.credentials.heldCredentialUserRecipient": "сохранённые учётные данные — это открытие пользователем или получателем, а не {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "пустой странице нужны положительные ширина и высота",
   "engine.create_pdf.blankPagePagesSelect": "у пустой страницы нет страниц, из которых можно выбрать диапазон",
   "engine.create_pdf.createPdfCannotConvert": "«Создать PDF» не может преобразовать {{v0}} (принимаются: {{v1}})",

@@ -2305,6 +2305,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Cel musi znajdować się poza folderem źródłowym — wybierz osobny folder na złożone dokumenty.",
   "engine.create_pdf_folders.unknownSourceSet": "nieznany zestaw źródeł {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Hasła tego dokumentu nie można przekazać do programu Ghostscript, więc ta operacja nie może odczytać dokumentu. Otwórz go hasłem właściciela lub najpierw odszyfruj dokument.",
+  "engine.credentials.heldCredentialNamesPermissions": "przechowywane poświadczenie określa swoje uprawnienia",
+  "engine.credentials.heldCredentialUserRecipient": "przechowywane poświadczenie to otwarcie przez użytkownika lub odbiorcę, a nie {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "pusta strona wymaga dodatniej szerokości i wysokości",
   "engine.create_pdf.blankPagePagesSelect": "pusta strona nie ma stron, z których można wybrać zakres",
   "engine.create_pdf.createPdfCannotConvert": "„Utwórz plik PDF” nie potrafi przekonwertować {{v0}} (akceptowane: {{v1}})",

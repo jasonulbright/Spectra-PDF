@@ -2239,6 +2239,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "היעד חייב להיות מחוץ לתיקיית המקור — בחרו תיקייה נפרדת למסמכים המורכבים.",
   "engine.create_pdf_folders.unknownSourceSet": "קבוצת מקורות לא מוכרת {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "לא ניתן להעביר את הסיסמה של מסמך זה ל-Ghostscript, ולכן פעולה זו אינה יכולה לקרוא את המסמך. פתחו אותו עם סיסמת הבעלים, או פענחו את המסמך תחילה.",
+  "engine.credentials.heldCredentialNamesPermissions": "אישור מוחזק מציין את ההרשאות שלו",
+  "engine.credentials.heldCredentialUserRecipient": "אישור מוחזק הוא פתיחה של משתמש או של נמען, לא {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "עמוד ריק זקוק לרוחב ולגובה חיוביים",
   "engine.create_pdf.blankPagePagesSelect": "בעמוד ריק אין עמודים שניתן לבחור מהם טווח",
   "engine.create_pdf.createPdfCannotConvert": "יצירת PDF אינה יכולה להמיר את {{v0}} — הסוגים הנתמכים הם {{v1}}",

@@ -2107,6 +2107,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "目标必须位于源文件夹之外——请为合并后的文档另选一个文件夹。",
   "engine.create_pdf_folders.unknownSourceSet": "未知的来源类别 {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "无法将此文档的密码传给 Ghostscript，因此该操作无法读取文档。请使用所有者密码打开，或先解密文档。",
+  "engine.credentials.heldCredentialNamesPermissions": "保留的凭据会注明其权限",
+  "engine.credentials.heldCredentialUserRecipient": "保留的凭据是用户或收件人打开方式，而不是 {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "空白页的宽度和高度必须为正数",
   "engine.create_pdf.blankPagePagesSelect": "空白页没有可供选择范围的页面",
   "engine.create_pdf.createPdfCannotConvert": "创建 PDF 无法转换 {{v0}}（可接受的格式：{{v1}}）",
