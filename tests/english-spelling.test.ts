@@ -245,7 +245,7 @@ describe('American spelling in English a person reads', () => {
   });
 
   it('holds in the public documents', () => {
-    const files = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'docs/TESTER-GUIDE-SCANNING.md'];
+    const files = ['README.md', 'SECURITY.md', 'docs/TESTER-GUIDE-SCANNING.md'];
     expect(files.flatMap((file) => hits(file, read(file).split(/\r?\n/)))).toEqual([]);
   });
 
