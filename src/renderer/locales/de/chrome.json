@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Das Ziel muss außerhalb des Quellordners liegen – wählen Sie einen eigenen Ordner für die gebündelten Dokumente.",
   "engine.create_pdf_folders.unknownSourceSet": "unbekannter Quellsatz {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Das Kennwort dieses Dokuments kann nicht an Ghostscript übergeben werden, daher kann dieser Vorgang das Dokument nicht lesen. Öffnen Sie es mit dem Besitzerkennwort oder entschlüsseln Sie das Dokument zuerst.",
+  "engine.credentials.heldCredentialNamesPermissions": "ein gespeicherter Berechtigungsnachweis nennt seine Berechtigungen",
+  "engine.credentials.heldCredentialUserRecipient": "ein gespeicherter Berechtigungsnachweis ist eine Öffnung als Benutzer oder Empfänger, nicht {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "eine leere Seite benötigt eine positive Breite und Höhe",
   "engine.create_pdf.blankPagePagesSelect": "eine leere Seite hat keine Seiten, aus denen ein Bereich gewählt werden könnte",
   "engine.create_pdf.createPdfCannotConvert": "PDF erstellen kann {{v0}} nicht konvertieren (zulässig: {{v1}})",

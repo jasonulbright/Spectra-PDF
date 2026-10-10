@@ -2239,6 +2239,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "La destinazione deve trovarsi fuori dalla cartella di origine: scegli una cartella separata per i documenti assemblati.",
   "engine.create_pdf_folders.unknownSourceSet": "insieme di origini sconosciuto {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "La password di questo documento non può essere passata a Ghostscript, quindi questa operazione non può leggere il documento. Aprilo con la password del proprietario oppure decrittografa prima il documento.",
+  "engine.credentials.heldCredentialNamesPermissions": "una credenziale conservata indica le proprie autorizzazioni",
+  "engine.credentials.heldCredentialUserRecipient": "una credenziale conservata è un’apertura utente o destinatario, non {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "una pagina vuota richiede una larghezza e un’altezza positive",
   "engine.create_pdf.blankPagePagesSelect": "una pagina vuota non ha pagine da cui selezionare un intervallo",
   "engine.create_pdf.createPdfCannotConvert": "Crea PDF non può convertire {{v0}} (formati accettati: {{v1}})",

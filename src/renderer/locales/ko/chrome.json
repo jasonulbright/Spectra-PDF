@@ -2107,6 +2107,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "대상은 원본 폴더 밖에 있어야 합니다 — 엮은 문서를 위해 별도 폴더를 고르세요.",
   "engine.create_pdf_folders.unknownSourceSet": "알 수 없는 원본 종류 {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "이 문서의 암호를 Ghostscript에 전달할 수 없으므로 이 작업에서 문서를 읽을 수 없습니다. 소유자 암호로 열거나 먼저 문서의 암호화를 해제하세요.",
+  "engine.credentials.heldCredentialNamesPermissions": "보관된 자격 증명에는 권한이 명시됩니다",
+  "engine.credentials.heldCredentialUserRecipient": "보관된 자격 증명은 사용자 또는 수신자 열기이며, {{opener}}이(가) 아닙니다",
   "engine.create_pdf.blankPageNeedsPositive": "빈 페이지에는 양수 너비와 높이가 필요합니다",
   "engine.create_pdf.blankPagePagesSelect": "빈 페이지에는 범위를 고를 페이지가 없습니다",
   "engine.create_pdf.createPdfCannotConvert": "PDF 만들기로는 {{v0}} 형식을 변환할 수 없습니다(허용: {{v1}})",

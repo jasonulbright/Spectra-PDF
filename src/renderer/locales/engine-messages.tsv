@@ -101,6 +101,8 @@ create_pdf_folders.destinationFolderRequired	exact	create_pdf_folders	A destinat
 create_pdf_folders.destinationMustOutsideSource	exact	create_pdf_folders	The destination must be outside the source folder — choose a separate folder for the assembled documents.
 create_pdf_folders.unknownSourceSet	pattern	create_pdf_folders	unknown source set {{sources}} ({{v1}})
 credentials.ghostscriptPasswordUnsupported	exact	credentials	This document's password cannot be handed to Ghostscript, so this operation cannot read the document. Open it with the owner password, or decrypt the document first.
+credentials.heldCredentialNamesPermissions	exact	credentials	a held credential names its permissions
+credentials.heldCredentialUserRecipient	pattern	credentials	a held credential is a user or recipient open, not {{opener}}
 csc.credentialUsesExplicitAuthorization	exact	csc	This credential uses explicit authorization, which requires this application to collect a PIN or one-time password and send it to the signing service. This application does not collect or transmit authentication secrets. Use a credential authorized through the provider's own sign-in instead.
 csc.credentialUsesUnsupportedAuthorization	pattern	csc	This credential uses an unsupported authorization mode ({{v0}}).
 csc.mustUseHttpsRefusing	pattern	csc	The {{what}} must use HTTPS. Refusing to send signing credentials to a {{v1}} address.

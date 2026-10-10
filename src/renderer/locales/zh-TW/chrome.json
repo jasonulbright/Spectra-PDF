@@ -2107,6 +2107,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "目標必須位於來源資料夾之外——請為合併後的文件另選一個資料夾。",
   "engine.create_pdf_folders.unknownSourceSet": "未知的來源類別 {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "無法將此文件的密碼傳給 Ghostscript，因此此操作無法讀取文件。請使用擁有者密碼開啟，或先將文件解密。",
+  "engine.credentials.heldCredentialNamesPermissions": "保留的憑證會註明其權限",
+  "engine.credentials.heldCredentialUserRecipient": "保留的憑證是使用者或收件者開啟方式，而不是 {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "空白頁需要正的寬度與高度",
   "engine.create_pdf.blankPagePagesSelect": "空白頁沒有可選取範圍的頁面",
   "engine.create_pdf.createPdfCannotConvert": "「建立 PDF」無法轉換 {{v0}}（可接受：{{v1}}）",

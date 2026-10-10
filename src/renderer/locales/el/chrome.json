@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Ο προορισμός πρέπει να βρίσκεται εκτός του φακέλου προέλευσης — επιλέξτε ξεχωριστό φάκελο για τα συναρμολογημένα έγγραφα.",
   "engine.create_pdf_folders.unknownSourceSet": "άγνωστο σύνολο πηγών {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Ο κωδικός πρόσβασης αυτού του εγγράφου δεν μπορεί να δοθεί στο Ghostscript, οπότε αυτή η λειτουργία δεν μπορεί να διαβάσει το έγγραφο. Ανοίξτε το με τον κωδικό πρόσβασης κατόχου ή αποκρυπτογραφήστε πρώτα το έγγραφο.",
+  "engine.credentials.heldCredentialNamesPermissions": "ένα διατηρημένο διαπιστευτήριο δηλώνει τα δικαιώματά του",
+  "engine.credentials.heldCredentialUserRecipient": "ένα διατηρημένο διαπιστευτήριο είναι άνοιγμα από χρήστη ή παραλήπτη, όχι {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "μια κενή σελίδα χρειάζεται θετικό πλάτος και ύψος",
   "engine.create_pdf.blankPagePagesSelect": "μια κενή σελίδα δεν έχει σελίδες από τις οποίες να επιλεγεί εύρος",
   "engine.create_pdf.createPdfCannotConvert": "Η Δημιουργία PDF δεν μπορεί να μετατρέψει {{v0}} (αποδεκτά: {{v1}})",

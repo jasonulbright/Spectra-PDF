@@ -2239,6 +2239,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Destinația trebuie să fie în afara folderului sursă — alegeți un folder separat pentru documentele asamblate.",
   "engine.create_pdf_folders.unknownSourceSet": "set de surse necunoscut {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Parola acestui document nu poate fi transmisă către Ghostscript, așa că această operație nu poate citi documentul. Deschideți-l cu parola de proprietar sau decriptați mai întâi documentul.",
+  "engine.credentials.heldCredentialNamesPermissions": "o credențială reținută își indică permisiunile",
+  "engine.credentials.heldCredentialUserRecipient": "o credențială reținută este o deschidere de utilizator sau de destinatar, nu {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "o pagină goală are nevoie de o lățime și o înălțime pozitive",
   "engine.create_pdf.blankPagePagesSelect": "o pagină goală nu are pagini din care să se selecteze un interval",
   "engine.create_pdf.createPdfCannotConvert": "Creare PDF nu poate converti {{v0}} (acceptate: {{v1}})",

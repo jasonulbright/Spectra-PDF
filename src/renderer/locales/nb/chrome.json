@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Målet må ligge utenfor kildemappen — velg en egen mappe for de sammensatte dokumentene.",
   "engine.create_pdf_folders.unknownSourceSet": "ukjent kildesett {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Passordet til dette dokumentet kan ikke gis til Ghostscript, så denne operasjonen kan ikke lese dokumentet. Åpne det med eierpassordet, eller dekrypter dokumentet først.",
+  "engine.credentials.heldCredentialNamesPermissions": "en lagret legitimasjon oppgir sine tillatelser",
+  "engine.credentials.heldCredentialUserRecipient": "en lagret legitimasjon er en åpning som bruker eller mottaker, ikke {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "en tom side trenger en positiv bredde og høyde",
   "engine.create_pdf.blankPagePagesSelect": "en tom side har ingen sider å velge et intervall fra",
   "engine.create_pdf.createPdfCannotConvert": "Opprett PDF kan ikke konvertere {{v0}} (godtatt: {{v1}})",

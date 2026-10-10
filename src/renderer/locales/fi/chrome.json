@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Kohteen on oltava lähdekansion ulkopuolella — valitse koottuja asiakirjoja varten oma kansio.",
   "engine.create_pdf_folders.unknownSourceSet": "tuntematon lähdejoukko {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Tämän asiakirjan salasanaa ei voi välittää Ghostscriptille, joten tämä toiminto ei voi lukea asiakirjaa. Avaa se omistajan salasanalla tai pura asiakirjan salaus ensin.",
+  "engine.credentials.heldCredentialNamesPermissions": "säilytetty tunnistetieto ilmoittaa käyttöoikeutensa",
+  "engine.credentials.heldCredentialUserRecipient": "säilytetty tunnistetieto on käyttäjän tai vastaanottajan avaus, ei {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "tyhjä sivu tarvitsee positiivisen leveyden ja korkeuden",
   "engine.create_pdf.blankPagePagesSelect": "tyhjässä sivussa ei ole sivuja, joista valita alue",
   "engine.create_pdf.createPdfCannotConvert": "Luo PDF ei voi muuntaa tiedostoa {{v0}} (hyväksytään: {{v1}})",

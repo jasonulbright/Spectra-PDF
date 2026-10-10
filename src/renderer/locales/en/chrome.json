@@ -2164,6 +2164,8 @@
   "engine.create_pdf.unknownUnsupportedRefuseSkip": "unknown on_unsupported {{on_unsupported}} (refuse, skip)",
   "engine.create_pdf.unreadableImage": "unreadable image: {{src_path}} ({{exc}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "This document's password cannot be handed to Ghostscript, so this operation cannot read the document. Open it with the owner password, or decrypt the document first.",
+  "engine.credentials.heldCredentialNamesPermissions": "a held credential names its permissions",
+  "engine.credentials.heldCredentialUserRecipient": "a held credential is a user or recipient open, not {{opener}}",
   "engine.csc_signer.signatureCannotRequestedSigning": "A {{algorithm}} signature cannot be requested from a signing service.",
   "engine.csc_signer.signingServiceAuthorizationExpired": "The signing service authorization expired. Sign in to the signing service again and repeat the signature.",
   "engine.csc_signer.signingServiceCannotAsked": "A signing service cannot be asked for a {{digest_algorithm}} digest.",

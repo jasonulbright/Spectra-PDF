@@ -2239,6 +2239,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "La destinació ha de ser fora de la carpeta d’origen — trieu una carpeta separada per als documents muntats.",
   "engine.create_pdf_folders.unknownSourceSet": "conjunt de fonts desconegut {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "La contrasenya d’aquest document no es pot passar a Ghostscript, de manera que aquesta operació no pot llegir el document. Obriu-lo amb la contrasenya de propietari o desxifreu primer el document.",
+  "engine.credentials.heldCredentialNamesPermissions": "una credencial retinguda indica els seus permisos",
+  "engine.credentials.heldCredentialUserRecipient": "una credencial retinguda és una obertura d’usuari o de destinatari, no {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "una pàgina en blanc necessita una amplada i una alçada positives",
   "engine.create_pdf.blankPagePagesSelect": "una pàgina en blanc no té pàgines de les quals seleccionar un interval",
   "engine.create_pdf.createPdfCannotConvert": "Crea un PDF no pot convertir {{v0}} (acceptats: {{v1}})",

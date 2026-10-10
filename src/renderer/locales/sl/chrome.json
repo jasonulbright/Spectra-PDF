@@ -2305,6 +2305,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Cilj mora biti zunaj izvorne mape — za sestavljene dokumente izberite ločeno mapo.",
   "engine.create_pdf_folders.unknownSourceSet": "neznana množica virov {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Gesla tega dokumenta ni mogoče predati programu Ghostscript, zato ta postopek ne more prebrati dokumenta. Odprite ga z geslom lastnika ali dokument najprej dešifrirajte.",
+  "engine.credentials.heldCredentialNamesPermissions": "shranjena poverilnica navaja svoja dovoljenja",
+  "engine.credentials.heldCredentialUserRecipient": "shranjena poverilnica je odpiranje kot uporabnik ali prejemnik, ne {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "prazna stran potrebuje pozitivno širino in višino",
   "engine.create_pdf.blankPagePagesSelect": "prazna stran nima strani, iz katerih bi bilo mogoče izbrati obseg",
   "engine.create_pdf.createPdfCannotConvert": "Ustvari PDF ne more pretvoriti {{v0}} (sprejeto: {{v1}})",

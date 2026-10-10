@@ -2305,6 +2305,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Тека призначення має бути поза вихідною текою — виберіть для зібраних документів окрему теку.",
   "engine.create_pdf_folders.unknownSourceSet": "невідомий набір джерел {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Пароль цього документа не можна передати Ghostscript, тому ця операція не може прочитати документ. Відкрийте його з паролем власника або спочатку розшифруйте документ.",
+  "engine.credentials.heldCredentialNamesPermissions": "збережені облікові дані вказують свої дозволи",
+  "engine.credentials.heldCredentialUserRecipient": "збережені облікові дані — це відкриття користувачем або одержувачем, а не {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "порожній сторінці потрібні додатні ширина й висота",
   "engine.create_pdf.blankPagePagesSelect": "у порожньої сторінки немає сторінок, з яких можна вибрати діапазон",
   "engine.create_pdf.createPdfCannotConvert": "«Створити PDF» не може перетворити {{v0}} (приймаються: {{v1}})",

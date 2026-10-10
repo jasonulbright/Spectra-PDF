@@ -2437,6 +2437,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "يجب أن تكون الوجهة خارج المجلد المصدر — اختر مجلدًا منفصلًا للمستندات المجمَّعة.",
   "engine.create_pdf_folders.unknownSourceSet": "مجموعة مصادر غير معروفة {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "لا يمكن تمرير كلمة مرور هذا المستند إلى Ghostscript، لذا لا تستطيع هذه العملية قراءة المستند. افتحه بكلمة مرور المالك، أو فك تشفير المستند أولاً.",
+  "engine.credentials.heldCredentialNamesPermissions": "بيانات الاعتماد المحفوظة تحدد أذوناتها",
+  "engine.credentials.heldCredentialUserRecipient": "بيانات الاعتماد المحفوظة هي فتح بصفة مستخدم أو مستلم، وليست {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "تحتاج الصفحة الفارغة إلى عرض وارتفاع موجبين",
   "engine.create_pdf.blankPagePagesSelect": "لا تتضمن الصفحة الفارغة صفحات يمكن تحديد نطاق منها",
   "engine.create_pdf.createPdfCannotConvert": "لا يمكن لأداة «إنشاء PDF» تحويل الملف {{v0}} — الأنواع المقبولة هي {{v1}}",

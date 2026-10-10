@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "A célnak a forrásmappán kívül kell lennie — válasszon külön mappát az összeállított dokumentumoknak.",
   "engine.create_pdf_folders.unknownSourceSet": "ismeretlen forráskészlet: {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "A dokumentum jelszava nem adható át a Ghostscriptnek, ezért ez a művelet nem tudja beolvasni a dokumentumot. Nyissa meg a tulajdonosi jelszóval, vagy előbb oldja fel a dokumentum titkosítását.",
+  "engine.credentials.heldCredentialNamesPermissions": "a tárolt hitelesítő adat megnevezi az engedélyeit",
+  "engine.credentials.heldCredentialUserRecipient": "a tárolt hitelesítő adat felhasználói vagy címzetti megnyitás, nem {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "az üres oldalhoz pozitív szélesség és magasság szükséges",
   "engine.create_pdf.blankPagePagesSelect": "az üres oldalon nincs oldal, amelyből tartományt lehetne választani",
   "engine.create_pdf.createPdfCannotConvert": "A PDF létrehozása nem tudja átalakítani ezt: {{v0}} (elfogadott: {{v1}})",
