@@ -874,7 +874,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   : null
             }
           />
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-default">
             <input
               type="checkbox"
               data-testid="batch-inplace"
@@ -908,7 +908,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             />
           )}
           <div className="flex flex-col gap-1">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 data-testid="batch-repair-only"
@@ -957,7 +957,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               className="max-h-44 overflow-y-auto rounded border border-neutral-700 bg-neutral-800 p-2 grid grid-cols-2 gap-x-3 gap-y-1"
             >
               {OCR_LANGUAGES.map((l) => (
-                <label key={l.code} className="flex items-center gap-2 text-sm cursor-pointer">
+                <label key={l.code} className="flex items-center gap-2 text-sm cursor-default">
                   <input
                     type="checkbox"
                     data-testid={`batch-ocr-lang-${l.code}`}
@@ -995,7 +995,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               improves what will be read, where MRC runs after because it
               replaces what was read. */}
           <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 data-testid="batch-enhance"
@@ -1007,7 +1007,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             </label>
             {enhance && (
               <div className="flex flex-col gap-2 ps-6">
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-center gap-2 cursor-default">
                   <input
                     type="checkbox"
                     data-testid="batch-enhance-orientation"
@@ -1025,7 +1025,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           </div>
 
           <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-default">
               <input
                 type="checkbox"
                 data-testid="batch-mrc"
@@ -1051,7 +1051,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                     <option value="smallest">{tChrome('panel.compress.mrcPresetSmallest')}</option>
                   </select>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-center gap-2 cursor-default">
                   <input
                     type="checkbox"
                     data-testid="batch-mrc-verify"
@@ -1072,7 +1072,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               that the source folder is never modified. Nothing here is on
               until a folder is chosen or a box is ticked. */}
           <details className="rounded border border-neutral-800 bg-neutral-950/40" data-testid="batch-ocr-filing">
-            <summary className="px-3 py-2 text-sm text-neutral-300 cursor-pointer select-none">
+            <summary className="px-3 py-2 text-sm text-neutral-300 cursor-default select-none">
               {tChrome('dialog.batch.filingSection')}
             </summary>
             <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
@@ -1106,7 +1106,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 note={tChrome('dialog.batch.errorsNote')}
               />
               <label
-                className={`flex items-start gap-2 ${repairOnly ? 'opacity-50' : 'cursor-pointer'}`}
+                className={`flex items-start gap-2 ${repairOnly ? 'opacity-50' : 'cursor-default'}`}
                 title={repairOnly ? tChrome('dialog.batch.repairOnlyNote') : undefined}
               >
                 <input
@@ -1125,7 +1125,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 </span>
               </label>
               <label
-                className={`flex items-start gap-2 ${repairDamaged || repairOnly ? 'cursor-pointer' : 'opacity-50'}`}
+                className={`flex items-start gap-2 ${repairDamaged || repairOnly ? 'cursor-default' : 'opacity-50'}`}
               >
                 <input
                   type="checkbox"
@@ -1142,7 +1142,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                   </span>
                 </span>
               </label>
-              <label className="flex items-start gap-2 cursor-pointer">
+              <label className="flex items-start gap-2 cursor-default">
                 <input
                   type="checkbox"
                   data-testid="batch-ocr-remove-empty-folders"

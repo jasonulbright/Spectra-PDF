@@ -280,7 +280,7 @@ function DiffRow({ row }: { row: CompareRow }): React.ReactElement {
         {row.page != null ? `p${row.page}` : ''}
       </span>
       <span className="w-3 shrink-0 select-none">{sign}</span>
-      <span className="whitespace-pre-wrap break-words">
+      <span className="selectable whitespace-pre-wrap break-words">
         {row.segments
           ? row.segments.map(([text, changed], i) =>
               changed ? (

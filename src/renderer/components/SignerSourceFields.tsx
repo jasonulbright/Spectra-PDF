@@ -415,7 +415,7 @@ export function SignerSourceFields({
       <div key={m} className="flex flex-col">
         <label
           data-testid={`${idPrefix}-source-${m}`}
-          className="flex w-full items-start gap-2 cursor-pointer"
+          className="flex w-full items-start gap-2 cursor-default"
         >
           <input
             type="radio"

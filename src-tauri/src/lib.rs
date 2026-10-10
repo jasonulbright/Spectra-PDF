@@ -92,6 +92,7 @@ pub mod csc_oauth;
 pub mod session;
 pub mod tabdrag;
 mod prompt_turn;
+mod web_link;
 
 /// A Windows path literal as this platform spells an absolute path: identity
 /// on Windows; elsewhere the drive is dropped and separators become `/`.
@@ -417,6 +418,7 @@ pub fn run() {
             commands::open_third_party_licenses,
             commands::reveal_in_file_manager,
             commands::open_releases_page,
+            commands::open_web_link,
             commands::get_system_accent_color,
             commands::get_window_backdrop,
             commands::platform_capabilities,

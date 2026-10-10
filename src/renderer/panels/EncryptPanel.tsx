@@ -81,7 +81,7 @@ export function EncryptPanel(): React.ReactElement {
   }, [activeFile, recipients, perms, restricted, call, saveFile]);
 
   const permRow = (key: keyof typeof perms, label: string) => (
-    <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+    <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-default">
       <input
         data-testid={`encrypt-allow-${key}`}
         type="checkbox"
@@ -105,7 +105,7 @@ export function EncryptPanel(): React.ReactElement {
             ['certs', tChrome('panel.encrypt.modeCerts')],
           ] as const
         ).map(([m, label]) => (
-          <label key={m} className="flex items-center gap-1.5 text-sm text-neutral-300 cursor-pointer">
+          <label key={m} className="flex items-center gap-1.5 text-sm text-neutral-300 cursor-default">
             <input
               data-testid={`encrypt-mode-${m}`}
               type="radio"

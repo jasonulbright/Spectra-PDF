@@ -29,7 +29,8 @@ import {
   parseSignaturePolicy,
   type SignedEditDecision,
 } from './lib/signatures';
-import type { LinkSpec } from './lib/links';
+import type { LinkSpec, LinkTarget } from './lib/links';
+import { namedDestinationPage, planLinkFollow, visiblePath } from './lib/link-follow';
 import { toEngineFormat } from './lib/af-emit';
 import {
   toEngineAction,
@@ -305,9 +306,10 @@ const panels: Record<Operation, React.ComponentType> = {
 interface ConfirmRequest {
   id: number;
   message: string;
-  kind?: 'unsaved' | 'proceed' | 'notice';
+  kind?: 'unsaved' | 'proceed' | 'notice' | 'choice';
   title?: string;
   affirmLabel?: string;
+  alternateLabel?: string;
   resolve: (result: ConfirmResult) => void;
 }
 
@@ -461,6 +463,23 @@ function AppContent(): React.ReactElement {
       requestConfirm({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
     });
   }, [requestConfirm]);
+
+  /** Two named actions and Cancel. Resolves which was chosen; Cancel, Escape
+   * and closing the dialog all resolve 'cancel'. */
+  const showChoice = useCallback(
+    (title: string, message: string, affirmLabel: string, alternateLabel: string): Promise<'affirm' | 'alternate' | 'cancel'> =>
+      new Promise((resolve) => {
+        requestConfirm({
+          message,
+          kind: 'choice',
+          title,
+          affirmLabel,
+          alternateLabel,
+          resolve: (r) => resolve(r === 'save' ? 'affirm' : r === 'discard' ? 'alternate' : 'cancel'),
+        });
+      }),
+    [requestConfirm],
+  );
 
   // The submission consent dialog's state. It resolves ONE answer for ONE
   // request: there is no per-host memory to keep, deliberately, so the state
@@ -2284,6 +2303,110 @@ function AppContent(): React.ReactElement {
       readState,
       writeGesture,
     ],
+  );
+
+  // A link the reader clicked in the reading view (`lib/link-follow.ts` holds
+  // the routing and its reasons). Read-only against the document: a jump moves
+  // the view, and everything that would leave this document asks first. A web
+  // address is never opened silently: the reader sees it in full and chooses
+  // to open it in the browser or only copy it.
+  const handleFollowLink = useCallback(
+    async (link: { path: string; workingPath: string; target: LinkTarget }) => {
+      const title = tChrome('app.link.title');
+      const jump = async (page: number) => {
+        if (!(getCanvasServices()?.jumpToFilePage(link.path, page) ?? false)) {
+          await showNotice(title, tChrome('app.link.pageUnresolved'));
+        }
+      };
+      const plan = planLinkFollow(link.target, link.path);
+      switch (plan.kind) {
+        case 'page':
+          await jump(plan.page);
+          return;
+        case 'pageUnresolved':
+          await showNotice(title, tChrome('app.link.pageUnresolved'));
+          return;
+        case 'named': {
+          // Resolved at the click, not at open: a document with thousands of
+          // names pays nothing until a reader follows one.
+          let page: number | null;
+          try {
+            const listed = (await call('list_named_destinations', { file: link.workingPath })) as unknown as {
+              destinations?: { name: string; page: number | null }[];
+            };
+            page = namedDestinationPage(listed.destinations, plan.name);
+          } catch (err) {
+            await showNotice(title, errorText(err));
+            return;
+          }
+          if (page === null) {
+            await showNotice(title, tChrome('app.link.namedUnresolved', { name: visiblePath(plan.name) }));
+            return;
+          }
+          await jump(page);
+          return;
+        }
+        case 'web': {
+          // One dialog, the full address, and nothing by default: Open hands
+          // the address to the Rust command (which re-checks it before the
+          // system browser sees it); Copy never launches anything.
+          const choice = await showChoice(
+            tChrome('app.link.externalTitle'),
+            tChrome('app.link.web', { url: plan.url }),
+            tChrome('app.link.openInBrowser'),
+            tChrome('app.link.copyAddress'),
+          );
+          if (choice === 'alternate') await copyToClipboard(plan.url);
+          if (choice === 'affirm') {
+            try {
+              await app.openWebLink(plan.url);
+            } catch (err) {
+              await showNotice(title, tChrome('app.link.openFailed', { url: plan.url, message: errorText(err) }));
+            }
+          }
+          return;
+        }
+        case 'webRefused':
+          await showNotice(
+            title,
+            plan.reason === 'scheme'
+              ? tChrome('app.link.webScheme', { url: plan.url, scheme: plan.scheme ?? '' })
+              : plan.reason === 'mailField'
+                ? tChrome('app.link.webMailField', { url: plan.url, field: plan.field })
+                : tChrome('app.link.webMalformed', { url: plan.url }),
+          );
+          return;
+        case 'pdf': {
+          const proceed = await showProceedConfirm(title, tChrome('app.link.openPdf', { file: visiblePath(plan.path) }));
+          if (!proceed) return;
+          await openByPaths([plan.path], { focus: true });
+          if (plan.page === null) return;
+          const [opened] = await app.canonicalizePaths([plan.path]).catch(() => [plan.path]);
+          // The open lands over the next renders; the jump is idempotent and
+          // no-ops until the page resolves (`openPathAtPage`'s bounded shape).
+          for (let i = 0; i < 15; i++) {
+            if (getCanvasServices()?.jumpToFilePage(opened, plan.page)) return;
+            await new Promise((r) => setTimeout(r, 120));
+          }
+          return;
+        }
+        case 'fileNotRun':
+          await showNotice(title, tChrome('app.link.fileNotRun', { file: plan.path }));
+          return;
+        case 'fileRemote':
+          await showNotice(title, tChrome('app.link.fileRemote', { file: plan.path }));
+          return;
+        case 'launch':
+          await showNotice(title, tChrome('app.link.launch', { file: plan.path }));
+          return;
+        case 'unsupported':
+          await showNotice(title, tChrome('app.link.unsupported', { action: plan.action }));
+          return;
+        default:
+          await showNotice(title, tChrome('app.link.none'));
+      }
+    },
+    [call, copyToClipboard, openByPaths, showChoice, showNotice, showProceedConfirm],
   );
 
   // Link authoring writes /Link annotations, so every link method is
@@ -4113,6 +4236,7 @@ function AppContent(): React.ReactElement {
                   onSaveRedactionMarks={handleSaveRedactionMarks}
                   onWidgetAction={handleWidgetAction}
                   onAddLinks={handleAddLinks}
+                  onFollowLink={handleFollowLink}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onSaveFiles={handleSaveFiles}
                   onEditImage={handleEditImage}
@@ -4298,6 +4422,7 @@ function AppContent(): React.ReactElement {
         kind={confirmState?.kind}
         title={confirmState?.title}
         affirmLabel={confirmState?.affirmLabel}
+        alternateLabel={confirmState?.alternateLabel}
         onResult={handleConfirmResult}
       />
       {unlockState?.kind === 'password' && (

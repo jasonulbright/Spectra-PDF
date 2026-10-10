@@ -518,7 +518,7 @@ export function LinksPanel(): React.ReactElement {
                         kind: tChrome(KIND_KEYS[l.kind] ?? 'panel.links.kind.other'),
                       })}
                     </div>
-                    <div className="text-sm text-neutral-200 truncate" title={l.target}>
+                    <div className="selectable text-sm text-neutral-200 truncate" title={l.target}>
                       {l.target || tChrome('panel.links.noTarget')}
                     </div>
                   </div>
