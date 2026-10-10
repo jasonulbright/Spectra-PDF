@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "De bestemming moet buiten de bronmap liggen — kies een aparte map voor de samengestelde documenten.",
   "engine.create_pdf_folders.unknownSourceSet": "onbekende bronverzameling {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Het wachtwoord van dit document kan niet aan Ghostscript worden doorgegeven, dus deze bewerking kan het document niet lezen. Open het met het eigenaarswachtwoord of ontsleutel het document eerst.",
+  "engine.credentials.heldCredentialNamesPermissions": "een bewaarde referentie vermeldt haar machtigingen",
+  "engine.credentials.heldCredentialUserRecipient": "een bewaarde referentie is een opening als gebruiker of ontvanger, niet {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "een lege pagina heeft een positieve breedte en hoogte nodig",
   "engine.create_pdf.blankPagePagesSelect": "een lege pagina heeft geen pagina's om een bereik uit te kiezen",
   "engine.create_pdf.createPdfCannotConvert": "PDF maken kan {{v0}} niet converteren (geaccepteerd: {{v1}})",

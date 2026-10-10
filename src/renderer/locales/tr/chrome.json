@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Hedef, kaynak klasörün dışında olmalı — birleştirilen belgeler için ayrı bir klasör seçin.",
   "engine.create_pdf_folders.unknownSourceSet": "bilinmeyen kaynak kümesi {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Bu belgenin parolası Ghostscript uygulamasına iletilemiyor, bu nedenle bu işlem belgeyi okuyamıyor. Belgeyi sahip parolasıyla açın veya önce belgenin şifresini çözün.",
+  "engine.credentials.heldCredentialNamesPermissions": "tutulan kimlik bilgisi izinlerini belirtir",
+  "engine.credentials.heldCredentialUserRecipient": "tutulan kimlik bilgisi bir kullanıcı veya alıcı açışıdır, {{opener}} değil",
   "engine.create_pdf.blankPageNeedsPositive": "boş bir sayfa pozitif bir genişlik ve yükseklik gerektirir",
   "engine.create_pdf.blankPagePagesSelect": "boş bir sayfada aralık seçilecek sayfa yoktur",
   "engine.create_pdf.createPdfCannotConvert": "PDF Oluştur {{v0}} biçimini dönüştüremez (kabul edilenler: {{v1}})",

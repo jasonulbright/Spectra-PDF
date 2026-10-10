@@ -2305,6 +2305,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Cieľ musí byť mimo zdrojového priečinka — zvoľte pre zostavené dokumenty samostatný priečinok.",
   "engine.create_pdf_folders.unknownSourceSet": "neznáma množina zdrojov {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Heslo tohto dokumentu nemožno odovzdať programu Ghostscript, takže táto operácia nemôže dokument prečítať. Otvorte ho heslom vlastníka alebo dokument najprv dešifrujte.",
+  "engine.credentials.heldCredentialNamesPermissions": "uchované poverenie uvádza svoje oprávnenia",
+  "engine.credentials.heldCredentialUserRecipient": "uchované poverenie je otvorenie používateľom alebo príjemcom, nie {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "prázdna strana potrebuje kladnú šírku a výšku",
   "engine.create_pdf.blankPagePagesSelect": "prázdna strana nemá strany, z ktorých sa dá vybrať rozsah",
   "engine.create_pdf.createPdfCannotConvert": "„Vytvoriť PDF“ nedokáže previesť {{v0}} (prijímané: {{v1}})",

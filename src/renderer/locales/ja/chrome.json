@@ -2107,6 +2107,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "出力先はソースフォルダーの外にしてください。組み立てた文書用に別のフォルダーを選んでください。",
   "engine.create_pdf_folders.unknownSourceSet": "不明なソース種別 {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "この文書のパスワードは Ghostscript に渡せないため、この操作では文書を読み取れません。所有者パスワードで開くか、先に文書の暗号化を解除してください。",
+  "engine.credentials.heldCredentialNamesPermissions": "保持された資格情報には権限が記載されています",
+  "engine.credentials.heldCredentialUserRecipient": "保持された資格情報はユーザーまたは受信者によるオープンであり、{{opener}} ではありません",
   "engine.create_pdf.blankPageNeedsPositive": "空白ページには正の幅と高さが必要です",
   "engine.create_pdf.blankPagePagesSelect": "空白ページには範囲を選択できるページがありません",
   "engine.create_pdf.createPdfCannotConvert": "PDF の作成では {{v0}} を変換できません（対応形式: {{v1}}）",

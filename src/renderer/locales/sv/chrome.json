@@ -2173,6 +2173,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "Målet måste ligga utanför källmappen — välj en egen mapp för de sammanfogade dokumenten.",
   "engine.create_pdf_folders.unknownSourceSet": "okänd källuppsättning {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Dokumentets lösenord kan inte lämnas till Ghostscript, så den här åtgärden kan inte läsa dokumentet. Öppna det med ägarlösenordet eller dekryptera dokumentet först.",
+  "engine.credentials.heldCredentialNamesPermissions": "en lagrad autentiseringsuppgift anger sina behörigheter",
+  "engine.credentials.heldCredentialUserRecipient": "en lagrad autentiseringsuppgift är en öppning som användare eller mottagare, inte {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "en tom sida kräver en positiv bredd och höjd",
   "engine.create_pdf.blankPagePagesSelect": "en tom sida har inga sidor att välja ett intervall ur",
   "engine.create_pdf.createPdfCannotConvert": "Skapa PDF kan inte konvertera {{v0}} (godtas: {{v1}})",

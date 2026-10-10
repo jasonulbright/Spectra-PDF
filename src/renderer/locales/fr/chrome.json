@@ -2239,6 +2239,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "La destination doit se trouver hors du dossier source : choisissez un dossier distinct pour les documents assemblés.",
   "engine.create_pdf_folders.unknownSourceSet": "ensemble de sources inconnu {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "Le mot de passe de ce document ne peut pas être transmis à Ghostscript : cette opération ne peut donc pas lire le document. Ouvrez-le avec le mot de passe du propriétaire ou déchiffrez d’abord le document.",
+  "engine.credentials.heldCredentialNamesPermissions": "un identifiant conservé indique ses autorisations",
+  "engine.credentials.heldCredentialUserRecipient": "un identifiant conservé correspond à une ouverture par utilisateur ou par destinataire, et non {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "une page vierge nécessite une largeur et une hauteur positives",
   "engine.create_pdf.blankPagePagesSelect": "une page vierge n’a aucune page dans laquelle choisir une plage",
   "engine.create_pdf.createPdfCannotConvert": "Créer un PDF ne peut pas convertir {{v0}} (formats acceptés : {{v1}})",

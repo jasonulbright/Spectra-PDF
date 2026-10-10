@@ -2239,6 +2239,8 @@
   "engine.create_pdf_folders.destinationMustOutsideSource": "O destino precisa ficar fora da pasta de origem — escolha uma pasta separada para os documentos montados.",
   "engine.create_pdf_folders.unknownSourceSet": "conjunto de origens desconhecido {{sources}} ({{v1}})",
   "engine.credentials.ghostscriptPasswordUnsupported": "A senha deste documento não pode ser repassada ao Ghostscript, portanto esta operação não consegue ler o documento. Abra-o com a senha do proprietário ou descriptografe o documento primeiro.",
+  "engine.credentials.heldCredentialNamesPermissions": "uma credencial retida informa suas permissões",
+  "engine.credentials.heldCredentialUserRecipient": "uma credencial retida é uma abertura de usuário ou de destinatário, não {{opener}}",
   "engine.create_pdf.blankPageNeedsPositive": "uma página em branco precisa de largura e altura positivas",
   "engine.create_pdf.blankPagePagesSelect": "uma página em branco não tem páginas das quais selecionar um intervalo",
   "engine.create_pdf.createPdfCannotConvert": "Criar PDF não consegue converter {{v0}} (aceitos: {{v1}})",
