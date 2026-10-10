@@ -8,7 +8,7 @@ The pipeline is two external tools, both already required by the product
 (tesseract ships with it; Ghostscript is bundled with it or installed as a
 package dependency, and validated before each raster):
 
-    page -> Ghostscript raster (PNG, 300 dpi) -> tesseract TSV -> word boxes
+    page -> Ghostscript raster (PNG, 150-300 dpi) -> tesseract TSV -> word boxes
 
 Coordinates: tesseract reports boxes in IMAGE PIXELS. This returns them
 normalized to fractions of the rendered page (x, y, w, h in 0..1, y measured
@@ -40,6 +40,20 @@ from . import budget, platform_support
 # tesseract's models are trained around -- materially lower loses small type,
 # materially higher costs time for no accuracy.
 OCR_DPI = 300
+
+# A page that draws one picture and nothing else renders at the picture's
+# effective density on the page times OCR_SOURCE_HEADROOM, clamped to
+# [OCR_MIN_DPI, OCR_DPI]. At a flat OCR_DPI a low-density picture is upsampled
+# several times over its own samples, and tesseract finds less text in that
+# upsampled raster than in one near the source density.
+OCR_SOURCE_HEADROOM = 1.5
+# Below this density the glyphs of a low-density picture are too few pixels
+# tall for tesseract to read.
+OCR_MIN_DPI = 150
+
+# ISO 32000-2 12.5.3, Table 167: an annotation flagged Hidden (bit 2) or
+# NoView (bit 6) is not drawn on screen, so the raster does not contain it.
+_ANNOT_NOT_DRAWN = 2 | 32
 
 # Tesseract TSV columns. `level` 5 is a WORD row; the coarser levels (page,
 # block, paragraph, line) describe layout and are not what we index.
@@ -75,7 +89,103 @@ def _tesseract_exe(tesseract_path: str) -> Path:
     return exe
 
 
-def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
+def _draws_annotations(page) -> bool:
+    """True when the raster of `page` contains an annotation's appearance.
+
+    Ghostscript draws annotations with the page, and synthesises an appearance
+    for several subtypes that carry none, so any annotation that is not a
+    Popup and not flagged out of the screen view counts.
+    """
+    import pikepdf
+
+    annots = page.obj.get("/Annots")
+    if not isinstance(annots, pikepdf.Array):
+        return False
+    for annot in annots:
+        if not isinstance(annot, pikepdf.Dictionary):
+            continue
+        if annot.get("/Subtype") == pikepdf.Name.Popup:
+            continue
+        if int(annot.get("/F", 0)) & _ANNOT_NOT_DRAWN:
+            continue
+        return True
+    return False
+
+
+def _picture_page_dpi(pdf, page) -> float | None:
+    """The effective density of the one picture `page` draws, or None.
+
+    None when the page draws anything else that reaches the raster: visible
+    text, vector art, a second picture, an annotation. Invisible text (`3 Tr`,
+    an existing OCR layer) does not reach it. The density is samples per inch
+    on the page along each sample axis of the placement matrix, scaled by
+    /UserUnit (ISO 32000-2 8.3.2.3), and the denser axis decides: rendering
+    below either axis's density discards samples on that axis. This holds for
+    a rotated or skewed placement and for any /Rotate, which only turns the
+    raster. The sample format plays no part.
+    """
+    import math
+
+    import pikepdf
+
+    from .mrc import _has_other_visible_content
+    from .page_images import _walk_placements
+    from .redact import IDENTITY, _resolve_resources
+
+    if _draws_annotations(page):
+        return None
+    resources = _resolve_resources(page)
+    instructions = list(pikepdf.parse_content_stream(page))
+    placements = [
+        p
+        for p in _walk_placements(pdf, instructions, resources, IDENTITY, 0, None, [], False)
+        if not p.get("clipped")
+    ]
+    if len(placements) != 1 or placements[0].get("kind") not in ("xobject", "inline"):
+        return None
+    if _has_other_visible_content(pdf, instructions, resources, None, inline_images=False):
+        return None
+    placement = placements[0]
+    a, b, c, d, _e, _f = (float(v) for v in placement["matrix"])
+    unit = float(page.obj.get("/UserUnit", 1))
+    across = math.hypot(a, b) * unit
+    down = math.hypot(c, d) * unit
+    width = int(placement["native_width"] or 0)
+    height = int(placement["native_height"] or 0)
+    if not (across > 0 and down > 0 and width > 0 and height > 0):
+        return None
+    dpi = max(width * 72.0 / across, height * 72.0 / down)
+    return dpi if math.isfinite(dpi) else None
+
+
+def _ocr_dpi_for_page(file: str, page: int) -> int:
+    """The resolution to rasterise ONE 1-based page at for recognition.
+
+    A page that draws one picture and nothing else gets that picture's
+    effective density times OCR_SOURCE_HEADROOM, clamped to
+    [OCR_MIN_DPI, OCR_DPI]; every other page gets OCR_DPI. Any failure to
+    open or read the page (no stored password, a broken content stream, a page
+    out of range) also gets OCR_DPI: recognition never stops here.
+    """
+    try:
+        from engine.credentials import open_pdf
+
+        with open_pdf(file) as pdf:
+            if not 1 <= page <= len(pdf.pages):
+                return OCR_DPI
+            dpi = _picture_page_dpi(pdf, pdf.pages[page - 1])
+        if dpi is None:
+            return OCR_DPI
+        # Clamped before round(): a finite density near the float maximum
+        # overflows to inf under the headroom, and round(inf) raises.
+        return max(OCR_MIN_DPI, round(min(dpi * OCR_SOURCE_HEADROOM, OCR_DPI)))
+    except Exception:
+        return OCR_DPI
+
+
+def _render_page_png(
+    file: str, page: int, gs_path: str, out_png: Path, dpi: int = OCR_DPI
+) -> None:
     """Rasterise ONE page with the configured Ghostscript.
 
     Same device/idiom as image_export.py. -dFirstPage/-dLastPage bound the work
@@ -96,7 +206,7 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
         "-dBATCH",
         "-dSAFER",
         "-sDEVICE=png16m",
-        f"-r{OCR_DPI}",
+        f"-r{dpi}",
         "-dUseCropBox",
         f"-dFirstPage={page}",
         f"-dLastPage={page}",
@@ -403,7 +513,9 @@ def recognize(
 
     with tempfile.TemporaryDirectory(prefix="opdfs-ocr-") as tmp:
         png = Path(tmp) / "page.png"
-        _render_page_png(str(input_path), page, gs_path, png)
+        _render_page_png(
+            str(input_path), page, gs_path, png, _ocr_dpi_for_page(str(input_path), page)
+        )
         try:
             text, words = _run_tesseract(png, lang, exe, tessdata)
         except _TesseractFailure as exc:
