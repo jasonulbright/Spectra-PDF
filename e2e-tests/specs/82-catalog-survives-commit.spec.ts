@@ -113,10 +113,14 @@ describe('catalog state survives committed page edits', () => {
     expect(outline.outline[0].title).toBe('Catalog Carry Marker');
     expect(outline.outline[0].page).toBe(2);
 
-    // The label range survived (structure pinned semantically in vitest —
-    // here the committed file must still carry the roman range at all).
-    const bytes = readFileSync(dest);
-    expect(bytes.includes('/PageLabels')).toBe(true);
+    // The rebuild writes the catalog into a compressed object stream, so the
+    // label range is read from the parsed file, never searched for in raw bytes.
+    const saved = await PDFDocument.load(readFileSync(dest), { updateMetadata: false });
+    expect(saved.getPage(0).getRotation().angle).toBe(90);
+    const nums = saved.catalog.lookup(PDFName.of('PageLabels'), PDFDict).lookup(PDFName.of('Nums'), PDFArray);
+    expect(nums.size()).toBe(2);
+    expect(nums.lookup(0, PDFNumber).asNumber()).toBe(0);
+    expect(nums.lookup(1, PDFDict).lookup(PDFName.of('S'))).toBe(PDFName.of('r'));
   });
 
   it('keeps a bookmark whose GoTo action targeted a deleted page', async () => {
