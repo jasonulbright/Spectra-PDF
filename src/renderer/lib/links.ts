@@ -292,6 +292,12 @@ export interface LinkRegion extends PickedLink {
   pageId: string;
   rect: { x: number; y: number; w: number; h: number };
   kind: string;
+  /** Where the link goes, as the engine read it — what following it in the
+   * reading view routes on (`lib/link-follow.ts`). */
+  target: LinkTarget;
+  /** The page's own rotation when `rect` was projected. A page turned since
+   * then draws the region over a different part of the page. */
+  rotation: 0 | 90 | 180 | 270;
 }
 
 const NO_REGIONS: readonly LinkRegion[] = [];
@@ -305,6 +311,42 @@ export function linksForPage(
   if (!regions || regions.length === 0) return NO_REGIONS;
   const out = regions.filter((r) => r.pageId === pageId);
   return out.length === 0 ? NO_REGIONS : out;
+}
+
+/** The regions a reader may follow: those read from the bytes their file
+ * holds now, on a page not turned since they were projected. A followed region
+ * is invisible, so one drawn in the wrong place sends a press to a link the
+ * reader never saw; the re-seed for the new bytes or the committed turn
+ * restores it. Returns `regions` itself when nothing is left out. */
+export function followableRegions(
+  regions: readonly LinkRegion[],
+  fileOf: (path: string) => { buffer: unknown; workingPath: string } | undefined,
+  rotationOf: (pageId: string) => number | undefined,
+): readonly LinkRegion[] {
+  const live = regions.filter((r) => {
+    const owner = fileOf(r.path);
+    return owner?.buffer === r.buffer && owner.workingPath === r.workingPath
+      && rotationOf(r.pageId) === r.rotation;
+  });
+  return live.length === regions.length ? regions : live;
+}
+
+/** Every page's regions, grouped ONCE per region list. A view that renders a
+ * page cell on every scroll pass looks a page up here instead of filtering, so
+ * each page's array is the same object until the regions change and the
+ * memoised cell is not re-rendered — the reading view carries the regions all
+ * the time under the Select tool, not only while the Links tool is open. */
+export function groupLinksByPage(
+  regions: readonly LinkRegion[] | undefined,
+): (pageId: string) => readonly LinkRegion[] {
+  if (!regions || regions.length === 0) return () => NO_REGIONS;
+  const byPage = new Map<string, LinkRegion[]>();
+  for (const r of regions) {
+    const list = byPage.get(r.pageId);
+    if (list) list.push(r);
+    else byPage.set(r.pageId, [r]);
+  }
+  return (pageId) => byPage.get(pageId) ?? NO_REGIONS;
 }
 
 let drawn: DrawnLink | null = null;

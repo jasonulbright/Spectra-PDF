@@ -576,6 +576,11 @@ export const CANVAS_STRINGS = {
     '{{name}}: {{count}} link is not shown on the page — its page is no longer in this document.',
   'canvas.link.seedOrphaned_other':
     '{{name}}: {{count}} links are not shown on the page — their pages are no longer in this document.',
+  // A link in the reading view, named by where it goes.
+  'canvas.link.followPage': 'Go to page {{page}}',
+  'canvas.link.followNamed': 'Go to “{{name}}”',
+  'canvas.link.followWeb': 'Link to {{url}}',
+  'canvas.link.followFile': 'Link to {{file}}',
 
   // The on-canvas sign card.
   'canvas.sign.fieldTitle': 'Sign field "{{field}}"',

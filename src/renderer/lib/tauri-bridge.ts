@@ -1012,6 +1012,11 @@ export const app = {
   /** Open the releases page in the browser. Destination is compiled into the
    *  Rust command — nothing about it comes from the update manifest. */
   openReleasesPage: () => invoke('open_releases_page'),
+  /** Open a web address a PDF link names in the default browser, after the
+   *  reader chose to. The Rust command re-checks it (http/https/mailto only,
+   *  no hidden characters, no user-info, at most 2048 bytes) and refuses
+   *  anything else; see `src-tauri/src/web_link.rs`. */
+  openWebLink: (url: string) => invoke('open_web_link', { url }),
   getSystemAccentColor: () => invoke<string | null>('get_system_accent_color'),
   /** Which backdrop the window was created with: "mica" or "none". */
   getWindowBackdrop: () => invoke<string>('get_window_backdrop'),

@@ -55,7 +55,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
   return (
     <div className="border-t border-neutral-800 bg-neutral-850 shrink-0">
       <div
-        className="flex items-center justify-between px-4 py-1.5 cursor-pointer select-none"
+        className="flex items-center justify-between px-4 py-1.5 cursor-default select-none"
         onClick={() => setCollapsed((prev) => !prev)}
       >
         <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">
@@ -91,7 +91,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
               </span>
               {/* Wraps rather than truncating: a failure's text is the only
                   account of what went wrong, and an ellipsis hid its end. */}
-              <span className="min-w-0 flex-1 text-neutral-500 [overflow-wrap:anywhere]">
+              <span className="selectable min-w-0 flex-1 text-neutral-500 [overflow-wrap:anywhere]">
                 {/* Completion is the queue's OWN wording, keyed off the state
                     discriminant rather than off any text the hook wrote —
                     a failure's text belongs to the engine and passes through. */}
