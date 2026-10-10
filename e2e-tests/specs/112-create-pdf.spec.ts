@@ -207,6 +207,9 @@ describe('Create PDF from any file', () => {
       async () => ((await getState()).activeFile?.path ?? '').includes('mixed.pdf'),
       { timeout: 20_000, timeoutMsg: 'the created PDF never opened in the app' },
     );
+    // The dialog closes when the open settles, after the document is already
+    // active; a command issued before that close is undone by it.
+    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 20_000 });
   });
 
   it('normalises every page onto a chosen size without stretching', async function () {
