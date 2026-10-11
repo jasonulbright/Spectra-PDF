@@ -14,6 +14,8 @@ from io import BytesIO
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
+import vendored_tools
+
 FONT_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "fonts")
 SANS = os.path.join(FONT_DIR, "LiberationSans-Regular.ttf")
 SERIF = os.path.join(FONT_DIR, "LiberationSerif-Regular.ttf")
@@ -26,7 +28,7 @@ def fonts_available() -> bool:
 def _face(path: str = SANS):
     from fontTools.ttLib import TTFont
 
-    raw = open(path, "rb").read()
+    raw = open(vendored_tools.require(path, "bundled font"), "rb").read()
     return raw, TTFont(BytesIO(raw), lazy=True)
 
 

@@ -660,10 +660,12 @@ class TestPngSizeBytes:
 
 
 class TestRecognizeRaster:
+    @needs_tesseract
     def test_refuses_input_that_is_not_base64(self):
         with pytest.raises(ValueError):
             recognize_raster("not base64!!", tesseract_path=str(TESSERACT))
 
+    @needs_tesseract
     def test_refuses_empty_input(self):
         with pytest.raises(ValueError):
             recognize_raster("", tesseract_path=str(TESSERACT))

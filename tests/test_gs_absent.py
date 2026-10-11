@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import gs_axis  # noqa: E402
 import preflight_builders as builders  # noqa: E402
+import vendored_tools  # noqa: E402
 from engine import gs_capability as gc  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -336,10 +337,16 @@ ROSTER: dict[str, Callable[[Bench], object]] = {
 
 #: The printer door drives Ghostscript's Windows print device; elsewhere it
 #: refuses by platform before Ghostscript is consulted (tests/test_engine.py).
+#: The prepress door resolves its destination profile before it consults
+#: Ghostscript, so with no bundled profile it refuses on the profile instead.
+DOOR_MARKS = {
+    "printer": pytest.mark.skipif(
+        sys.platform != "win32", reason="the print device is a Windows interface"),
+    "prepress": pytest.mark.skipif(
+        not vendored_tools.icc_profiles_provisioned(), reason=vendored_tools.ICC_MISSING),
+}
 DOORS = [
-    pytest.param(door, marks=pytest.mark.skipif(
-        sys.platform != "win32", reason="the print device is a Windows interface"))
-    if door == "printer" else door
+    pytest.param(door, marks=DOOR_MARKS[door]) if door in DOOR_MARKS else door
     for door in sorted(ROSTER)
 ]
 

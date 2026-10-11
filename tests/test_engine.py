@@ -227,6 +227,7 @@ class TestCompress:
 # ── PDF/A ─────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestPdfa:
     def test_pdfa_2b(self, tmp_pdf, tmp_dir, gs_path):
         out = os.path.join(tmp_dir, "pdfa.pdf")
@@ -4817,6 +4818,7 @@ class TestInPlaceOutputs:
         with pikepdf.open(tmp_pdf) as pdf:
             assert len(pdf.pages) == 5
 
+    @pytest.mark.usefixtures("srgb_profile")
     def test_pdfa_in_place(self, tmp_pdf, gs_path):
         result = convert_pdfa(file=tmp_pdf, output=tmp_pdf, gs_path=gs_path)
         assert result["level"] == "PDF/A-2b"

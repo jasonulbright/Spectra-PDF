@@ -5619,6 +5619,7 @@ class TestHardBreakDurability:
         # a merge that re-anchored it would move it onto the joined seam.
         assert joined.split(chr(10))[1].lstrip().startswith("gamma")
 
+    @pytest.mark.usefixtures("srgb_profile")
     def test_pdfa_conversion_and_rebuild_carry_the_break(self, tmp_dir, gs_path):
         from engine.pdfa import convert_pdfa
         from engine.rebuild import rebuild

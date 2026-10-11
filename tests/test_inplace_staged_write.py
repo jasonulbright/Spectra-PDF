@@ -722,6 +722,8 @@ class Case:
     needs_fonts: bool = False
     needs_cjk: bool = False
     needs_tesseract: bool = False
+    needs_icc: bool = False
+    needs_srgb: bool = False
     leaves: tuple = ()
     deterministic: bool = True
     run_gs: Callable[[str, str, str], dict] | None = None
@@ -1661,6 +1663,7 @@ CASES = (
         _producer,
         doors=("convert_pdfa",),
         needs_gs=True,
+        needs_srgb=True,
         run_gs=lambda src, out, gs: pdfa_mod.convert_pdfa(src, out, gs_path=gs),
         dies_on=budget_mod,
         dies="gs",
@@ -1699,6 +1702,7 @@ CASES = (
         _producer,
         doors=("convert_cmyk",),
         needs_gs=True,
+        needs_icc=True,
         run_gs=lambda src, out, gs: prepress_mod.convert_cmyk(src, out, gs_path=gs),
         dies_on=budget_mod,
         dies="gs",
@@ -1714,6 +1718,7 @@ CASES = (
         _producer,
         doors=("convert_pdfx",),
         needs_gs=True,
+        needs_icc=True,
         run_gs=lambda src, out, gs: prepress_mod.convert_pdfx(src, out, gs_path=gs),
         dies_on=budget_mod,
         dies="gs",
@@ -1956,6 +1961,10 @@ def case(request, gs_path_or_none):
         pytest.skip("bundled CJK face not provisioned")
     if subject.needs_tesseract and not TESSERACT.is_file():
         pytest.skip("Tesseract not vendored")
+    if subject.needs_icc:
+        vendored_tools.require_icc_profiles()
+    if subject.needs_srgb:
+        vendored_tools.require(vendored_tools.SRGB_PROFILE, "bundled sRGB profile")
     if subject.needs_gs:
         if gs_path_or_none is None:
             pytest.skip(gs_axis.PRESENT_AXIS_SKIP)

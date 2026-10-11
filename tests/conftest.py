@@ -144,11 +144,14 @@ def icc_dir():
     would pass over an empty tree and the tests below would then measure
     nothing while reporting green.
     """
-    import glob
-
-    if not glob.glob(os.path.join(ICC_DIR, "*.icc")):
-        pytest.skip("bundled ICC profiles not available")
+    vendored_tools.require_icc_profiles()
     return ICC_DIR
+
+
+@pytest.fixture
+def srgb_profile():
+    """The bundled sRGB profile every PDF/A output intent embeds."""
+    return vendored_tools.require(vendored_tools.SRGB_PROFILE, "bundled sRGB profile")
 
 
 def _resolve_soffice():
