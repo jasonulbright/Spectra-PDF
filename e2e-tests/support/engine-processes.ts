@@ -1,10 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
-
-/** The binary under test, as `wdio.conf.ts` resolves it. */
-const APP_BINARY = process.env.SPECTRAPDF_E2E_APP
-  ? resolve(process.env.SPECTRAPDF_E2E_APP)
-  : resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+import { APP_BINARY } from './app-data.js';
 
 export interface EngineProcess {
   pid: number;

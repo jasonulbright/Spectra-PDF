@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString } from 'pdf-lib';
 import { expect } from '@wdio/globals';
 import { closeAllFiles, commitPendingEdits, getCanvasDocs, getState, getWorkspacePageIds, importPagesIntoDoc,
-  invokeAppCommand, openByPaths, saveActiveAs, selectCanvasPages, waitForActiveCanvasPageIds, waitForHarness } from '../support/harness.js';
+  invokeAppCommand, openByPaths, saveActiveAs, selectCanvasPages, waitForActiveCanvasPageIds, waitForHarness, waitForDisplayedSelector } from '../support/harness.js';
 
 const N = PDFName.of;
 async function layerFixture(hidden: boolean, mode?: string) {
@@ -49,6 +49,7 @@ describe('Optional content survives live page publication', () => {
     writeFileSync(source, bytes); await closeAllFiles(); await openByPaths([source]);
     const ids = await waitForActiveCanvasPageIds(); await assertRaster(ids[0], hidden);
     await selectCanvasPages([ids[0]]); expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     await commitPendingEdits(); await saveActiveAs(saved); await assertLayer(saved, 0, hidden);
     expect(readFileSync(source).equals(bytes)).toBe(true);
     await closeAllFiles(); await openByPaths([saved]); await assertRaster((await waitForActiveCanvasPageIds())[0], hidden);

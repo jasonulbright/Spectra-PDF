@@ -131,6 +131,70 @@ describe('preferences dialog', () => {
     await $('[data-testid="prefs-close"]').click();
   });
 
+  // The reading view's opening defaults: zoom, page layout and scrolling for
+  // a document with no remembered view, and whether a document's own initial
+  // view outranks them. Each choice must reach storage, because a document
+  // opened in the next session reads the defaults cold.
+  it('Viewing sets the reading-view defaults and persists them', async () => {
+    const stored = async (field: string): Promise<unknown> =>
+      await browser.execute(
+        (f: string) => JSON.parse(localStorage.getItem('spectra-settings') ?? '{}')[f],
+        field,
+      );
+
+    await browser.keys(['Control', 'k']);
+    const cat = $('[data-testid="prefs-cat-viewing"]');
+    await cat.waitForDisplayed({ timeout: 10_000, timeoutMsg: 'Preferences has no Viewing category' });
+    await cat.click();
+    await expect($('[data-testid="prefs-body-viewing"]')).toBeDisplayed();
+    expect(await cat.getAttribute('aria-pressed')).toBe('true');
+
+    const zoom = $('[data-testid="pref-view-zoom-mode"]');
+    const layout = $('[data-testid="pref-view-layout-mode"]');
+    const scroll = $('[data-testid="pref-view-scroll-mode"]');
+    const honour = $('[data-testid="pref-view-honour-initial"]');
+    // The shipped defaults.
+    expect(await zoom.getValue()).toBe('fitPage');
+    expect(await layout.getValue()).toBe('single');
+    expect(await scroll.getValue()).toBe('continuous');
+    expect(await honour.isSelected()).toBe(true);
+    // A percentage is only asked for when the zoom is a custom one.
+    await expect($('[data-testid="pref-view-zoom-percent"]')).not.toBeExisting();
+
+    await zoom.selectByAttribute('value', 'custom');
+    await $('[data-testid="pref-view-zoom-percent"]').waitForDisplayed({
+      timeout: 5_000,
+      timeoutMsg: 'a custom zoom did not offer the percentage',
+    });
+    await layout.selectByAttribute('value', 'grid');
+    await scroll.selectByAttribute('value', 'paged');
+    await honour.click();
+    await browser.waitUntil(
+      async () =>
+        (await stored('viewZoomMode')) === 'custom' &&
+        (await stored('viewLayoutMode')) === 'grid' &&
+        (await stored('viewScrollMode')) === 'paged' &&
+        (await stored('viewHonourDocumentView')) === false,
+      { timeout: 5_000, timeoutMsg: 'the Viewing choices never reached storage' },
+    );
+
+    // Put the defaults back: later specs open documents with them.
+    await zoom.selectByAttribute('value', 'fitPage');
+    await layout.selectByAttribute('value', 'single');
+    await scroll.selectByAttribute('value', 'continuous');
+    await honour.click();
+    await browser.waitUntil(
+      async () =>
+        (await stored('viewZoomMode')) === 'fitPage' &&
+        (await stored('viewLayoutMode')) === 'single' &&
+        (await stored('viewScrollMode')) === 'continuous' &&
+        (await stored('viewHonourDocumentView')) === true,
+      { timeout: 5_000, timeoutMsg: 'the Viewing defaults never came back' },
+    );
+    await expect($('[data-testid="pref-view-zoom-percent"]')).not.toBeExisting();
+    await $('[data-testid="prefs-close"]').click();
+  });
+
   // A LIVE theme swap, driven through the real select — spec 97's walk stamps
   // data-theme directly, which is the right shortcut for a colour audit but
   // means nothing here ever exercised applyTheme's ordering. The accent

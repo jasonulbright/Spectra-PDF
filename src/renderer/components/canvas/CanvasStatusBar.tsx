@@ -16,6 +16,7 @@ import {
 } from './DocumentHealthSegment';
 import { statusPageFieldWidth } from './status-page-width';
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
+import { ReadingViewControls } from './ReadingViewControls';
 
 // The docked status bar.
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
@@ -263,6 +264,8 @@ interface CanvasStatusBarProps {
   onToggleComments: () => void;
   /** null hides the page segment (Organize board has no "current" page). */
   pageBox: StatusBarPageBox | null;
+  /** The board's camera. The reading view's controls act through commands
+   * and read the reading-view store instead. */
   onZoomOut: () => void;
   onFit: () => void;
   onZoomIn: () => void;
@@ -296,8 +299,9 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
   useTranslation();
   const barRef = useRef<HTMLDivElement | null>(null);
   // One tab stop for the BUTTONS (the MainToolbar roving pattern); the page
-  // input stays its own stop — arrow keys inside a text input edit text, so
-  // it is excluded from the roving set rather than half-hijacked.
+  // input and the zoom percent box stay their own stops — arrow keys inside a
+  // text input edit text, so inputs are excluded from the roving set rather
+  // than half-hijacked.
   const rovingRef = useRef(0);
   const buttonsOf = (): HTMLButtonElement[] =>
     Array.from(barRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
@@ -473,17 +477,23 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
           </span>
         </div>
       )}
-      <div className="canvas-status-zoom" role="group" aria-label={tChrome('chrome.status.zoom')}>
-        <button type="button" title={tChrome('chrome.status.zoomOut')} onClick={props.onZoomOut} className="canvas-status-action canvas-status-quiet">
-          −
-        </button>
-        <button type="button" title={tChrome('chrome.status.fitTitle')} onClick={props.onFit} className="canvas-status-action canvas-status-quiet">
-          {tChrome('chrome.status.fit')}
-        </button>
-        <button type="button" title={tChrome('chrome.status.zoomIn')} onClick={props.onZoomIn} className="canvas-status-action canvas-status-quiet">
-          +
-        </button>
-      </div>
+      {props.docViewMode === 'document' ? (
+        <ReadingViewControls />
+      ) : (
+        // The board has one camera over every document: no page layout and
+        // no scrolling mode to offer.
+        <div className="canvas-status-zoom" role="group" aria-label={tChrome('chrome.status.zoom')}>
+          <button type="button" title={tChrome('chrome.status.zoomOut')} onClick={props.onZoomOut} className="canvas-status-action canvas-status-quiet">
+            −
+          </button>
+          <button type="button" title={tChrome('chrome.status.fitTitle')} onClick={props.onFit} className="canvas-status-action canvas-status-quiet">
+            {tChrome('chrome.status.fit')}
+          </button>
+          <button type="button" title={tChrome('chrome.status.zoomIn')} onClick={props.onZoomIn} className="canvas-status-action canvas-status-quiet">
+            +
+          </button>
+        </div>
+      )}
       <button
         type="button"
         data-testid="toggle-doc-view"

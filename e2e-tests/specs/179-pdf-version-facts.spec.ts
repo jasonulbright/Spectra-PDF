@@ -4,7 +4,7 @@ import { PDFDocument, PDFName } from 'pdf-lib';
 import { expect } from '@wdio/globals';
 import { answerNextSaveDialog, closeAllFiles, commitPendingEdits, getState, invokeAppCommand,
   openByPaths, selectCanvasPages, setActiveOp, setView, waitForActiveCanvasPageIds,
-  waitForHarness } from '../support/harness.js';
+  waitForHarness, waitForDisplayedSelector } from '../support/harness.js';
 
 function fixture(catalog: string): Buffer {
   const objects = [`<< /Type /Catalog /Pages 2 0 R /Version /${catalog} >>`,
@@ -59,6 +59,7 @@ describe('PDF version declarations at the live engine and panel boundaries', () 
     const working = (await getState()).activeFile!.workingPath;
     await selectCanvasPages([ids[0]]);
     expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     await commitPendingEdits();
     expect((await getState()).activeFile!.workingPath).toBe(working);
     expect(readFileSync(working).subarray(0, 8).toString()).toBe('%PDF-1.7');

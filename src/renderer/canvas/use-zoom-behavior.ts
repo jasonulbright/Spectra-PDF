@@ -82,6 +82,11 @@ export function useZoomBehavior({
       if (event.ctrlKey || event.metaKey) {
         const dy = Math.max(-50, Math.min(50, event.deltaY));
         zoomBehavior.scaleBy(sel, Math.pow(2, -dy * WHEEL_ZOOM_SPEED), [px, py]);
+      } else if (event.altKey) {
+        // Alt+wheel pans horizontally; a vertical-only wheel has no deltaX.
+        const k = zoomTransform(vp).k;
+        const d = event.deltaY !== 0 ? event.deltaY : event.deltaX;
+        zoomBehavior.translateBy(sel, -d / k, 0);
       } else {
         const k = zoomTransform(vp).k;
         zoomBehavior.translateBy(sel, -event.deltaX / k, -event.deltaY / k);

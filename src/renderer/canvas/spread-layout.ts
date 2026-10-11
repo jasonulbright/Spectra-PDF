@@ -1,50 +1,58 @@
-// Two-up spread layout math — PURE, because the reading
-// column's virtualizer/jump/current-page machinery is the most regression-prone
-// surface in the app and every mapping here must be testable without a DOM.
+// Row layout math for the reading view — PURE, because the reading column's
+// virtualizer/jump/current-page machinery is the most regression-prone surface
+// in the app and every mapping here must be testable without a DOM.
 //
-// The reading view lays pages in uniform-height ROWS. Single layout: one page
-// per row (the shipped behavior — every function below is the identity for it,
-// so single mode cannot regress by construction). Two-up: two facing pages per
-// row, optionally with the first page alone to follow the bound-book convention,
-// so spreads pair as (2,3), (4,5)…
-// exactly like a bound book's verso/recto.
+// The reading view lays pages in uniform-height ROWS of `columns` pages each.
+// One column is the identity (row r holds page r), so the single-page column
+// cannot regress by construction. With more than one column, `coverAlone`
+// puts page 0 by itself on the first row and the rest follow in groups of
+// `columns`, so two columns pair (1,2), (3,4)… like a bound book's
+// verso/recto. With one column `coverAlone` is inert.
 
-export type PageLayout = 'single' | 'two';
+/** Whether page 0 sits alone on row 0 under this column count. */
+export function coverActive(columns: number, coverAlone: boolean): boolean {
+  return coverAlone && columns > 1;
+}
+
+function cols(columns: number): number {
+  return Math.max(1, Math.floor(columns));
+}
 
 /** How many rows a document occupies. */
-export function rowCountOf(pageCount: number, layout: PageLayout, coverAlone: boolean): number {
+export function rowCountOf(pageCount: number, columns: number, coverAlone: boolean): number {
   if (pageCount <= 0) return 0;
-  if (layout === 'single') return pageCount;
-  if (!coverAlone) return Math.ceil(pageCount / 2);
-  return 1 + Math.ceil((pageCount - 1) / 2);
+  const c = cols(columns);
+  if (!coverActive(c, coverAlone)) return Math.ceil(pageCount / c);
+  return 1 + Math.ceil((pageCount - 1) / c);
 }
 
 /** The row a page (0-based) sits in. */
-export function rowOfPage(pageIndex: number, layout: PageLayout, coverAlone: boolean): number {
-  if (layout === 'single') return pageIndex;
-  if (!coverAlone) return Math.floor(pageIndex / 2);
-  return pageIndex === 0 ? 0 : Math.ceil(pageIndex / 2);
+export function rowOfPage(pageIndex: number, columns: number, coverAlone: boolean): number {
+  const c = cols(columns);
+  if (!coverActive(c, coverAlone)) return Math.floor(pageIndex / c);
+  return pageIndex <= 0 ? 0 : 1 + Math.floor((pageIndex - 1) / c);
 }
 
-/** The 0-based page indexes a row shows, in reading order (1 or 2 entries). */
+/** The 0-based page indexes a row shows, in reading order (1..columns entries). */
 export function pagesInRow(
   row: number,
-  layout: PageLayout,
+  columns: number,
   coverAlone: boolean,
   pageCount: number,
 ): number[] {
   if (row < 0 || pageCount <= 0) return [];
-  if (layout === 'single') return row < pageCount ? [row] : [];
+  const c = cols(columns);
   let firstPage: number;
-  if (!coverAlone) {
-    firstPage = row * 2;
+  let size = c;
+  if (!coverActive(c, coverAlone)) {
+    firstPage = row * c;
   } else if (row === 0) {
-    return [0];
+    firstPage = 0;
+    size = 1;
   } else {
-    firstPage = row * 2 - 1;
+    firstPage = 1 + (row - 1) * c;
   }
   const out: number[] = [];
-  if (firstPage < pageCount) out.push(firstPage);
-  if (firstPage + 1 < pageCount) out.push(firstPage + 1);
+  for (let i = firstPage; i < firstPage + size && i < pageCount; i++) out.push(i);
   return out;
 }

@@ -32,6 +32,7 @@ import {
   a11yArtifactRest,
   a11yFindingsOnPage,
   tagsSelectedPath,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 const UNTAGGED_TEXT = 'This paragraph is tagged by nothing at all.';
@@ -395,6 +396,7 @@ describe('the accessibility report', () => {
     // commit replaced — so they go with it.
     await selectCanvasPages(await getWorkspacePageIds());
     expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     expect((await a11yFindingsOnPage()).length).toBeGreaterThan(0);
     expect(await invokeAppCommand('document.applyPageEdits')).toBe(true);
     await browser.waitUntil(async () => (await a11yFindingsOnPage()).length === 0, {

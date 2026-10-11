@@ -24,20 +24,18 @@
  *   npx wdio run wdio.linux.conf.ts --spec specs/<spec>
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, resolve } from 'node:path';
 import { config as windowsConfig } from './wdio.conf';
 import {
-  APP_DATA_ROOT,
+  APP_BINARY,
   E2E_XDG_CONFIG_HOME,
   E2E_XDG_DATA_HOME,
   ICC_ASSENT_RECORD,
+  resetLaunchRestoreState,
 } from './support/app-data';
 
-const REPO_ROOT = resolve(__dirname, '..');
-const TARGET_DIR = process.env.CARGO_TARGET_DIR ?? resolve(REPO_ROOT, 'src-tauri', 'target');
-const APP_BINARY = resolve(TARGET_DIR, 'debug', 'spectrapdf');
 const TAURI_DRIVER_PORT = 4444;
 // Fits a single 1080p monitor at its origin, whatever the desktop layout.
 const WINDOW_RECT = { x: 0, y: 0, width: 1600, height: 1000 } as const;
@@ -168,8 +166,8 @@ export const config: WebdriverIO.Config = {
     reapOrphanedApps();
     await requireFreeDriverPort();
     // A restored rectangle from an earlier session can span every monitor:
-    // each session starts from the default placement instead.
-    rmSync(resolve(APP_DATA_ROOT, 'session.json'), { force: true });
+    // each session starts from the default placement, with window restore off.
+    resetLaunchRestoreState();
     // The binary keeps no state beside itself on Linux; these keep its
     // per-user state out of the developer's home.
     const env: NodeJS.ProcessEnv = {

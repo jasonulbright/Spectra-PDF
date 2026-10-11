@@ -228,6 +228,7 @@ export const COMMAND_IDS = [
   'view.fit',
   'view.actualSize',
   'view.fitWidth',
+  'view.fitHeight',
   'view.documentView',
   'view.presentation',
   'view.readingMode',
@@ -243,8 +244,10 @@ export const COMMAND_IDS = [
   'view.clearGuides',
   'view.customizeToolbar',
   'view.singlePage',
-  'view.twoUp',
+  'view.multiPage',
   'view.twoUpCover',
+  'view.scrollContinuous',
+  'view.scrollPaged',
   'view.organizeAll',
   'view.goToPage',
   'view.omniSearch',
@@ -764,7 +767,7 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
     run: (ctx) => ctx.canvas!.canvas()!.zoomOut(),
   },
   'view.fit': {
-    title: 'Fit to View',
+    title: 'Fit Page',
     when: (ctx) => ctx.canvas?.canvas() != null,
     run: (ctx) => ctx.canvas!.canvas()!.reset(),
   },
@@ -781,6 +784,11 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
     title: 'Fit Width',
     when: (ctx) => ctx.canvas?.canvas()?.fitWidth != null,
     run: (ctx) => ctx.canvas!.canvas()!.fitWidth!(),
+  },
+  'view.fitHeight': {
+    title: 'Fit Height',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas?.canvas()?.setZoomMode != null,
+    run: (ctx) => ctx.canvas?.canvas()?.setZoomMode?.('fitHeight'),
   },
   // The two modes, as the View menu names them. "Organize All Documents" IS the
   // board (it renders every open document — the cross-doc superpower); the
@@ -881,23 +889,40 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openCustomizeToolbar(),
   },
-  // Page Display: single-page column vs two-up facing spreads, and the
-  // cover convention. Layout is a reading-view property, so they gate on the
-  // canvas exactly like Rotate View does.
+  // Page Display acts on the active pane's own view through its handle, so
+  // a layout or scroll change never reaches another document. The board has
+  // no such methods, which disables these there.
   'view.singlePage': {
     title: 'Single Page',
-    when: inCanvas,
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_PAGE_LAYOUT', layout: 'single' }),
+    when: (ctx) => inCanvas(ctx) && ctx.canvas?.canvas()?.setLayoutMode != null,
+    run: (ctx) => ctx.canvas?.canvas()?.setLayoutMode?.('single'),
   },
-  'view.twoUp': {
-    title: 'Two-Page Spread',
-    when: inCanvas,
-    run: ({ dispatch }) => dispatch({ type: 'UI_SET_PAGE_LAYOUT', layout: 'two' }),
+  'view.multiPage': {
+    title: 'Multiple Pages',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas?.canvas()?.setLayoutMode != null,
+    run: (ctx) => ctx.canvas?.canvas()?.setLayoutMode?.('grid'),
   },
   'view.twoUpCover': {
     title: 'Show Cover Page Separately',
-    when: (ctx) => inCanvas(ctx) && ctx.state.ui.pageLayout === 'two',
-    run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_TWOUP_COVER' }),
+    when: (ctx) =>
+      inCanvas(ctx) &&
+      ctx.canvas?.canvas()?.setCoverAlone != null &&
+      ctx.canvas?.canvas()?.viewState?.()?.layoutMode === 'grid',
+    run: (ctx) => {
+      const canvas = ctx.canvas?.canvas();
+      const view = canvas?.viewState?.();
+      if (view) canvas?.setCoverAlone?.(!view.coverAlone);
+    },
+  },
+  'view.scrollContinuous': {
+    title: 'Continuous Scrolling',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas?.canvas()?.setScrollMode != null,
+    run: (ctx) => ctx.canvas?.canvas()?.setScrollMode?.('continuous'),
+  },
+  'view.scrollPaged': {
+    title: 'Paged Scrolling',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas?.canvas()?.setScrollMode != null,
+    run: (ctx) => ctx.canvas?.canvas()?.setScrollMode?.('paged'),
   },
   'view.organizeAll': {
     title: 'Organize All Documents',

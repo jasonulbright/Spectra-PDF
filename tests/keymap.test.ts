@@ -156,6 +156,12 @@ describe('resolveBinding', () => {
     expect(resolveBinding(fakeEvent({ key: '0', ctrl: true }))?.command).toBe('view.fit');
   });
 
+  it('Ctrl+1/2/3 are the Actual Size, Fit Width and Fit Height presets', () => {
+    expect(resolveBinding(fakeEvent({ key: '1', ctrl: true }))?.command).toBe('view.actualSize');
+    expect(resolveBinding(fakeEvent({ key: '2', ctrl: true }))?.command).toBe('view.fitWidth');
+    expect(resolveBinding(fakeEvent({ key: '3', ctrl: true }))?.command).toBe('view.fitHeight');
+  });
+
   it('Ctrl+P prints; Ctrl+Shift+P stays reserved (Page Setup, unshipped)', () => {
     // 'always' preventDefault: WebView2 has its own Ctrl+P UI.
     expect(resolveBinding(fakeEvent({ key: 'p', ctrl: true }))?.command).toBe('file.print');

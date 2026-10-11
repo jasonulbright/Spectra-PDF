@@ -11,6 +11,7 @@ import {
   invokeAppCommand,
   focusTab,
   commitPendingEdits,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 // Portfolio authoring: create (bridge-injected paths), the auto-open
@@ -186,6 +187,7 @@ describe('portfolio authoring', () => {
     const ids = await getWorkspacePageIds();
     await selectCanvasPages([ids[0]]);
     expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     await commitPendingEdits();
 
     const after = await getWorkspacePageIds();

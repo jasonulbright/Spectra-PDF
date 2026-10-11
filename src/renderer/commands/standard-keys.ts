@@ -143,11 +143,12 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: '_', ctrl: true, shift: true, command: 'view.rotateCCW', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '-', ctrl: true, shift: true, command: 'view.rotateCCW', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '0', ctrl: true, command: 'view.fit', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
-  // Zoom presets. Ctrl+1/Ctrl+2 sit beside Ctrl+0 (Fit Page) and are
-  // reading-view only — the commands' `when` disables them on the board, so the
-  // keys are inert there rather than doing something unexpected.
+  // Zoom presets. Ctrl+1/Ctrl+2/Ctrl+3 sit beside Ctrl+0 (Fit Page); a preset
+  // the active view does not implement is disabled by its `when`, so the key
+  // is inert there rather than doing something unexpected.
   { key: '1', ctrl: true, command: 'view.actualSize', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   { key: '2', ctrl: true, command: 'view.fitWidth', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
+  { key: '3', ctrl: true, command: 'view.fitHeight', scope: 'canvas', editableGuard: true, preventDefault: 'always' },
   // Single-key accelerators are preference-gated and off by default. Bare
   // letters honor the editable guard and require every modifier to be false;
   // Alt+letter is a mnemonic, not a tool selection. Disabled commands let the

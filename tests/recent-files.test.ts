@@ -750,3 +750,70 @@ describe('completed opens after storage failure', () => {
     expect(visible).toEqual([]);
   });
 });
+
+describe('saved reading views follow the history', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', fakeStorage());
+  });
+
+  const row = (savedAt: number) => ({
+    page: 3,
+    docIndex: 0,
+    zoomMode: 'fitWidth' as const,
+    zoomPercent: 120,
+    layoutMode: 'single' as const,
+    coverAlone: false,
+    scrollMode: 'continuous' as const,
+    pageCount: 9,
+    savedAt,
+  });
+
+  it('Clear Recent forgets every saved view', async () => {
+    const recents = await newWindow();
+    const views = await import('../src/renderer/lib/view-history');
+    views.writeViewRecordNow('a.pdf', row(1));
+    views.writeViewRecordNow('b.pdf', row(2));
+    await recents.recordRecentOpen([], 'a.pdf', 1);
+    await recents.clearRecentStorageSafely();
+    expect(Object.keys(JSON.parse(localStorage.getItem('spectra-view-history') ?? '{}').entries ?? {})).toEqual([]);
+    expect(views.readViewRecord('a.pdf')).toBeNull();
+    expect(views.readViewRecord('b.pdf')).toBeNull();
+  });
+
+  it('removing an entry forgets that path only', async () => {
+    const recents = await newWindow();
+    const views = await import('../src/renderer/lib/view-history');
+    views.writeViewRecordNow('a.pdf', row(1));
+    views.writeViewRecordNow('b.pdf', row(2));
+    const opened = await recents.recordRecentOpen([], 'a.pdf', 1);
+    const both = await recents.recordRecentOpen(opened, 'b.pdf', 2);
+    await recents.removeRecentEntriesSafely(both, ['a.pdf']);
+    expect(views.readViewRecord('a.pdf')).toBeNull();
+    expect(views.readViewRecord('b.pdf')?.page).toBe(3);
+  });
+
+  it('a refused compare-and-remove keeps the view', async () => {
+    const recents = await newWindow();
+    const views = await import('../src/renderer/lib/view-history');
+    views.writeViewRecordNow('a.pdf', row(1));
+    const opened = await recents.recordRecentOpen([], 'a.pdf', 1);
+    await recents.removeRecentEntriesSafely(opened, ['a.pdf'], [{ path: 'a.pdf', openedAt: 999 }]);
+    expect(views.readViewRecord('a.pdf')).not.toBeNull();
+  });
+
+  it('the dead-entry sweep forgets the views of the paths it removes', async () => {
+    const recents = await newWindow();
+    const views = await import('../src/renderer/lib/view-history');
+    views.writeViewRecordNow('gone.pdf', row(1));
+    views.writeViewRecordNow('here.pdf', row(2));
+    let state = await recents.recordRecentOpen([], 'gone.pdf', 1);
+    state = await recents.recordRecentOpen(state, 'here.pdf', 2);
+    const result = await recents.sweepDeadRecents(
+      () => state,
+      async (paths) => paths.map((p) => (p === 'gone.pdf' ? 'missing' : 'exists')),
+    );
+    expect(result?.removedPaths).toEqual(['gone.pdf']);
+    expect(views.readViewRecord('gone.pdf')).toBeNull();
+    expect(views.readViewRecord('here.pdf')).not.toBeNull();
+  });
+});

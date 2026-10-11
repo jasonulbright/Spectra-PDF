@@ -6,6 +6,24 @@
 
 export type FocusedTab = 'home' | 'tools' | { doc: string };
 
+export type ReadingZoomMode = 'custom' | 'actual' | 'fitPage' | 'fitWidth' | 'fitHeight';
+export type ReadingLayoutMode = 'single' | 'grid';
+export type ReadingScrollMode = 'continuous' | 'paged';
+
+/** The active reading pane's view, as the reading-view store holds it. */
+export interface ReadingViewSnapshot {
+  zoomMode: ReadingZoomMode;
+  /** Percent of actual size of the current page. */
+  zoomPercent: number;
+  layoutMode: ReadingLayoutMode;
+  coverAlone: boolean;
+  scrollMode: ReadingScrollMode;
+  /** 1-based page number. */
+  page: number;
+  columns: number;
+  pageCount: number;
+}
+
 export interface TestStateSnapshot {
   view: 'welcome' | 'operations' | 'canvas';
   focusedTab: FocusedTab;
@@ -25,6 +43,7 @@ export interface TestStateSnapshot {
     pageCount: number;
     dirty: boolean;
   } | null;
+  readingView: ReadingViewSnapshot | null;
 }
 
 export async function waitForHarness(timeoutMs = 15_000): Promise<void> {
@@ -1745,51 +1764,64 @@ export async function scrollIntoReach(
 ): Promise<{ x: number; y: number }> {
   let held = { x: 0, y: 0 };
   let previous: string | null = null;
-  await browser.waitUntil(
-    async () => {
-      const now = await browser.execute(function (sel: string) {
-        const el = document.querySelector(sel) as HTMLElement | null;
-        if (!el) return { x: 0, y: 0, key: '', reachable: false };
-        const box = (): DOMRect => el.getBoundingClientRect();
-        const first = box();
-        if (
-          first.top < 0 ||
-          first.bottom > window.innerHeight ||
-          first.left < 0 ||
-          first.right > window.innerWidth
-        ) {
-          el.scrollIntoView({ block: 'center', inline: 'center' });
-        }
-        const r = box();
-        const x = Math.round(r.left + r.width / 2);
-        const y = Math.round(r.top + r.height / 2);
-        const hit = document.elementFromPoint(x, y);
-        return {
-          x,
-          y,
-          key: `${r.left},${r.top},${r.width},${r.height}`,
-          reachable:
-            r.width > 0 &&
-            r.height > 0 &&
-            x >= 0 &&
-            y >= 0 &&
-            x < window.innerWidth &&
-            y < window.innerHeight &&
-            hit !== null &&
-            (el === hit || el.contains(hit)),
-        };
-      }, selector);
-      const settled = previous === now.key;
-      previous = now.key;
-      held = { x: now.x, y: now.y };
-      return settled && now.reachable;
-    },
-    {
-      timeout: timeoutMs,
-      interval: 150,
-      timeoutMsg: `${selector} never came into reach`,
-    },
-  );
+  let last: unknown = null;
+  try {
+    await browser.waitUntil(
+      async () => {
+        const now = await browser.execute(function (sel: string) {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) return { x: 0, y: 0, key: '', reachable: false, hitBy: 'no element' };
+          const box = (): DOMRect => el.getBoundingClientRect();
+          const covers = (r: DOMRect): boolean => {
+            const h = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+            return h !== null && (el === h || el.contains(h));
+          };
+          const first = box();
+          // A box inside the window can still sit outside its scroll container's
+          // clip, where the hit test answers whatever is drawn over it.
+          if (
+            first.top < 0 ||
+            first.bottom > window.innerHeight ||
+            first.left < 0 ||
+            first.right > window.innerWidth ||
+            !covers(first)
+          ) {
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+          }
+          const r = box();
+          const x = Math.round(r.left + r.width / 2);
+          const y = Math.round(r.top + r.height / 2);
+          const hit = document.elementFromPoint(x, y);
+          const hitBy = hit
+            ? `${hit.tagName.toLowerCase()}${hit.getAttribute('data-testid') ? `[${hit.getAttribute('data-testid')}]` : ''}.${hit.className?.toString().split(/\s+/).slice(0, 3).join('.')}`
+            : 'nothing';
+          return {
+            x,
+            y,
+            hitBy,
+            key: `${r.left},${r.top},${r.width},${r.height}`,
+            reachable:
+              r.width > 0 &&
+              r.height > 0 &&
+              x >= 0 &&
+              y >= 0 &&
+              x < window.innerWidth &&
+              y < window.innerHeight &&
+              hit !== null &&
+              (el === hit || el.contains(hit)),
+          };
+        }, selector);
+        const settled = previous === now.key;
+        previous = now.key;
+        held = { x: now.x, y: now.y };
+        last = now;
+        return settled && now.reachable;
+      },
+      { timeout: timeoutMs, interval: 150 },
+    );
+  } catch {
+    throw new Error(`${selector} never came into reach; last read: ${JSON.stringify(last)}`);
+  }
   return held;
 }
 
@@ -3836,4 +3868,311 @@ export async function expectNoCspViolations(): Promise<void> {
   if (refused.length > 0) {
     throw new Error(`Content security policy refused ${refused.length} load(s):\n${refused.join('\n')}`);
   }
+}
+
+// ── Reading view: zoom, layout and scrolling ──────────────────────────────
+
+/** The shared localStorage key of the per-document view history. */
+export const VIEW_HISTORY_KEY = 'spectra-view-history';
+
+/** The active reading pane's view from the store; null when no reading pane
+ * has published one. */
+export async function getReadingView(): Promise<ReadingViewSnapshot | null> {
+  return await browser.execute<ReadingViewSnapshot | null, []>(function () {
+    return (window as any).__SPECTRA_TEST__.getState().readingView ?? null;
+  });
+}
+
+/**
+ * Forget every document's remembered view. The history is shared
+ * localStorage, so it outlives the session: a spec that opens a shared fixture
+ * after another spec read it would otherwise open where that spec left off.
+ */
+export async function clearViewHistory(): Promise<void> {
+  await browser.execute(function (key: string) {
+    localStorage.removeItem(key);
+  }, VIEW_HISTORY_KEY);
+}
+
+/** What one reading pane's scroller states about itself in the DOM. */
+export interface ReadingViewDom {
+  zoomMode: string | null;
+  zoomPercent: number;
+  layoutMode: string | null;
+  columns: number;
+  scrollMode: string | null;
+  currentPage: number;
+  scrollTop: number;
+  scrollLeft: number;
+  scrollWidth: number;
+  scrollHeight: number;
+  clientWidth: number;
+  clientHeight: number;
+  /** The scroller's client box in viewport coordinates (scrollbars excluded). */
+  box: { left: number; top: number; width: number; height: number };
+}
+
+function readingViewSelector(scope: string): string {
+  return `${scope} [data-testid="document-view"]`.trim();
+}
+
+/**
+ * Read a reading pane's state attributes and scroll geometry. `scope` is a
+ * selector for the pane's container (`[data-testid="doc-pane-b"]`); empty
+ * reads the first reading view in the document.
+ */
+export async function readingViewDom(scope = ''): Promise<ReadingViewDom | null> {
+  return (await readingViewNow(scope)).dom;
+}
+
+/** A pane's DOM read and the store snapshot, taken in one script run so both
+ * describe the same instant. */
+async function readingViewNow(
+  scope: string,
+): Promise<{ dom: ReadingViewDom | null; store: ReadingViewSnapshot | null }> {
+  return await browser.execute(function (sel: string) {
+    const store = ((window as any).__SPECTRA_TEST__?.getState().readingView ?? null) as ReadingViewSnapshot | null;
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return { dom: null, store };
+    const num = (name: string): number => {
+      const v = el.getAttribute(name);
+      return v === null ? Number.NaN : Number(v);
+    };
+    const r = el.getBoundingClientRect();
+    const dom: ReadingViewDom = {
+      zoomMode: el.getAttribute('data-zoom-mode'),
+      zoomPercent: num('data-zoom-percent'),
+      layoutMode: el.getAttribute('data-layout-mode'),
+      columns: num('data-columns'),
+      scrollMode: el.getAttribute('data-scroll-mode'),
+      currentPage: num('data-current-page'),
+      scrollTop: el.scrollTop,
+      scrollLeft: el.scrollLeft,
+      scrollWidth: el.scrollWidth,
+      scrollHeight: el.scrollHeight,
+      clientWidth: el.clientWidth,
+      clientHeight: el.clientHeight,
+      box: {
+        left: r.left + el.clientLeft,
+        top: r.top + el.clientTop,
+        width: el.clientWidth,
+        height: el.clientHeight,
+      },
+    };
+    return { dom, store };
+  }, readingViewSelector(scope));
+}
+
+/**
+ * Wait until a reading pane's DOM satisfies `predicate`; returns that read.
+ *
+ * The store snapshot (`getReadingView()`, and the status-bar controls that
+ * render from it) is published on the zoom settle beat, after the DOM
+ * attributes change. A spec that also asserts on the store passes `store`;
+ * the DOM and the store are read in one script run, so both describe the
+ * same instant.
+ */
+export async function waitForReadingView(
+  predicate: (v: ReadingViewDom) => boolean,
+  timeoutMsg: string,
+  opts: {
+    scope?: string;
+    timeout?: number;
+    store?: (s: ReadingViewSnapshot | null) => boolean;
+  } = {},
+): Promise<ReadingViewDom> {
+  let last: ReadingViewDom | null = null;
+  let lastStore: ReadingViewSnapshot | null = null;
+  try {
+    await browser.waitUntil(
+      async () => {
+        const now = await readingViewNow(opts.scope ?? '');
+        last = now.dom;
+        lastStore = now.store;
+        if (last === null || !predicate(last)) return false;
+        return opts.store ? opts.store(lastStore) : true;
+      },
+      { timeout: opts.timeout ?? 10_000, interval: 100 },
+    );
+  } catch {
+    throw new Error(`${timeoutMsg}; last read: ${JSON.stringify({ dom: last, store: lastStore })}`);
+  }
+  return last!;
+}
+
+/** Wait until every listed control reports the given `aria-pressed` value. */
+export async function waitForPressed(
+  expected: Record<string, boolean>,
+  timeoutMsg: string,
+): Promise<void> {
+  let last: Record<string, string | null> = {};
+  try {
+    await browser.waitUntil(
+      async () => {
+        last = await browser.execute(function (ids: string[]) {
+          const out: Record<string, string | null> = {};
+          for (const id of ids) {
+            const el = document.querySelector('[data-testid="' + id + '"]');
+            out[id] = el ? el.getAttribute('aria-pressed') : null;
+          }
+          return out;
+        }, Object.keys(expected));
+        return Object.entries(expected).every(([id, on]) => last[id] === String(on));
+      },
+      { timeout: 10_000, interval: 100 },
+    );
+  } catch {
+    throw new Error(`${timeoutMsg}; last read: ${JSON.stringify(last)}`);
+  }
+}
+
+/** Type a zoom into the status bar's percent box and press Enter, the way a
+ * reader does. */
+export async function setReadingZoomPercent(text: string): Promise<void> {
+  const box = '[data-testid="reading-zoom-percent"]';
+  await $(box).waitForEnabled({ timeout: 10_000 });
+  await $(box).click();
+  await setReactInputValue(box, text);
+  await browser.keys(['Enter']);
+}
+
+/** One mounted page's box in viewport coordinates, by page id. The raster
+ * element is measured when it is mounted: it is the page itself, without any
+ * cell chrome. */
+export async function readingPageBox(
+  pageId: string,
+  scope = '',
+): Promise<{ left: number; top: number; width: number; height: number } | null> {
+  return await browser.execute(
+    function (sel: string, id: string) {
+      const view = document.querySelector(sel);
+      if (!view) return null;
+      // Match by dataset: page ids are paths, and a backslash is a CSS escape.
+      const cell = (Array.from(view.querySelectorAll('[data-page-id]')) as HTMLElement[]).find(
+        (c) => c.dataset.pageId === id,
+      );
+      if (!cell) return null;
+      const page = (cell.querySelector('.pageview') as HTMLElement | null) ?? cell;
+      const r = page.getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    },
+    readingViewSelector(scope),
+    pageId,
+  );
+}
+
+/** Mounted page cells of a reading pane in reading order (top, then left),
+ * with their viewport boxes. */
+export async function readingCells(
+  scope = '',
+): Promise<{ id: string; left: number; top: number; width: number; height: number }[]> {
+  return await browser.execute(function (sel: string) {
+    const view = document.querySelector(sel);
+    if (!view) return [];
+    return (Array.from(view.querySelectorAll('.docview-row [data-page-id]')) as HTMLElement[])
+      .map((c) => {
+        const page = (c.querySelector('.pageview') as HTMLElement | null) ?? c;
+        const r = page.getBoundingClientRect();
+        return {
+          id: c.dataset.pageId as string,
+          left: Math.round(r.left),
+          top: Math.round(r.top),
+          width: r.width,
+          height: r.height,
+        };
+      })
+      .sort((a, b) => a.top - b.top || a.left - b.left);
+  }, readingViewSelector(scope));
+}
+
+const KEY_CONTROL = '';
+const KEY_ALT = '';
+
+export type WheelModifier = 'none' | 'ctrl' | 'alt';
+
+/**
+ * Turn the mouse wheel over a reading pane at a viewport point.
+ *
+ * The real gesture goes first: a WebDriver wheel source, with the modifier
+ * held by a key source on the same ticks. When the pane shows no effect within
+ * `settleMs` (a driver that delivers the wheel without the held modifier, or
+ * not at all), the same wheel event is dispatched on the element under the
+ * point, which bubbles to the scroller's own listener. Resolves to the path
+ * that took effect. Use only where the wheel must change something: a native
+ * gesture that changes nothing is followed by the synthetic one.
+ */
+export async function readingWheel(opts: {
+  x: number;
+  y: number;
+  deltaY: number;
+  deltaX?: number;
+  modifier?: WheelModifier;
+  scope?: string;
+  settleMs?: number;
+}): Promise<'native' | 'synthetic'> {
+  const scope = opts.scope ?? '';
+  const modifier = opts.modifier ?? 'none';
+  const x = Math.round(opts.x);
+  const y = Math.round(opts.y);
+  const deltaX = Math.round(opts.deltaX ?? 0);
+  const deltaY = Math.round(opts.deltaY);
+  const signature = async (): Promise<string> => {
+    const v = await readingViewDom(scope);
+    return v
+      ? [v.zoomPercent, v.zoomMode, v.currentPage, v.scrollTop, v.scrollLeft, v.scrollWidth, v.scrollHeight].join('|')
+      : '';
+  };
+  const before = await signature();
+
+  const scroll = { x, y, deltaX, deltaY, duration: 10 };
+  if (modifier === 'none') {
+    await browser.action('wheel').scroll(scroll).perform();
+  } else {
+    const key = modifier === 'ctrl' ? KEY_CONTROL : KEY_ALT;
+    await browser.actions([
+      browser.action('key').down(key).pause(0).up(key),
+      browser.action('wheel').pause(0).scroll(scroll).pause(0),
+    ]);
+  }
+  let changed = false;
+  try {
+    await browser.waitUntil(async () => (await signature()) !== before, {
+      timeout: opts.settleMs ?? 1500,
+      interval: 100,
+    });
+    changed = true;
+  } catch {
+    changed = false;
+  }
+  if (changed) return 'native';
+
+  await browser.execute(
+    function (sel: string, px: number, py: number, dx: number, dy: number, mod: string) {
+      const view = document.querySelector(sel) as HTMLElement | null;
+      if (!view) return;
+      const hit = document.elementFromPoint(px, py);
+      const target = hit && view.contains(hit) ? hit : view;
+      target.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaX: dx,
+          deltaY: dy,
+          deltaMode: 0,
+          clientX: px,
+          clientY: py,
+          ctrlKey: mod === 'ctrl',
+          altKey: mod === 'alt',
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+        }),
+      );
+    },
+    readingViewSelector(scope),
+    x,
+    y,
+    deltaX,
+    deltaY,
+    modifier,
+  );
+  return 'synthetic';
 }

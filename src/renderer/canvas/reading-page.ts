@@ -1,4 +1,4 @@
-
+import { READING_ZOOM_PERCENT_MAX, READING_ZOOM_PERCENT_MIN } from '../lib/reading-view-types';
 
 // Which page is "current" in the reading view.
 //
@@ -264,6 +264,45 @@ export function maxZoomFor(pageCount: number, widestWidthAtZoom1 = 0): number {
 export const clampZoom = (z: number, pageCount: number, widestWidthAtZoom1 = 0): number =>
   Math.min(maxZoomFor(pageCount, widestWidthAtZoom1), Math.max(MIN_ZOOM, z));
 
+/**
+ * The largest zoom the WIDTH axis can render: the widest page's spacer width
+ * stays under `SAFE_ELEMENT_EXTENT`. Infinity for an unmeasured document.
+ * The height axis needs no bound (see `maxZoomFor`).
+ */
+export function renderableMaxZoom(widestWidthAtZoom1: number): number {
+  return widestWidthAtZoom1 > 0 ? SAFE_ELEMENT_EXTENT / widestWidthAtZoom1 : Infinity;
+}
+
+/**
+ * The reading view's zoom range in INTERNAL zoom. The range the controls,
+ * Settings and the view history state is a PERCENT of a page's actual size
+ * (`READING_ZOOM_PERCENT_MIN..MAX`); internal zoom is relative to
+ * `READING_BASE_HEIGHT`, so the bounds convert through `refPage`, the page
+ * the percent is reported against. The renderability cap applies on top: a
+ * document too wide to render at the percent ceiling stops at the cap, and
+ * the floor never exceeds the ceiling.
+ */
+export function readingZoomRange(
+  refPage: PageGeometry | null | undefined,
+  widestWidthAtZoom1 = 0,
+): { min: number; max: number } {
+  const actual = actualSizeZoom(refPage ?? { width: 0, height: 0 }, READING_BASE_HEIGHT);
+  const max = Math.min((actual * READING_ZOOM_PERCENT_MAX) / 100, renderableMaxZoom(widestWidthAtZoom1));
+  const min = Math.min((actual * READING_ZOOM_PERCENT_MIN) / 100, max);
+  return { min, max };
+}
+
+/** Clamp an internal zoom to `readingZoomRange`. NaN answers the floor. */
+export function clampReadingZoom(
+  z: number,
+  refPage: PageGeometry | null | undefined,
+  widestWidthAtZoom1 = 0,
+): number {
+  const { min, max } = readingZoomRange(refPage, widestWidthAtZoom1);
+  if (Number.isNaN(z)) return min;
+  return Math.min(max, Math.max(min, z));
+}
+
 /** A page's own geometry, as the reading view needs it for the zoom presets. */
 export interface PageGeometry {
   /** Natural size at PDF scale 1 (72dpi points === CSS px). */
@@ -318,6 +357,18 @@ export function actualSizeZoom(page: PageGeometry, readingBaseHeight: number): n
 export function fitWidthZoom(availableWidth: number, widthAtZoom1: number): number {
   if (availableWidth <= 0 || widthAtZoom1 <= 0) return 0;
   return availableWidth / widthAtZoom1;
+}
+
+/**
+ * Zoom that fits one page's height to the available pane height — Fit Height.
+ *
+ * Every page renders at the same height (`baseHeight * zoom`), so the fit is
+ * the ratio and depends on no page. Returns 0 for degenerate input so callers
+ * clamp rather than divide by zero.
+ */
+export function fitHeightZoom(availableHeight: number, baseHeight: number): number {
+  if (availableHeight <= 0 || baseHeight <= 0) return 0;
+  return availableHeight / baseHeight;
 }
 
 /**

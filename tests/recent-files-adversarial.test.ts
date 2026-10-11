@@ -108,10 +108,14 @@ describe('adversarial recent-file ordering', () => {
     const opened = await A.recordRecentOpen([], 'x.pdf', 1);
     await A.removeRecentEntriesSafely(opened, ['x.pdf']);
     await A.clearRecentStorageSafely();
+    // Removal and clear also drop the saved reading views, under that
+    // history's own lock.
     expect(requests).toEqual([
       'spectra-recent-storage',
       'spectra-recent-storage',
+      'spectra-view-history-storage',
       'spectra-recent-storage',
+      'spectra-view-history-storage',
     ]);
   });
 

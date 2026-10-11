@@ -18,7 +18,14 @@ import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { hostOs, platformCapability } from '../lib/platform-capabilities';
 import { preferenceAvailable } from '../commands/platform';
 import { StatusBar } from '../components/StatusBar';
-import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
+import { commitViewZoomPercentDraft, loadSettings, saveSettings, type Settings } from '../lib/app-settings';
+import {
+  LAYOUT_MODES,
+  READING_ZOOM_PERCENT_MAX,
+  READING_ZOOM_PERCENT_MIN,
+  SCROLL_MODES,
+  type ZoomMode,
+} from '../lib/reading-view-types';
 import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
 import { useFieldScriptsAllowed } from '../hooks/useFieldScriptsAllowed';
 import { useTranslation } from 'react-i18next';
@@ -370,17 +377,60 @@ function GhostscriptSection(): React.ReactElement {
  * and it gave Help ▸ Third-party Licenses nowhere to land except "the top of
  * the modal, scroll down".
  */
-export const PREF_CATEGORIES = ['general', 'appearance', 'engine', 'tray', 'licenses'] as const;
+export const PREF_CATEGORIES = ['general', 'viewing', 'appearance', 'engine', 'tray', 'licenses'] as const;
 export type PrefCategory = (typeof PREF_CATEGORIES)[number];
 
 // Values are catalog KEYS; the nav renders tChrome(label).
 export const PREF_CATEGORY_LABELS: Record<PrefCategory, PanelKey> = {
   general: 'panel.settings.catGeneral',
+  viewing: 'panel.settings.catViewing',
   appearance: 'panel.settings.catAppearance',
   engine: 'panel.settings.catEngine',
   tray: 'panel.settings.catTray',
   licenses: 'panel.settings.catLicenses',
 };
+
+// The fits first: they are what a reader picks, the fixed zooms are exceptions.
+const VIEW_ZOOM_MODE_ORDER: readonly ZoomMode[] = ['fitPage', 'fitWidth', 'fitHeight', 'actual', 'custom'];
+
+/** The custom opening zoom. The text is a local draft while it is edited and
+ * commits on blur or Enter only: a controlled numeric value rewrites an emptied
+ * field to a number under the caret, and a per-keystroke save persists every
+ * prefix ("5" on the way to "50"). */
+function ViewZoomPercentInput({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (percent: number) => void;
+}): React.ReactElement {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+  const commit = (): void => {
+    const next = commitViewZoomPercentDraft(draft, value);
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <input
+      id="pref-view-zoom-percent"
+      type="number"
+      data-testid="pref-view-zoom-percent"
+      min={READING_ZOOM_PERCENT_MIN}
+      max={READING_ZOOM_PERCENT_MAX}
+      step={1}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+      }}
+      className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm w-28"
+    />
+  );
+}
 
 export interface SettingsPanelProps {
   /** Which category to open on. Help ▸ Third-party Licenses lands on its own. */
@@ -654,6 +704,94 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       </div>
       {platformCapability('virtualPrinter') && <VirtualPrinterBlock />}
       {preferenceAvailable('explorerMenu') && <ExplorerMenuBlock />}
+      </>
+      )}
+
+      {category === 'viewing' && (
+      <>
+      <div>
+        <label className="block text-sm text-neutral-300 mb-1">{tChrome('panel.settings.viewOpenAt')}</label>
+        <p className="text-xs text-neutral-500">{tChrome('panel.settings.viewOpenAtHint')}</p>
+      </div>
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="pref-view-zoom-mode">
+          {tChrome('panel.settings.viewZoom')}
+        </label>
+        <select
+          id="pref-view-zoom-mode"
+          data-testid="pref-view-zoom-mode"
+          value={settings.viewZoomMode}
+          onChange={(e) => update('viewZoomMode', e.target.value)}
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+        >
+          {VIEW_ZOOM_MODE_ORDER.map((mode) => (
+            <option key={mode} value={mode}>
+              {tChrome(`panel.settings.viewZoomMode.${mode}`)}
+            </option>
+          ))}
+        </select>
+        {settings.viewZoomMode === 'custom' && (
+          <div className="mt-2">
+            <label className="block text-sm text-neutral-400 mb-1" htmlFor="pref-view-zoom-percent">
+              {tChrome('panel.settings.viewZoomPercent')}
+            </label>
+            <ViewZoomPercentInput
+              value={settings.viewZoomPercent}
+              onCommit={(percent) => update('viewZoomPercent', percent)}
+            />
+          </div>
+        )}
+      </div>
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="pref-view-layout-mode">
+          {tChrome('panel.settings.viewLayout')}
+        </label>
+        <select
+          id="pref-view-layout-mode"
+          data-testid="pref-view-layout-mode"
+          value={settings.viewLayoutMode}
+          onChange={(e) => update('viewLayoutMode', e.target.value)}
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+        >
+          {LAYOUT_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {tChrome(`panel.settings.viewLayoutMode.${mode}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="pref-view-scroll-mode">
+          {tChrome('panel.settings.viewScroll')}
+        </label>
+        <select
+          id="pref-view-scroll-mode"
+          data-testid="pref-view-scroll-mode"
+          value={settings.viewScrollMode}
+          onChange={(e) => update('viewScrollMode', e.target.value)}
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+        >
+          {SCROLL_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {tChrome(`panel.settings.viewScrollMode.${mode}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="flex items-center gap-2 text-sm text-neutral-400">
+          <input
+            type="checkbox"
+            data-testid="pref-view-honour-initial"
+            checked={settings.viewHonourDocumentView}
+            onChange={(e) => update('viewHonourDocumentView', e.target.checked)}
+          />
+          {tChrome('panel.settings.viewHonourInitial')}
+        </label>
+        <p className="text-xs text-neutral-500 mt-1">
+          {tChrome('panel.settings.viewHonourInitialHint')}
+        </p>
+      </div>
       </>
       )}
 

@@ -504,11 +504,8 @@ export interface NavPaneState {
 // tool; `View ▸ Organize All Documents` forces the board.
 export type DocViewMode = 'document' | 'organize';
 
-// Reading-view page layout: one page per row, or two-up facing spreads.
-export type PageLayoutMode = 'single' | 'two';
-
 // Which way a two-up spread reads. Set from the open document's
-// /ViewerPreferences /Direction; only meaningful while pageLayout === 'two',
+// /ViewerPreferences /Direction; only meaningful in a multi-column layout,
 // since a single-page column has no facing order to reverse.
 export type SpreadDirection = 'l2r' | 'r2l';
 
@@ -564,10 +561,6 @@ export interface UiState {
   // Document-pane view mode. The board and the reading view are two
   // renders of the same per-page cells; commands/toolbar read this.
   docViewMode: DocViewMode;
-  // Reading-view page layout. `twoUpCover` = first page alone (the book
-  // convention); only meaningful while pageLayout === 'two'.
-  pageLayout: PageLayoutMode;
-  twoUpCover: boolean;
   // Facing-page order, from the open document's own reading direction.
   spreadDirection: SpreadDirection;
   // Reading mode: collapse the app chrome (toolbar, tab strip, nav pane)
@@ -845,8 +838,6 @@ export type AppAction =
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
   | { type: 'UI_SET_TOOL_LOCK'; locked: boolean }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
-  | { type: 'UI_SET_PAGE_LAYOUT'; layout: PageLayoutMode }
-  | { type: 'UI_TOGGLE_TWOUP_COVER' }
   | { type: 'UI_TOGGLE_READING_MODE' }
   // A document's own initial view, applied as ONE act. Null fields are what
   // the document did not state; the workbench keeps what the user had.

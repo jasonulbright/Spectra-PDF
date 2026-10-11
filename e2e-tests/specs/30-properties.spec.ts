@@ -11,6 +11,10 @@ import {
   saveActiveAs,
   setReactInputValue,
   setReactSelectValue,
+  clearViewHistory,
+  getReadingView,
+  readingCells,
+  waitForReadingView,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -295,8 +299,11 @@ describe('document properties: fonts, initial view and advanced', () => {
 
   it('the app HONORS a document’s own initial view when it opens it', async () => {
     const out = resolve(tmp, 'initial-view.pdf');
-    // The file written by the previous test: two-up with a cover page, the
-    // bookmarks pane, opening on page 3.
+    // The file written by the previous test: two columns with the cover
+    // alone, the bookmarks pane, opening on page 3 at 125%. The previous test
+    // opened it too, and a remembered view outranks the document's own, so
+    // the history is cleared first.
+    await clearViewHistory();
     await openByPaths([out]);
     await browser.waitUntil(
       async () =>
@@ -304,15 +311,19 @@ describe('document properties: fonts, initial view and advanced', () => {
       { timeoutMsg: 'the document’s /PageMode did not open the bookmarks pane' },
     );
     await expect($('[data-testid="bookmarks-panel"]')).toBeDisplayed();
-    // The layout the document asked for is the one the reading view uses: with
-    // the cover alone, page 1 is its own row and pages 2-3 share the next.
-    await browser.waitUntil(
-      async () =>
-        (await browser.execute(function () {
-          const rows = document.querySelectorAll('.docview-row');
-          return Array.from(rows).some((r) => r.querySelectorAll('[data-page-id]').length === 2);
-        })) === true,
-      { timeoutMsg: 'the document’s /PageLayout did not produce a two-up spread' },
+    // The layout, page and magnification the document asked for are the ones
+    // the reading view uses. A stated zoom wins over a column count, so the
+    // grid holds as many columns as fit at 125%.
+    await waitForReadingView(
+      (v) =>
+        v.layoutMode === 'grid' &&
+        v.scrollMode === 'continuous' &&
+        v.zoomMode === 'custom' &&
+        v.zoomPercent === 125 &&
+        // Page 3 shares a row with page 2 when two columns fit at 125%.
+        (v.currentPage === 3 || (v.columns >= 2 && v.currentPage === 2)),
+      'the document’s /PageLayout, open page and /XYZ zoom did not reach the reading view',
+      { store: (st) => st?.layoutMode === 'grid' && st.coverAlone === true },
     );
     await closeAllFiles();
   });
@@ -325,5 +336,68 @@ describe('document properties: fonts, initial view and advanced', () => {
     await browser.pause(300);
     expect(await $('[data-testid="navicon-bookmarks"]').getAttribute('aria-pressed')).toBe('true');
     await closeAllFiles();
+  });
+
+  /** Write a page layout and nothing else into a copy of the sample, save it
+   * under `name`, and open it with no remembered view. */
+  async function openWithLayout(name: string, layout: string): Promise<void> {
+    const out = resolve(tmp, name);
+    await openByPaths([SAMPLE_PDF]);
+    await openProperties('initialView');
+    await setReactSelectValue('[data-testid="props-iv-layout"]', layout);
+    await $('[data-testid="props-iv-apply"]').click();
+    await browser.waitUntil(
+      async () => (await $('[data-testid="props-status"]').getText()) === 'Saved to the document',
+      { timeoutMsg: `the ${layout} write never reported success` },
+    );
+    await $('[data-testid="props-close"]').click();
+    await saveActiveAs(out);
+    await closeAllFiles();
+    await clearViewHistory();
+    await openByPaths([out]);
+  }
+
+  it('a two-column layout with no stated zoom opens at a zoom that shows two columns', async () => {
+    await openWithLayout('two-column-right.pdf', 'two-column-right');
+    await waitForReadingView(
+      (v) => v.layoutMode === 'grid' && v.scrollMode === 'continuous' && v.columns === 2,
+      'TwoColumnRight did not open as two continuous columns',
+    );
+    // The cover alone: page 1 is its own row and pages 2-3 share the next.
+    await browser.waitUntil(
+      async () => {
+        const boxes = await readingCells();
+        if (boxes.length < 3) return false;
+        const first = boxes.filter((b) => b.top === boxes[0].top);
+        const second = boxes.filter((b) => b.top === boxes[1].top);
+        const view = await getReadingView();
+        return first.length === 1 && second.length === 2 && view?.coverAlone === true;
+      },
+      { timeoutMsg: 'TwoColumnRight did not put the cover alone over a facing pair' },
+    );
+    await closeAllFiles();
+  });
+
+  it('a two-page layout opens paged, two columns, pages 1 and 2 facing', async () => {
+    await openWithLayout('two-page-left.pdf', 'two-page-left');
+    await waitForReadingView(
+      (v) => v.layoutMode === 'grid' && v.scrollMode === 'paged' && v.columns === 2,
+      'TwoPageLeft did not open as two paged columns',
+    );
+    await browser.waitUntil(
+      async () => {
+        const boxes = await readingCells();
+        if (boxes.length < 2) return false;
+        const view = await getReadingView();
+        return (
+          boxes.filter((b) => b.top === boxes[0].top).length === 2 &&
+          view?.layoutMode === 'grid' &&
+          view.coverAlone === false
+        );
+      },
+      { timeoutMsg: 'TwoPageLeft did not put pages 1 and 2 on the first row' },
+    );
+    await closeAllFiles();
+    await clearViewHistory();
   });
 });

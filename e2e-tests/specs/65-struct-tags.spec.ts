@@ -20,6 +20,7 @@ import {
   selectCanvasPages,
   getWorkspacePageIds,
   commitPendingEdits,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -244,6 +245,7 @@ describe('structure tags + reading order', () => {
     const ids = await getWorkspacePageIds();
     await selectCanvasPages([ids[0]]);
     expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     await commitPendingEdits();
     const dest = resolve(tmp, 'carried.pdf');
     await saveActiveAs(dest);

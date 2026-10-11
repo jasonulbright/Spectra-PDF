@@ -25,6 +25,7 @@ import {
   setActiveOp,
   focusTab,
   getSelectedCanvasPageIds,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 // The catalog carry (lib/catalog-carry.ts): bookmarks and page labels
@@ -99,6 +100,7 @@ describe('catalog state survives committed page edits', () => {
     const ids = await getWorkspacePageIds();
     await selectCanvasPages([ids[0]]);
     expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     await commitPendingEdits();
 
     const dest = resolve(TMP, 'committed.pdf');
@@ -238,6 +240,7 @@ describe('catalog state survives committed page edits', () => {
     await closeAllFiles(); await openByPaths([path]); const ids = await waitForActiveCanvasPageIds(); expect(ids).toHaveLength(2);
     const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
     await selectCanvasPages([ids[0]]); expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     if (malformed) {
       let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
       expect(error).toContain('verif'); expect(readFileSync(work).equals(before)).toBe(true);
@@ -277,7 +280,9 @@ describe('catalog state survives committed page edits', () => {
       const selected = await getSelectedCanvasPageIds(), live = await getWorkspacePageIds();
       return selected.length === 1 && selected[0] === ids[0] && live.includes(ids[0]);
     }, { timeout: 30_000, timeoutMsg: 'signed document did not settle into a selectable canvas page' });
-    expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true); await commitPendingEdits();
+    expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
+    await commitPendingEdits();
     const saved = readFileSync(work); expect(saved.subarray(0, signed.length).equals(signed)).toBe(true);
     const out = await PDFDocument.load(saved, { updateMetadata: false }); expect(out.getPage(0).getRotation().angle).toBe(90);
     const metadata = out.catalog.lookup(N('Metadata')); expect(metadata).toBeInstanceOf(PDFRawStream);
@@ -301,6 +306,7 @@ describe('catalog state survives committed page edits', () => {
     await closeAllFiles(); await openByPaths([path]); const ids = await waitForActiveCanvasPageIds();
     const work = (await getState()).activeFile!.workingPath, before = readFileSync(work);
     await selectCanvasPages([ids[0]]); expect(await invokeAppCommand('document.rotateSelectionCW')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="apply-page-edits-btn"]', { timeout: 20_000, timeoutMsg: 'the rotate never reached the page tier' });
     if (malformed) {
       let error = ''; try { await commitPendingEdits(); } catch (caught) { error = String(caught); }
       expect(error).toContain('verif'); expect(readFileSync(work).equals(before)).toBe(true);

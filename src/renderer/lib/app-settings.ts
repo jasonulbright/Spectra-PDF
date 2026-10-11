@@ -5,6 +5,17 @@
 // The panel imports from here and re-exports `getSettings` for its existing
 // consumers; nothing here may touch the DOM, Tauri, or React.
 
+import {
+  LAYOUT_MODES,
+  READING_ZOOM_PERCENT_MAX,
+  READING_ZOOM_PERCENT_MIN,
+  SCROLL_MODES,
+  ZOOM_MODES,
+  type LayoutMode,
+  type ScrollMode,
+  type ZoomMode,
+} from './reading-view-types';
+
 export interface Settings {
   /** The Ghostscript program the user chose, or '' for the default: the
    * included copy, else an install discovery finds. Never written without a
@@ -132,6 +143,15 @@ export interface Settings {
    * (falling back to en), an explicit code pins one. Stored values are
    * locale-independent keys, never display names. */
   language: string;
+  /** How the reading view opens a document that has no saved view. */
+  viewZoomMode: ZoomMode;
+  /** The opening zoom when `viewZoomMode` is `custom`, in percent of actual size. */
+  viewZoomPercent: number;
+  viewLayoutMode: LayoutMode;
+  viewScrollMode: ScrollMode;
+  /** Apply a document's own initial view (page layout, opening page,
+   * magnification) when no saved view exists for it. */
+  viewHonourDocumentView: boolean;
 }
 
 export const DEFAULTS: Settings = {
@@ -159,7 +179,49 @@ export const DEFAULTS: Settings = {
   readAloudRate: 1,
   runUnrecognizedFieldScripts: false,
   language: 'system',
+  viewZoomMode: 'fitPage',
+  viewZoomPercent: 100,
+  viewLayoutMode: 'single',
+  viewScrollMode: 'continuous',
+  viewHonourDocumentView: true,
 };
+
+/** A typed zoom percentage as the stored integer: non-finite input takes the
+ * default, the rest is rounded and clamped to the reading view's range. */
+export function clampViewZoomPercent(value: unknown): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return DEFAULTS.viewZoomPercent;
+  return Math.min(READING_ZOOM_PERCENT_MAX, Math.max(READING_ZOOM_PERCENT_MIN, Math.round(n)));
+}
+
+/** The value an edited zoom-percentage field commits: the clamped number when
+ * the text parses to one, else `current` unchanged. An empty or partial field
+ * is a draft, never a value. */
+export function commitViewZoomPercentDraft(draft: string, current: number): number {
+  const text = draft.trim();
+  const n = text === '' ? NaN : Number(text);
+  return Number.isFinite(n) ? clampViewZoomPercent(n) : current;
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback;
+}
+
+/** The reading-view fields, field by field: these drive the canvas geometry,
+ * where an unknown mode or a NaN zoom would lay out nothing. */
+function coerceViewSettings(s: Settings): Settings {
+  return {
+    ...s,
+    viewZoomMode: oneOf(s.viewZoomMode, ZOOM_MODES, DEFAULTS.viewZoomMode),
+    viewZoomPercent: clampViewZoomPercent(s.viewZoomPercent),
+    viewLayoutMode: oneOf(s.viewLayoutMode, LAYOUT_MODES, DEFAULTS.viewLayoutMode),
+    viewScrollMode: oneOf(s.viewScrollMode, SCROLL_MODES, DEFAULTS.viewScrollMode),
+    viewHonourDocumentView:
+      typeof s.viewHonourDocumentView === 'boolean' ? s.viewHonourDocumentView : DEFAULTS.viewHonourDocumentView,
+  };
+}
 
 export function loadSettings(): Settings {
   try {
@@ -178,7 +240,7 @@ export function loadSettings(): Settings {
       parsed.gsPath = '';
     }
     delete parsed.gsSource;
-    return { ...DEFAULTS, ...parsed };
+    return coerceViewSettings({ ...DEFAULTS, ...parsed });
   } catch { return DEFAULTS; }
 }
 

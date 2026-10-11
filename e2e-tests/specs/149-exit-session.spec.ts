@@ -193,10 +193,24 @@ describe('app exit and the launch that reads its record', () => {
     copyFileSync(SAMPLE_PDF, survivorDoc);
   });
 
-  after(() => {
+  after(async () => {
     // The preference is machine state, not workspace state: leaving it on would
     // make every later launch on this machine reopen whatever this spec was
-    // holding. Written directly because the app that owns the setting is gone.
+    // holding. Rust reads startup.json and the preferences dialog reads
+    // spectra-settings, so both are reset: the settings record through the
+    // last window when one is still up, and the file directly because the app
+    // may be gone.
+    try {
+      await browser.execute(function () {
+        const raw = localStorage.getItem('spectra-settings');
+        if (!raw) return;
+        const settings = JSON.parse(raw) as Record<string, unknown>;
+        settings.restoreWindowsOnLaunch = false;
+        localStorage.setItem('spectra-settings', JSON.stringify(settings));
+      });
+    } catch {
+      /* no window left to ask; the session-start reset in wdio.conf.ts covers it */
+    }
     try {
       const existing = existsSync(STARTUP_FILE)
         ? (JSON.parse(readFileSync(STARTUP_FILE, 'utf-8')) as Record<string, unknown>)

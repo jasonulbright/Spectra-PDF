@@ -2,6 +2,22 @@ import { select } from 'd3-selection';
 import { zoomIdentity, zoomTransform, type ZoomBehavior } from 'd3-zoom';
 import { BUTTON_ZOOM_FACTOR } from './zoom-constants';
 import type { RefObject } from 'react';
+import type { LayoutMode, ReadingViewSnapshot, ScrollMode, ZoomMode } from '../lib/reading-view-types';
+import type { PageHit } from './reading-layout';
+
+/**
+ * A zoom one quad pane applied, for its siblings to follow. `hit` is the page
+ * point the origin kept under `pointer` (scroller-relative, in the origin's
+ * box); null when the origin had no page to anchor on.
+ */
+export interface LinkedZoom {
+  zoom: number;
+  mode: 'custom' | 'actual';
+  hit: PageHit | null;
+  pointer: { x: number; y: number };
+  /** The origin also centred its content horizontally. */
+  hCenter: boolean;
+}
 
 export interface CanvasHandle {
   zoomIn(): void;
@@ -32,17 +48,35 @@ export interface CanvasHandle {
   centerOn(pageId: string): void;
   /** Marquee zoom (reading view only): zoom until the display-normalized
    * page rect fills the pane, scroll it centered, and return the APPLIED
-   * zoom (null when the request names nothing) — the split layer syncs
-   * sibling panes to that value, since quad zoom must stay equal. */
+   * zoom (null when the request names nothing). */
   zoomToPageRect?(pageId: string, rect: { x: number; y: number; w: number; h: number }): number | null;
-  /** Clamped absolute zoom set — the sibling half of zoomToPageRect. */
+  /** Absolute internal zoom, clamped to the percent range of the current
+   * page and to what the document can render. */
   setZoomAbsolute?(zoom: number): void;
+  /**
+   * Quad split only: apply the zoom a sibling pane applied, without passing
+   * it on. On each axis in `axes` (the axes whose scroll offsets the links
+   * mirror between the two panes) the view anchors on the origin's hit and
+   * pointer, so both panes land on the same offset; on the other axes it
+   * anchors at its own viewport centre.
+   */
+  followZoom?(zoom: LinkedZoom, axes: { x: boolean; y: boolean }): void;
   /** Magnify to a PERCENTAGE of actual size, where 100 renders 1pt as 1 CSS
    * px. Not the same quantity as `setZoomAbsolute`, whose argument is the
    * view's internal zoom: actual size is a function of the current page's
    * height, so only the view can solve it. The seam a document's /XYZ open
    * magnification lands on. Reading view only. */
   setZoomPercent?(percent: number): void;
+  /** Reading view only, like the methods below; the board omits them and
+   * the commands gate on their presence. `custom` freezes the current
+   * effective zoom; the fit modes stay fitted across resizes. */
+  setZoomMode?(mode: ZoomMode): void;
+  setLayoutMode?(mode: LayoutMode): void;
+  /** Grid only: page 1 alone on the first row. */
+  setCoverAlone?(on: boolean): void;
+  setScrollMode?(mode: ScrollMode): void;
+  /** The pane's current view, or null before its first layout. */
+  viewState?(): ReadingViewSnapshot | null;
 }
 
 interface CanvasHandleArgs {

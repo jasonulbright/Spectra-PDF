@@ -230,7 +230,7 @@ describe('snapping', () => {
   });
 
   it('Alt SUSPENDS snapping for the rest of the gesture', async () => {
-    const near = at(T.endpointRight, -6, 5);
+    const near = at(T.endpointRight, -4, 4);
     try {
       await pressAndTravel(at(T.endpointLeft, 0, -40), near);
       expect(await badgeText()).toBe('Endpoint'); // snapped so far
