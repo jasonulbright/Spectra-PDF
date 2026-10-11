@@ -166,6 +166,7 @@ class TestThePlatesTheDeviceWrites:
             assert tuple(rgb[70, 30]) != (255, 255, 255)
             assert tuple(rgb[70, 65]) == (255, 255, 255)
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_soft_proof_reads_the_spots_own_alternate(self, tmp_path, gs_path):
         from engine.separations import composite_separations, render_separations
 
@@ -626,6 +627,7 @@ class TestPlatesInTheOrderOfTheirBytes:
         assert [p["key"] for p in plates["plates"] if p["kind"] == "spot"] == [
             LATIN_BLUE.hex(), UTF8_GREEN.hex(), LATIN_GROEN.hex(), LATIN_GREEN.hex()]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_proof_composites_a_process_plate_beside_a_spot(self, tmp_path, gs_path):
         from engine.separations import composite_separations, render_separations
 
@@ -754,6 +756,7 @@ def _spot_shading(tmp_path, name, alternate: bytes, keyword: bytes) -> str:
 
 
 @pytest.mark.usefixtures("gs_path")
+@pytest.mark.usefixtures("icc_dir")
 class TestAColourConversionPastNamesAndKeywordsThatAreNotUtf8:
     def test_a_spot_shading_is_carved_out_past_a_keyword(self, tmp_path, gs_path):
         from engine.prepress import convert_cmyk

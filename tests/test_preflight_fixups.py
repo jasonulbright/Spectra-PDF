@@ -335,6 +335,7 @@ class TestRoundTrip:
         assert "partial" not in result["applied"][0]
 
     @needs_gs
+    @pytest.mark.usefixtures("icc_dir")
     def test_convert_to_cmyk(self, tmp_path):
         source = builders.build("rgb_content", str(tmp_path))
         result = apply_fixups(

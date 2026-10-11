@@ -31,6 +31,7 @@ from fontTools.ttLib import TTFont
 from pdfminer.high_level import extract_text
 from pikepdf import Array, Dictionary, Name, String
 
+import vendored_tools
 from engine import redact_fonts
 from engine.redact import redact
 
@@ -97,6 +98,10 @@ def _tounicode_map(font) -> dict:
     return dict(table.cid2unichr)
 
 
+def _bundled(face: str) -> str:
+    return vendored_tools.require(face, "bundled font")
+
+
 def _cut(face: str, text: str = "", retain: bool = False, gids=None) -> bytes:
     """`face` cut to `text` (or glyph ids) — the program a writer embeds."""
     options = subset.Options()
@@ -104,7 +109,7 @@ def _cut(face: str, text: str = "", retain: bool = False, gids=None) -> bytes:
     options.glyph_names = True
     options.retain_gids = retain
     options.drop_tables += ["FFTM"]
-    font = TTFont(face, lazy=True, recalcTimestamp=False)
+    font = TTFont(_bundled(face), lazy=True, recalcTimestamp=False)
     cutter = subset.Subsetter(options)
     if gids is not None:
         cutter.populate(gids=gids)
@@ -1149,7 +1154,7 @@ class TestOpenTypeCFFWhereTheCIDIsTheGlyphId:
     name that said what it was."""
 
     def _doc(self):
-        base = TTFont(SERIF_CFF, lazy=True)
+        base = TTFont(_bundled(SERIF_CFF), lazy=True)
         order = base.getGlyphOrder()
         cmap = base.getBestCmap()
         chars = sorted(set(KEPT + SECRET + "Quiz"))
@@ -1507,7 +1512,7 @@ class TestTrueTypeWithoutACmap:
     stay, and a glyph not kept is emptied and renamed like every other."""
 
     def test_removed_glyphs_are_emptied_in_place_and_renamed(self, tmp_dir):
-        full = TTFont(SANS, lazy=True)
+        full = TTFont(_bundled(SANS), lazy=True)
         order = full.getGlyphOrder()
         cmap = full.getBestCmap()
         wanted = sorted({order.index(cmap[ord(ch)]) for ch in KEPT + SECRET})
