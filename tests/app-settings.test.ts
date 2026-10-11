@@ -1,7 +1,7 @@
 // app-settings persistence, with the update preference as the case that
 // matters. Uses a localStorage stub since vitest runs in node.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadSettings, saveSettings, DEFAULTS } from '../src/renderer/lib/app-settings';
+import { clampViewZoomPercent, commitViewZoomPercentDraft, loadSettings, saveSettings, DEFAULTS } from '../src/renderer/lib/app-settings';
 
 const store = new Map<string, string>();
 beforeEach(() => {
@@ -107,5 +107,105 @@ describe('app settings', () => {
   it('falls back to defaults on a corrupt blob instead of throwing', () => {
     store.set('spectra-settings', '{not json');
     expect(loadSettings()).toEqual(DEFAULTS);
+  });
+});
+
+describe('Viewing preferences', () => {
+  it('opens documents at a fitted single continuous column, honouring their own view', () => {
+    expect(DEFAULTS).toMatchObject({
+      viewZoomMode: 'fitPage',
+      viewZoomPercent: 100,
+      viewLayoutMode: 'single',
+      viewScrollMode: 'continuous',
+      viewHonourDocumentView: true,
+    });
+  });
+
+  it('gives an EXISTING install the viewing defaults', () => {
+    store.set('spectra-settings', JSON.stringify({ theme: 'dark' }));
+    expect(loadSettings()).toMatchObject({
+      theme: 'dark',
+      viewZoomMode: 'fitPage',
+      viewZoomPercent: 100,
+      viewLayoutMode: 'single',
+      viewScrollMode: 'continuous',
+      viewHonourDocumentView: true,
+    });
+  });
+
+  it('round-trips every viewing field', () => {
+    const next = {
+      ...DEFAULTS,
+      viewZoomMode: 'custom' as const,
+      viewZoomPercent: 240,
+      viewLayoutMode: 'grid' as const,
+      viewScrollMode: 'paged' as const,
+      viewHonourDocumentView: false,
+    };
+    saveSettings(next);
+    expect(loadSettings()).toEqual(next);
+  });
+
+  it('coerces each corrupt viewing field to its default, field by field', () => {
+    store.set(
+      'spectra-settings',
+      JSON.stringify({
+        theme: 'dark',
+        viewZoomMode: 'zoomy',
+        viewZoomPercent: 'big',
+        viewLayoutMode: 'two',
+        viewScrollMode: 7,
+        viewHonourDocumentView: 'false',
+      }),
+    );
+    const s = loadSettings();
+    expect(s.theme).toBe('dark');
+    expect(s.viewZoomMode).toBe('fitPage');
+    expect(s.viewZoomPercent).toBe(100);
+    expect(s.viewLayoutMode).toBe('single');
+    expect(s.viewScrollMode).toBe('continuous');
+    expect(s.viewHonourDocumentView).toBe(true);
+  });
+
+  it('keeps a valid field when its neighbour is corrupt', () => {
+    store.set('spectra-settings', JSON.stringify({ viewZoomMode: 'fitWidth', viewLayoutMode: null }));
+    const s = loadSettings();
+    expect(s.viewZoomMode).toBe('fitWidth');
+    expect(s.viewLayoutMode).toBe('single');
+  });
+
+  it('clamps a stored zoom percentage into the reading range', () => {
+    store.set('spectra-settings', JSON.stringify({ viewZoomPercent: 1e9 }));
+    expect(loadSettings().viewZoomPercent).toBe(6400);
+    store.set('spectra-settings', JSON.stringify({ viewZoomPercent: 0 }));
+    expect(loadSettings().viewZoomPercent).toBe(1);
+    store.set('spectra-settings', JSON.stringify({ viewZoomPercent: null }));
+    expect(loadSettings().viewZoomPercent).toBe(100);
+  });
+
+  it('reads a typed percentage as a whole number in range', () => {
+    expect(clampViewZoomPercent('125')).toBe(125);
+    expect(clampViewZoomPercent('125.6')).toBe(126);
+    expect(clampViewZoomPercent(' ')).toBe(100);
+    expect(clampViewZoomPercent('abc')).toBe(100);
+    expect(clampViewZoomPercent(Number.POSITIVE_INFINITY)).toBe(100);
+    expect(clampViewZoomPercent(-4)).toBe(1);
+    expect(clampViewZoomPercent(99999)).toBe(6400);
+  });
+});
+
+describe('custom zoom percentage field', () => {
+  it('commits a parsed draft, clamped to the reading range', () => {
+    expect(commitViewZoomPercentDraft('250', 100)).toBe(250);
+    expect(commitViewZoomPercentDraft(' 87.6 ', 100)).toBe(88);
+    expect(commitViewZoomPercentDraft('0', 100)).toBe(1);
+    expect(commitViewZoomPercentDraft('99999', 100)).toBe(6400);
+  });
+
+  it('keeps the stored value for an emptied or unparsable draft', () => {
+    expect(commitViewZoomPercentDraft('', 175)).toBe(175);
+    expect(commitViewZoomPercentDraft('   ', 175)).toBe(175);
+    expect(commitViewZoomPercentDraft('-', 175)).toBe(175);
+    expect(commitViewZoomPercentDraft('abc', 175)).toBe(175);
   });
 });

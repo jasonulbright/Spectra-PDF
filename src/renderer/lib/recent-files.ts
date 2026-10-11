@@ -10,6 +10,7 @@
 // displayed as an em dash, never a fabricated date.
 
 import { formattingLocale, tChrome } from '../i18n';
+import { clearViewHistory, forgetViewRecords } from './view-history';
 
 const KEY = 'spectra-recent';
 // Clear Recent empties the list for every window at once, and it has to
@@ -456,14 +457,18 @@ export function removeRecentEntriesSafely(
     });
     if (removable.length === 0) return { removedPaths: [], next: base };
     const next = removeRecentEntries(base, removable);
+    // A document gone from the history keeps no saved view either.
+    forgetViewRecords(removable);
     return { removedPaths: removable, next: persistRecent(next) };
   });
 }
 
-/** Clear under the same serialization boundary as opens and removals. */
+/** Clear under the same serialization boundary as opens and removals. The
+ * saved per-document views go with the list. */
 export function clearRecentStorageSafely(): Promise<RecentEntry[]> {
   return withRecentStorageLock(() => {
     clearRecentStorage();
+    clearViewHistory();
     return [];
   });
 }

@@ -5,7 +5,9 @@
 // The rules live here rather than in the dialog because there is no DOM test
 // environment — a rule inside a component is a rule with no test.
 
-import type { NavPanelId, PageLayoutMode, SpreadDirection } from '../state/types';
+import type { NavPanelId, SpreadDirection } from '../state/types';
+import { seedFromInitialView } from './reading-view-resolve';
+import type { ReadingViewSeed } from './reading-view-types';
 
 export type PageLayoutValue =
   | 'default'
@@ -89,10 +91,9 @@ export const VIEWER_ONLY_OPTIONS = [
 
 export type ViewerOnlyOption = (typeof VIEWER_ONLY_OPTIONS)[number];
 
-/** Magnifications this app's own camera can reproduce. The rest are written
- * to the file and honored by other readers; this app has one absolute-zoom
- * seam and one fit-width seam, so it claims exactly those two. */
-export const HONORED_ZOOMS: readonly ZoomValue[] = ['percent', 'fit-width'];
+/** Magnifications the reading view reproduces. `custom` (a stored view
+ * rectangle) is written to the file and honored by other readers only. */
+export const HONORED_ZOOMS: readonly ZoomValue[] = ['percent', 'fit-page', 'fit-width', 'fit-height', 'fit-visible'];
 
 export interface InitialView {
   page_layout: PageLayoutValue;
@@ -202,33 +203,15 @@ export function initialViewChanges(
  * field means "the document said nothing" — the workbench keeps what the user
  * had, which is why opening an ordinary PDF does not close their nav pane. */
 export interface InitialViewPlan {
-  pageLayout: PageLayoutMode | null;
-  twoUpCover: boolean | null;
   spreadDirection: SpreadDirection;
   navPane: { open: boolean; panel: NavPanelId | null } | null;
   readingMode: boolean | null;
-  /** 1-based opening page, or null. */
+  /** 1-based opening page, or null. The same page `seed` carries. */
   page: number | null;
-  /** Magnification as a percentage, or null when this app cannot reproduce
-   * the document's chosen form. */
-  zoomPercent: number | null;
-  /** The document asked for fit-width, which this app's reading view has. */
-  fitWidth: boolean;
+  /** The reading-view axes the document states (layout, scrolling, zoom,
+   * opening page), or null when it states none. */
+  seed: ReadingViewSeed | null;
 }
-
-const LAYOUT_PLAN: Record<
-  Exclude<PageLayoutValue, 'default'>,
-  { pageLayout: PageLayoutMode; twoUpCover: boolean }
-> = {
-  'single-page': { pageLayout: 'single', twoUpCover: false },
-  'one-column': { pageLayout: 'single', twoUpCover: false },
-  'two-column-left': { pageLayout: 'two', twoUpCover: false },
-  'two-page-left': { pageLayout: 'two', twoUpCover: false },
-  // "…Right" means odd-numbered pages sit on the right, which is the bound-book
-  // convention this app spells as a cover page alone.
-  'two-column-right': { pageLayout: 'two', twoUpCover: true },
-  'two-page-right': { pageLayout: 'two', twoUpCover: true },
-};
 
 const MODE_PANEL: Record<Exclude<PageModeValue, 'default' | 'none' | 'full-screen'>, NavPanelId> = {
   outlines: 'bookmarks',
@@ -238,7 +221,6 @@ const MODE_PANEL: Record<Exclude<PageModeValue, 'default' | 'none' | 'full-scree
 };
 
 export function initialViewPlan(view: InitialView): InitialViewPlan {
-  const layout = view.page_layout === 'default' ? null : LAYOUT_PLAN[view.page_layout];
   let navPane: InitialViewPlan['navPane'] = null;
   let readingMode: boolean | null = null;
   if (view.page_mode === 'none') {
@@ -251,13 +233,7 @@ export function initialViewPlan(view: InitialView): InitialViewPlan {
     navPane = { open: true, panel: MODE_PANEL[view.page_mode] };
     readingMode = false;
   }
-  const percent =
-    view.open_page !== null && view.zoom === 'percent' && view.zoom_percent !== null
-      ? view.zoom_percent
-      : null;
   return {
-    pageLayout: layout?.pageLayout ?? null,
-    twoUpCover: layout?.twoUpCover ?? null,
     // Every document has a reading direction (absent means L2R), so this is
     // always stated: a spread left reversed by the previous document would be
     // a stale window, not a preserved preference.
@@ -265,8 +241,7 @@ export function initialViewPlan(view: InitialView): InitialViewPlan {
     navPane,
     readingMode,
     page: view.open_page,
-    zoomPercent: percent,
-    fitWidth: view.open_page !== null && view.zoom === 'fit-width',
+    seed: seedFromInitialView(view),
   };
 }
 
@@ -275,10 +250,16 @@ export function initialViewPlan(view: InitialView): InitialViewPlan {
  * not a reason to touch the workbench. */
 export function planIsInert(plan: InitialViewPlan, currentDirection: SpreadDirection): boolean {
   return (
-    plan.pageLayout === null &&
+    plan.seed === null &&
     plan.navPane === null &&
     plan.readingMode === null &&
     plan.page === null &&
     plan.spreadDirection === currentDirection
   );
+}
+
+/** Whether the workbench half of a plan (direction, nav pane, reading mode)
+ * would move the workbench. */
+export function planMovesWorkbench(plan: InitialViewPlan, currentDirection: SpreadDirection): boolean {
+  return plan.navPane !== null || plan.readingMode !== null || plan.spreadDirection !== currentDirection;
 }

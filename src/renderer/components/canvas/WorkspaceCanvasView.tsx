@@ -11,7 +11,11 @@ import { PermissionRefusal, capabilityBlockText, signBlock } from '../../lib/doc
 import { useAppState, useAppDispatch, useReadAppState, useReadLinkDrafts, useSubscribeAppState } from '../../state/AppStateProvider';
 import { usePdfProxyState } from '../../hooks/usePdfProxies';
 import { isUnrenderable } from '../../lib/render-health';
-import { showableFile, tabFiles, unsavedAmong } from '../../state/selectors';
+import { showableDoc, showableFile, tabFiles, unsavedAmong } from '../../state/selectors';
+import { forgetLiveReadingPanes, savedDocIndexFor, setActiveReadingPane } from '../../lib/reading-view-store';
+import { READING_PANE_IDS, type ReadingPaneId } from '../../lib/reading-view-types';
+import { linkQuadGeometry, quadLinkAxes, type FitBasis } from '../../canvas/reading-layout';
+import type { LinkedZoom } from '../../canvas/canvas-handle';
 import { useDocumentHealth } from '../../hooks/useDocumentHealth';
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
 import { factsFor, isCollecting, verdictFor } from '../../lib/doc-health';
@@ -765,21 +769,43 @@ export function WorkspaceCanvasView({
             : documentViewRefD.current,
     [],
   );
-  // Marquee zoom: the gesture's DocumentView applied its own zoom+scroll;
-  // sibling panes sync to the SAME zoom (quad's equal-zoom invariant — see
-  // activeCanvasHandle's broadcast note below). Their scroll follows the
-  // frozen-pane DOM links, exactly as with any active-pane navigation.
-  const syncMarqueeZoom = useCallback(
-    (z: number) => {
-      if (splitModeRef.current === 'off') return;
-      const active = paneHandleOf(activePaneRef.current);
-      for (const p of ['a', 'b', 'c', 'd'] as const) {
-        const h = paneHandleOf(p);
-        if (h && h !== active) h.setZoomAbsolute?.(z);
-      }
-    },
-    [paneHandleOf],
+  // Quad: a zoom one pane applied (a command, the wheel, the marquee) reaches
+  // the other three, each following on the axes its scroll links share with
+  // the origin. The two-pane split keeps its panes independent.
+  const linkedZoomFrom = useMemo(() => {
+    const make =
+      (origin: ReadingPaneId) =>
+      (l: LinkedZoom): void => {
+        if (splitModeRef.current !== 'quad') return;
+        for (const p of READING_PANE_IDS) {
+          if (p !== origin) paneHandleOf(p)?.followZoom?.(l, quadLinkAxes(origin, p));
+        }
+      };
+    return { a: make('a'), b: make('b'), c: make('c'), d: make('d') };
+  }, [paneHandleOf]);
+  // Quad: each pane's own measurement, and the geometry all four resolve
+  // against (`linkQuadGeometry`). A pane reports from a layout effect, so the
+  // shared geometry lands before the first paint of a resized pane.
+  const [quadBases, setQuadBases] = useState<Partial<Record<ReadingPaneId, FitBasis>>>({});
+  const fitBasisFrom = useMemo(() => {
+    const make =
+      (pane: ReadingPaneId) =>
+      (b: FitBasis): void =>
+        setQuadBases((prev) => {
+          const cur = prev[pane];
+          return cur && cur.availW === b.availW && cur.availH === b.availH && cur.viewportH === b.viewportH
+            ? prev
+            : { ...prev, [pane]: b };
+        });
+    return { a: make('a'), b: make('b'), c: make('c'), d: make('d') };
+  }, []);
+  const quadGeometry = useMemo(
+    () => (splitMode === 'quad' ? linkQuadGeometry(quadBases) : null),
+    [splitMode, quadBases],
   );
+  useEffect(() => {
+    if (splitMode !== 'quad') setQuadBases((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+  }, [splitMode]);
   const activeCanvasHandle = useCallback((): CanvasHandle | null => {
     if (docViewModeRef.current !== 'document') return canvasRef.current;
     const mode = splitModeRef.current;
@@ -787,9 +813,15 @@ export function WorkspaceCanvasView({
     if (mode === 'two') {
       return activePaneRef.current === 'b' ? documentViewRefB.current : documentViewRef.current;
     }
-    // Quad: ZOOM broadcasts to all four panes — linked scroll positions
-    // under unequal zooms would misalign the frozen rows. Navigation stays
-    // on the active pane; the scroll links carry a jump to its partners.
+    // Quad: the four panes keep ONE zoom and ONE resolved geometry, or the
+    // linked scroll offsets stop naming the same document point in the frozen
+    // rows and columns. The fit modes, layout and scrolling broadcast: every
+    // pane resolves them against the shared geometry (`linkQuadGeometry`). A
+    // stored zoom (the steppers, a percent, Actual Size, an absolute zoom)
+    // goes to the active pane alone, which hands the zoom it applied to its
+    // siblings (`followZoom`): solved per pane, a percent or Actual Size
+    // differs wherever the panes' current pages differ in size. Navigation
+    // stays on the active pane; the scroll links carry a jump to its partners.
     const active = paneHandleOf(activePaneRef.current) ?? documentViewRef.current;
     if (!active) return null;
     const all = (): CanvasHandle[] =>
@@ -797,11 +829,23 @@ export function WorkspaceCanvasView({
         .map(paneHandleOf)
         .filter((h): h is CanvasHandle => h !== null);
     return {
-      zoomIn: () => all().forEach((h) => h.zoomIn()),
-      zoomOut: () => all().forEach((h) => h.zoomOut()),
+      zoomIn: () => active.zoomIn(),
+      zoomOut: () => active.zoomOut(),
       reset: () => all().forEach((h) => h.reset()),
-      actualSize: active.actualSize ? () => all().forEach((h) => h.actualSize?.()) : undefined,
+      actualSize: active.actualSize ? () => active.actualSize?.() : undefined,
       fitWidth: active.fitWidth ? () => all().forEach((h) => h.fitWidth?.()) : undefined,
+      setZoomPercent: active.setZoomPercent ? (pct) => active.setZoomPercent?.(pct) : undefined,
+      setZoomAbsolute: active.setZoomAbsolute ? (z) => active.setZoomAbsolute?.(z) : undefined,
+      setZoomMode: active.setZoomMode
+        ? (m) =>
+            m === 'custom' || m === 'actual'
+              ? active.setZoomMode?.(m)
+              : all().forEach((h) => h.setZoomMode?.(m))
+        : undefined,
+      setLayoutMode: active.setLayoutMode ? (m) => all().forEach((h) => h.setLayoutMode?.(m)) : undefined,
+      setCoverAlone: active.setCoverAlone ? (on) => all().forEach((h) => h.setCoverAlone?.(on)) : undefined,
+      setScrollMode: active.setScrollMode ? (m) => all().forEach((h) => h.setScrollMode?.(m)) : undefined,
+      viewState: active.viewState ? () => active.viewState?.() ?? null : undefined,
       clientToWorld: (x, y) => active.clientToWorld(x, y),
       centerOn: (pid) => active.centerOn(pid),
     };
@@ -819,14 +863,53 @@ export function WorkspaceCanvasView({
   // by forgetting to clear the focus (regression via SET_ACTIVE_FILE, which
   // did exactly that — now also cleared, but the invariant no longer depends on
   // every writer remembering).
+  // With no explicit focus, a file opens on the .pdfx partition its saved
+  // view was taken in. Resolved here, before the reading view mounts: the
+  // view resolves its opening page against the partition it mounts on.
+  const savedPartition = useMemo(
+    () => (state.activeFileId ? savedDocIndexFor(state.activeFileId) : null),
+    [state.activeFileId],
+  );
   const focusedDoc =
     (state.ui.focusedDocId
       ? docs.find((d) => d.id === state.ui.focusedDocId && d.path === state.activeFileId)
       : null) ??
+    (savedPartition !== null && savedPartition > 0
+      ? docs.filter((d) => d.path === state.activeFileId)[savedPartition]
+      : undefined) ??
     docs.find((d) => d.path === state.activeFileId) ??
     null;
   const focusedDocRef = useRef(focusedDoc);
   focusedDocRef.current = focusedDoc;
+  // The reading-view store's active entry: the document the reading view
+  // shows, in the pane commands address. Null whenever no showable document
+  // is in the reading view, so the status-bar controls never act on a ghost.
+  const readingPath =
+    docViewMode === 'document' && focusedDoc && showableDoc(state) === focusedDoc.path ? focusedDoc.path : null;
+  useLayoutEffect(() => {
+    setActiveReadingPane(readingPath, activePane);
+  }, [readingPath, activePane]);
+  // A pane the split closes forgets its live view, or reopening the split
+  // would restore the closed pane instead of cloning pane a (the store
+  // prefers a pane's own entry). Only on the split's own transition: a pane
+  // that unmounts for a document switch keeps its entry for the switch back.
+  // The split setting is window-wide, so the panes close for every document.
+  const splitSetting = state.ui.splitView;
+  const prevSplitRef = useRef(splitSetting);
+  useEffect(() => {
+    const prev = prevSplitRef.current;
+    prevSplitRef.current = splitSetting;
+    if (prev === splitSetting) return;
+    const closed: ReadingPaneId[] =
+      splitSetting === 'off'
+        ? prev === 'quad'
+          ? ['b', 'c', 'd']
+          : ['b']
+        : splitSetting === 'two' && prev === 'quad'
+          ? ['c', 'd']
+          : [];
+    if (closed.length > 0) forgetLiveReadingPanes(closed);
+  }, [splitSetting]);
   // A jump whose target lives in a document the reading view isn't showing:
   // parked here until that document's view has mounted (see jumpToPage).
   const pendingJumpRef = useRef<string | null>(null);
@@ -7229,10 +7312,9 @@ export function WorkspaceCanvasView({
           const dvProps = {
             ocrSelection,
             onCreateLinks: createLinks,
-            pageLayout: state.ui.pageLayout,
-            twoUpCover: state.ui.twoUpCover,
             spreadDirection: state.ui.spreadDirection,
             doc: focusedDoc,
+            docIndex: docs.filter((d) => d.path === focusedDoc.path).indexOf(focusedDoc),
             viewRotation: state.ui.viewRotationByPath[focusedDoc.path] ?? 0,
             proxies,
             renderVersion,
@@ -7247,7 +7329,6 @@ export function WorkspaceCanvasView({
             measureScale,
             measureLeaveMarkup,
             onMeasureResult: setMeasureResult,
-            onMarqueeZoomApplied: syncMarqueeZoom,
             redactionMarksByPage,
             fieldCandidatesByPage,
             tableRegionsByPage,
@@ -7399,6 +7480,7 @@ export function WorkspaceCanvasView({
               <DocumentView
                 {...dvProps}
                 key={focusedDoc.id}
+                paneId="a"
                 ref={documentViewRef}
                 onCurrentPageChange={onPaneAPageChange}
               />
@@ -7437,9 +7519,14 @@ export function WorkspaceCanvasView({
                       {...dvProps}
                       {...(activePane === def.p ? null : inactiveOverrides)}
                       key={def.key}
+                      paneId={def.p}
                       ref={def.ref}
                       onCurrentPageChange={def.onPage}
+                      onZoomLinked={linkedZoomFrom[def.p]}
+                      onFitBasis={fitBasisFrom[def.p]}
+                      linkedGeometry={quadGeometry?.[def.p]}
                     />
+
                   </div>
                 ))}
                 <div
@@ -7478,6 +7565,7 @@ export function WorkspaceCanvasView({
                   {...dvProps}
                   {...(activePane === 'a' ? null : inactiveOverrides)}
                   key={focusedDoc.id}
+                  paneId="a"
                   ref={documentViewRef}
                   onCurrentPageChange={onPaneAPageChange}
                 />
@@ -7500,6 +7588,7 @@ export function WorkspaceCanvasView({
                   {...dvProps}
                   {...(activePane === 'b' ? null : inactiveOverrides)}
                   key={`${focusedDoc.id}:b`}
+                  paneId="b"
                   ref={documentViewRefB}
                   onCurrentPageChange={onPaneBPageChange}
                 />

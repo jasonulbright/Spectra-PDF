@@ -9,7 +9,9 @@ import { shortcutForCommand } from '../src/renderer/commands/keymap';
 import { TOOL_DEFS } from '../src/renderer/commands/tools';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenFile } from '../src/renderer/state/types';
-import type { CommandContext } from '../src/renderer/commands/types';
+import type { CanvasServices, CommandContext } from '../src/renderer/commands/types';
+import type { CanvasHandle } from '../src/renderer/canvas/canvas-handle';
+import type { ReadingViewSnapshot } from '../src/renderer/lib/reading-view-types';
 
 function ctxWith(partial: Partial<AppState>, app: CommandContext['app'] = null): CommandContext {
   const state = { ...initialState, ...partial, ui: { ...initialState.ui, ...(partial.ui ?? {}) } };
@@ -139,6 +141,26 @@ describe('menu completeness', () => {
     );
   });
 
+  it('Zoom and Page Display list the reading-view presets and modes in order', () => {
+    const sub = (id: string): string[] => {
+      const view = MENUS.find((m) => m.id === 'view')!;
+      const node = view.items.find((n) => n.kind === 'submenu' && n.id === id);
+      if (!node || node.kind !== 'submenu') throw new Error(id);
+      return node.items.map((n) => (n.kind === 'command' ? n.command : n.kind));
+    };
+    expect(sub('view-zoom')).toEqual([
+      'view.zoomIn', 'view.zoomOut', 'separator',
+      'view.actualSize', 'view.fit', 'view.fitWidth', 'view.fitHeight',
+    ]);
+    expect(sub('view-page-display')).toEqual([
+      'view.singlePage', 'view.multiPage', 'separator',
+      'view.twoUpCover', 'separator',
+      'view.scrollContinuous', 'view.scrollPaged',
+    ]);
+    expect(COMMANDS['view.fit'].title).toBe('Fit Page');
+    expect(menuCommandIds()).not.toContain('view.twoUp');
+  });
+
   it('Document inserts (file + blank), operates in menu order, and OCRs', () => {
     const ids = idsIn('document');
     expect(ids).toEqual(expect.arrayContaining([
@@ -197,5 +219,62 @@ describe('discoverability copy', () => {
   it('Combine Files sits in the Document menu as the named merge path', () => {
     const ids = menuCommandIds(MENUS.find((m) => m.id === 'document')!.items);
     expect(ids).toContain('document.combineFiles');
+  });
+});
+
+describe('reading-view commands', () => {
+  const docTab = { ...initialState.ui, focusedTab: { doc: 'a.pdf' } };
+  function ctxWithHandle(handle: Partial<CanvasHandle> | null, onHome = false): CommandContext {
+    const base = ctxWith({ ui: onHome ? initialState.ui : docTab });
+    const services = { canvas: () => handle as CanvasHandle | null } as unknown as CanvasServices;
+    return { ...base, canvas: services };
+  }
+  const view = (over: Partial<ReadingViewSnapshot> = {}): ReadingViewSnapshot => ({
+    zoomMode: 'fitPage', zoomPercent: 100, layoutMode: 'single', coverAlone: false,
+    scrollMode: 'continuous', page: 1, columns: 1, pageCount: 4, docIndex: 0, ...over,
+  });
+  const MODE_COMMANDS: CommandId[] = [
+    'view.fitHeight', 'view.singlePage', 'view.multiPage', 'view.scrollContinuous', 'view.scrollPaged',
+  ];
+
+  it('are disabled on a handle without the reading-view methods', () => {
+    const board = ctxWithHandle({ zoomIn: () => {}, zoomOut: () => {}, reset: () => {} });
+    for (const id of [...MODE_COMMANDS, 'view.twoUpCover' as CommandId]) {
+      expect(COMMANDS[id].when!(board), id).toBe(false);
+    }
+  });
+
+  it('are disabled outside a document tab', () => {
+    const handle = { setZoomMode: () => {}, setLayoutMode: () => {}, setScrollMode: () => {} };
+    for (const id of MODE_COMMANDS) {
+      expect(COMMANDS[id].when!(ctxWithHandle(handle, true)), id).toBe(false);
+    }
+  });
+
+  it('call the handle methods with the mode they name', () => {
+    const setZoomMode = vi.fn();
+    const setLayoutMode = vi.fn();
+    const setScrollMode = vi.fn();
+    const ctx = ctxWithHandle({ setZoomMode, setLayoutMode, setScrollMode });
+    for (const id of MODE_COMMANDS) {
+      expect(COMMANDS[id].when!(ctx), id).toBe(true);
+      void COMMANDS[id].run(ctx);
+    }
+    expect(setZoomMode.mock.calls).toEqual([['fitHeight']]);
+    expect(setLayoutMode.mock.calls).toEqual([['single'], ['grid']]);
+    expect(setScrollMode.mock.calls).toEqual([['continuous'], ['paged']]);
+  });
+
+  it('toggles the cover page only in the grid layout', () => {
+    const setCoverAlone = vi.fn();
+    let current = view();
+    const ctx = ctxWithHandle({ setCoverAlone, viewState: () => current });
+    expect(COMMANDS['view.twoUpCover'].when!(ctx)).toBe(false);
+    current = view({ layoutMode: 'grid', coverAlone: false });
+    expect(COMMANDS['view.twoUpCover'].when!(ctx)).toBe(true);
+    void COMMANDS['view.twoUpCover'].run(ctx);
+    current = view({ layoutMode: 'grid', coverAlone: true });
+    void COMMANDS['view.twoUpCover'].run(ctx);
+    expect(setCoverAlone.mock.calls).toEqual([[true], [false]]);
   });
 });

@@ -12,6 +12,8 @@ import {
   setReactInputValue,
   openParagraphEditor,
   scrollIntoReach,
+  setReadingZoomPercent,
+  waitForReadingView,
 } from '../support/harness.js';
 
 // Paragraph split (Enter mid-text) + merge (Backspace at the
@@ -132,6 +134,15 @@ describe('paragraph split + merge', () => {
     await browser.waitUntil(
       async () => ((await getState()).activeFile?.path ?? '').includes('split-merge.pdf'),
       { timeout: 15_000, timeoutMsg: 'fixture never became active' },
+    );
+    // The editor's geometry is pinned to one zoom: a 960 px tall page, which is
+    // 320% of this 300 pt page. The opening Fit Page depends on the pane size.
+    expect(await invokeAppCommand('view.documentView')).toBe(true);
+    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+    await setReadingZoomPercent('320');
+    await waitForReadingView(
+      (v) => v.zoomMode === 'custom' && v.zoomPercent === 320,
+      'the reading view did not take 320%',
     );
     expect(await invokeAppCommand('tools.open.edit')).toBe(true);
     const pageId = await waitForListedParas('paragraphs never loaded');

@@ -4159,6 +4159,75 @@ input:not([type]) {
   gap: 2px;
 }
 
+/* The reading view's control group: zoom steppers around a percent box, the
+   Fit popover, and two segmented choices (page layout, scrolling). */
+.reading-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.reading-zoom-input {
+  width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+.reading-zoom-input:disabled {
+  opacity: 0.6;
+}
+.reading-view-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border, #45454c);
+}
+.reading-segment {
+  display: flex;
+  align-items: center;
+}
+.reading-segment > .canvas-status-action {
+  border-radius: 0;
+}
+.reading-segment > .canvas-status-action + .canvas-status-action {
+  margin-inline-start: -1px;
+}
+.reading-segment > .canvas-status-action:first-child {
+  border-start-start-radius: 3px;
+  border-end-start-radius: 3px;
+}
+.reading-segment > .canvas-status-action:last-child {
+  border-start-end-radius: 3px;
+  border-end-end-radius: 3px;
+}
+.reading-fit {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.reading-fit-caret {
+  margin-inline-start: 4px;
+  font-size: 10px;
+}
+.canvas-status-snap-popover.reading-fit-popover {
+  min-width: 132px;
+  padding: 4px;
+}
+.reading-fit-item {
+  display: block;
+  width: 100%;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: start;
+  white-space: nowrap;
+  cursor: default;
+}
+.reading-fit-item:hover {
+  background: rgba(127, 127, 127, 0.2);
+}
+.reading-fit-item[aria-pressed="true"] {
+  font-weight: 600;
+}
+
 /* Properties bar (Ctrl+E) — the strip under the secondary toolbar. */
 .properties-bar {
   display: flex;
