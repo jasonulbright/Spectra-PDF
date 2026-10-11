@@ -12,6 +12,7 @@ import pytest
 
 import pikepdf
 
+import vendored_tools
 from engine.icc_profiles import DEFAULT_CMYK_DESCRIPTION as DEFAULT_PRESS
 from engine.icc_profiles import installed as _installed_profiles
 from engine.separations import (
@@ -55,6 +56,7 @@ from transparency_builders import (
 
 def _bundled_path(description):
     """A bundled profile's file, by its ICC description string."""
+    vendored_tools.require_icc_profiles()
     return _installed_profiles()[description].path
 
 np = pytest.importorskip("numpy")
@@ -546,6 +548,7 @@ ORACLE_SRGB = {
 
 
 def _proof_row(directory, tmp_path, gs_path, paper_white, black_ink, tag):
+    vendored_tools.require_icc_profiles()
     result = composite_separations(
         directory,
         output=str(tmp_path / f"proof-{tag}.png"),
@@ -781,6 +784,7 @@ class TestSoftProofComposition:
         assert proofed["max_tac"] == plain["max_tac"]
         assert proofed["over_pixels"] == plain["over_pixels"]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_hidden_plate_contributes_nothing_to_the_buffer(self, tmp_path, gs_path):
         src = tac_ladder_pdf(tmp_path / "tac.pdf")
         result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
@@ -799,6 +803,7 @@ class TestSoftProofComposition:
                 - np.asarray(b.convert("RGB")).astype(np.int16)
             ).max() > 0
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_spot_proofs_through_its_own_declared_alternate(self, tmp_path, gs_path):
         # `display_rgb` is the ink SWATCH — an identity colour for the list —
         # and it must not become the proof's answer, or the swatch and the
@@ -819,6 +824,7 @@ class TestSoftProofComposition:
         sample = arr[int(height * (1 - 225 / 400))][int(width * 0.2)]
         assert tuple(int(v) for v in sample) != tuple(spot[0]["display_rgb"])
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_spot_shown_as_another_ink_lands_in_that_inks_channel(
         self, tmp_path, gs_path
     ):
@@ -844,6 +850,7 @@ class TestSoftProofComposition:
                 - np.asarray(b.convert("RGB")).astype(np.int16)
             ).max() > 0
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_device_alternate_names_the_source_space_it_assumed(
         self, tmp_path, gs_path
     ):
@@ -958,6 +965,7 @@ class TestSoftProofRefusals:
         # so the black channel has to climb across the ramp.
         assert ramp[255][3] > ramp[0][3]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_spot_the_alternates_cannot_describe_refuses_rather_than_falling_back(
         self, tmp_path, gs_path
     ):
@@ -977,6 +985,7 @@ class TestSoftProofRefusals:
         assert result["simulation"]["source"] == "none"
         assert "is not a space this proof can describe" in result["simulation"]["refusal"]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_spot_only_view_has_nothing_for_the_press_to_describe(
         self, tmp_path, gs_path
     ):
@@ -1013,6 +1022,7 @@ class TestStagedSeparation:
         assert families == ["DeviceRGB"]
         assert soft_proof.staging_applies(families) is True
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_the_profile_splits_the_plate_cache_only_where_staging_applies(
         self, tmp_path, gs_path
     ):
@@ -1688,6 +1698,7 @@ class TestOptionalContentCarriedAcrossExtraction:
         assert single.read_bytes() == before
 
 
+@pytest.mark.usefixtures("icc_dir")
 def test_a_user_opened_document_never_reaches_the_plate_cache_unprotected(tmp_path, gs_path, monkeypatch):
     """The optional-content staging copy was saved without its protection
     into the plate cache, which outlives the session."""

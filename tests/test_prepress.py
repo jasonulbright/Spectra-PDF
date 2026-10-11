@@ -67,6 +67,7 @@ def _plates(path, gs_path, out_dir, resolution: int = 36):
 
 
 class TestConvertCmyk:
+    @pytest.mark.usefixtures("icc_dir")
     def test_converts_device_rgb_to_cmyk(self, tmp_dir, gs_path):
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         out = os.path.join(tmp_dir, "cmyk.pdf")
@@ -101,6 +102,7 @@ class TestConvertCmyk:
         assert ab != per, "absolute colorimetric must differ from perceptual"
         assert sat != per, "saturation must differ from perceptual"
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_separation_spot_colours_survive(self, tmp_dir, gs_path):
         # gs's CMYK conversion PRESERVES Separation/spot colours (does not
         # flatten them to process) — a plus for prepress, verified by the
@@ -166,6 +168,7 @@ class TestConvertCmyk:
         with pytest.raises(ValueError, match="render_intent must be"):
             convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"), render_intent="bogus")
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_form_fields_survive_the_conversion(self, tmp_dir, gs_path):
         # gs pdfwrite drops /AcroForm + widgets; convert_cmyk reattaches them
         # (like grayscale). A filled form must not be silently destroyed.
@@ -280,6 +283,7 @@ def _ident(obj):
     return obj.objgen if getattr(obj, "is_indirect", False) else id(obj)
 
 
+@pytest.mark.usefixtures("icc_dir")
 class TestSpotShadings:
     """Gradients in a colorant space, through the CMYK conversion.
 
@@ -458,6 +462,7 @@ class TestSpotShadings:
                 )
 
 
+@pytest.mark.usefixtures("icc_dir")
 class TestAppearanceShadings:
     """The same gradients, in an annotation's APPEARANCE stream.
 
@@ -676,6 +681,7 @@ class TestAppearancePatternSpace:
     """
 
     @pytest.mark.parametrize("kind", ["shading", "skewed"])
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_patterned_appearance_lands_where_it_did(
             self, kind, tmp_path, gs_path):
         from separation_builders import appearance_pattern_pdf
@@ -694,6 +700,7 @@ class TestAppearancePatternSpace:
                 f"{kind}: the appearance's {name} paint moved"
             )
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_tiled_appearance_keeps_its_step(self, tmp_path, gs_path):
         # The producer re-derives the pattern matrix in rounded reals, so the
         # tile grid cannot land on the same pixels; what a wrong pattern space
@@ -716,6 +723,7 @@ class TestAppearancePatternSpace:
             )
             assert int(abs(original[name][band] - converted[name][band]).max()) <= 1
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_an_appearance_without_a_pattern_is_left_alone(self, tmp_path, gs_path):
         # Nothing but a pattern reads a content stream's default space, so
         # nothing but a patterned appearance is rebased.
@@ -731,6 +739,7 @@ class TestAppearancePatternSpace:
             assert [float(v) for v in stream.BBox] != [
                 float(v) for v in pdf.pages[0].obj.Annots[0].Rect]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_the_rebased_appearance_declares_the_page_space_it_now_uses(
             self, tmp_path, gs_path):
         from separation_builders import APPEARANCE_RECT, appearance_pattern_pdf
@@ -852,6 +861,7 @@ class TestFormAppearances:
                 pdf.save(str(dest))
         return str(dest)
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_the_field_is_painted_once_and_in_the_destinations_colour(
             self, tmp_path, gs_path):
         from separation_builders import (FORM_FILL_CMYK, FORM_FILL_RGB,
@@ -887,6 +897,7 @@ class TestFormAppearances:
             assert len(pdf.Root.AcroForm.Fields) == 1
             assert len(pdf.pages) == 1, "a staged appearance page was left behind"
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_the_appearance_lands_where_the_producer_put_it(
             self, tmp_path, gs_path):
         # The producer's own flattened output is the reference rendering of the
@@ -911,6 +922,7 @@ class TestFormAppearances:
                 f"the converted field's {name} plate is not the producer's"
             )
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_every_face_is_converted_not_only_the_drawn_one(
             self, tmp_path, gs_path):
         # The producer flattens only the face /AS selects (measured), so a
@@ -931,6 +943,7 @@ class TestFormAppearances:
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 1, "four staged pages, none removed"
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_field_with_no_appearance_is_given_one_and_the_page_stays_clean(
             self, tmp_path, gs_path):
         # The widget is given the appearance its own field states BEFORE the
@@ -987,6 +1000,7 @@ class TestFormAppearances:
         assert UTF16_BOM in _content(control)
         assert self._widgets(control)["bare"]["faces"] == {}
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_bare_field_carries_no_stale_value_after_a_refill(
             self, tmp_path, gs_path):
         # The defect this replaces: the producer flattened the value the field
@@ -1011,6 +1025,7 @@ class TestFormAppearances:
         assert field["value"] == "Inked"
         assert b"(Inked)" in field["faces"]["/N"]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_bare_field_with_nothing_to_show_is_left_alone(
             self, tmp_path, gs_path):
         # An empty value and no chrome is nothing to draw, and the producer
@@ -1033,6 +1048,7 @@ class TestFormAppearances:
         assert b"Tj" not in _content(filled), "the empty field left a painter behind"
         assert b"(Inked)" in self._widgets(filled)["bare"]["faces"]["/N"]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_bare_field_keeps_the_chrome_the_flatten_carried(
             self, tmp_path, gs_path):
         # /MK states a background and a border independently of any value
@@ -1053,6 +1069,7 @@ class TestFormAppearances:
         assert FORM_TEXT_CMYK in face
         assert b" rg" not in face and b" RG" not in face
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_bare_choice_draws_every_row_the_flatten_never_had(
             self, tmp_path, gs_path):
         # The producer synthesizes only the SELECTED row of a list box
@@ -1076,6 +1093,7 @@ class TestFormAppearances:
         assert FORM_TEXT_CMYK in rows
         assert b" rg" not in rows
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_bare_buttons_keep_the_producers_own_nothing(
             self, tmp_path, gs_path):
         # A check box or radio button draws through the /AP states it was
@@ -1101,6 +1119,7 @@ class TestFormAppearances:
         assert b"Tj" not in _content(filled)
         assert self._widgets(filled)["check"]["value"] == "/Off"
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_shared_appearance_is_converted_once(self, tmp_path, gs_path):
         # Two widgets wearing one stream is one appearance: staged once,
         # converted once, and still one object afterwards.
@@ -1117,6 +1136,7 @@ class TestFormAppearances:
         assert FORM_FILL_CMYK in widgets["first"]["faces"]["/N"]
         assert FORM_FILL_CMYK not in _content(out)
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_the_field_still_fills_after_the_conversion(self, tmp_path, gs_path):
         from engine.forms import fill_form_fields
         from separation_builders import form_appearance_pdf
@@ -1131,6 +1151,7 @@ class TestFormAppearances:
         assert field["value"] == "Goodbye"
         assert b"(Goodbye)" in field["faces"]["/N"]
 
+    @pytest.mark.usefixtures("icc_dir")
     def test_a_patterned_appearance_keeps_the_space_it_was_written_in(
             self, tmp_path, gs_path):
         # A harvested face's content came from a PAGE, so the pattern matrices

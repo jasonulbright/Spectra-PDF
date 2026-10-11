@@ -75,6 +75,13 @@ needs_tesseract = pytest.mark.skipif(
     not TESSERACT.is_file(), reason="Tesseract not vendored"
 )
 
+#: The default codec falls back to CCITT G4 when the encoder is absent, so a
+#: case that pins a JBIG2 codec has nothing to measure without it.
+needs_jbig2 = pytest.mark.skipif(
+    not vendored_tools.JBIG2.is_file(),
+    reason=vendored_tools.skip_reason(vendored_tools.JBIG2, "jbig2enc"),
+)
+
 
 @pytest.fixture(params=SCANS)
 def scan(request, tmp_dir):
@@ -939,6 +946,7 @@ class TestPdfa:
         assert "/JPXDecode" not in filters
 
     @pytest.mark.parametrize("level", ("1b", "2b"))
+    @pytest.mark.usefixtures("srgb_profile")
     def test_the_layering_survives_pdfa_conversion(self, text_scan, tmp_dir, gs_path, level):
         mrc = os.path.join(tmp_dir, "mrc.pdf")
         archival = os.path.join(tmp_dir, f"pdfa{level}.pdf")
@@ -1066,6 +1074,7 @@ class TestReport:
         assert report["mask_codec"] == CCITT_G4
         assert report["requested_mask_codec"] == CCITT_G4
 
+    @needs_jbig2
     def test_every_layered_page_names_the_codec_its_own_stencil_got(
         self, text_scan, tmp_dir, gs_path
     ):
@@ -1144,6 +1153,7 @@ class TestGrainRouting:
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 2
 
+    @needs_jbig2
     def test_a_document_of_both_reports_mixed_and_names_each_page(
         self, text_scan, tmp_dir, gs_path
     ):

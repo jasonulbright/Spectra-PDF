@@ -41,6 +41,7 @@ def row_of(result, kind):
     raise AssertionError(f"no {kind} row in {kinds(result)}")
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestSilentLosses:
     """The alterations Ghostscript performs without saying so."""
 
@@ -116,6 +117,7 @@ class TestSilentLosses:
         assert detail["used"] and detail["used"] != detail["requested"]
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestProducerNotices:
     """What Ghostscript itself says survives to the caller."""
 
@@ -137,6 +139,7 @@ class TestProducerNotices:
         assert result["producer_notices"] == []
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestLosslessConversion:
     def test_an_unchanged_document_reports_nothing_altered(
         self, sample_pdf, tmp_dir, gs_path
@@ -148,6 +151,7 @@ class TestLosslessConversion:
         assert result["declared_conformance"] == "PDF/A-2B"
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestDeclaredConformance:
     @pytest.mark.parametrize("level,declared", [
         ("1b", "PDF/A-1B"), ("2b", "PDF/A-2B"), ("3b", "PDF/A-3B"),
@@ -194,6 +198,7 @@ class TestDeclaredConformance:
         assert open(tmp_pdf, "rb").read() == before
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestInPlace:
     def test_an_in_place_conversion_compares_against_the_original(
         self, tmp_dir, gs_path
@@ -213,6 +218,7 @@ class TestStandardIdentifiers:
     standard's declaration, only to stop dropping it in silence.
     """
 
+    @pytest.mark.usefixtures("srgb_profile")
     def test_a_dropped_pdfua_declaration_is_named(self, tmp_dir, gs_path):
         src = pdfua_declared_pdf(os.path.join(tmp_dir, "ua.pdf"))
         assert standards_report.census(src).values["standard_identifiers"] == ["PDF/UA"]
@@ -224,6 +230,7 @@ class TestStandardIdentifiers:
         with pikepdf.open(out) as pdf:
             assert b"pdfuaid" not in bytes(pdf.Root.Metadata.read_bytes())
 
+    @pytest.mark.usefixtures("srgb_profile")
     def test_a_document_declaring_nothing_else_gets_no_row(self, tmp_dir, gs_path):
         src = plain_pdf(os.path.join(tmp_dir, "plain.pdf"))
         out = os.path.join(tmp_dir, "plain-a2.pdf")
@@ -388,6 +395,7 @@ class TestNoticeParsing:
         assert unmatched == []
 
 
+@pytest.mark.usefixtures("icc_dir")
 class TestPdfxCarriesTheSameReport:
     def test_a_dropped_form_is_named(self, tmp_dir, gs_path):
         src = tagged_form_pdf(os.path.join(tmp_dir, "form.pdf"))

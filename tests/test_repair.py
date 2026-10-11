@@ -834,6 +834,7 @@ class TestHonestReports:
             assert result["pages"] == 2
 
 
+@pytest.mark.usefixtures("srgb_profile")
 class TestPdfaOutputIntent:
     @pytest.mark.parametrize("level", ["1b", "2b"])
     def test_the_output_carries_a_pdfa_output_intent(self, tmp_dir, gs_path, level):
