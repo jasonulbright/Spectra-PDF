@@ -129,7 +129,13 @@ import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
 import { finishCoordinatedExit, sealBeforeClose, shouldMinimizeToTrayOnClose } from './lib/close-sequence';
 import { withPromptTurn } from './lib/prompt-turn';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
-import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
+import { initialViewPlan, parseInitialView, planMovesWorkbench } from './lib/initial-view';
+import {
+  flushReadingViewHistory,
+  flushReadingViewRecord,
+  forgetLiveReadingView,
+  seedReadingView,
+} from './lib/reading-view-store';
 import type { FormFieldValue } from './lib/forms';
 import { fillFormValues } from './lib/form-fill-transaction';
 import { createFormFields } from './lib/form-create-transaction';
@@ -1093,6 +1099,18 @@ function AppContent(): React.ReactElement {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // Every flow that closes a document (a tab's ×, Close All, a hand-off, a
+  // document retired to an import source) ends with its path leaving the set
+  // of real documents. Its reading view is forgotten there, once, so a reopen
+  // resolves from the saved row rather than from the closed session's panes.
+  const documentPaths = useRef(new Set<string>());
+  useEffect(() => {
+    const current = new Set<string>();
+    for (const [path, entry] of state.files) if (!entry.importOnly) current.add(path);
+    for (const path of documentPaths.current) if (!current.has(path)) forgetLiveReadingView(path);
+    documentPaths.current = current;
+  }, [state.files]);
+
   // Launch-time dead-recent cleanup (auto-removes only positively confirmed
   // missing local files; never a sourceUrl entry, never anything merely
   // indeterminate — see sweepDeadRecents). Runs once, after hydration, without
@@ -1116,14 +1134,17 @@ function AppContent(): React.ReactElement {
   const handOffsInFlight = useRef(new Map<string, { returned: boolean }>());
   const handOffGate = useRef(new HandOffGate());
 
-  // A newly opened document's own initial view: the layout, navigation pane
-  // and reading mode land as one reducer act; the opening page and its
-  // magnification are applied to the canvas once the document has indexed.
-  // A catalog this cannot read never blocks an open — the document appears
-  // with the workbench's own view, which is what a reader without the
-  // preference does.
+  // A newly opened document's own initial view. The workbench half (spread
+  // direction, navigation pane, reading mode) lands as one reducer act, and
+  // only for the document the open lands on: those are window-wide, and a
+  // document opened behind it must not move them. The reading-view half
+  // (layout, scrolling, zoom, opening page) is parked in the store as a seed
+  // for every fresh document; the document's view applies it when it mounts
+  // with no live or saved view. With "Use the document's initial view" off,
+  // only the spread direction moves. A catalog this cannot read never blocks
+  // an open.
   const applyInitialView = useCallback(
-    async (path: string, workingPath: string) => {
+    async (path: string, workingPath: string, workbench: boolean) => {
       let view;
       try {
         view = parseInitialView(
@@ -1132,25 +1153,17 @@ function AppContent(): React.ReactElement {
       } catch {
         return;
       }
+      const opened = readState().files.get(path);
+      if (!opened || opened.importOnly) return;
       const plan = initialViewPlan(view);
-      if (!planIsInert(plan, stateRef.current.ui.spreadDirection)) {
-        dispatch({ type: 'UI_APPLY_INITIAL_VIEW', plan });
+      const honour = getSettings().viewHonourDocumentView;
+      const applied = honour ? plan : { ...plan, navPane: null, readingMode: null, page: null, seed: null };
+      if (workbench && planMovesWorkbench(applied, stateRef.current.ui.spreadDirection)) {
+        dispatch({ type: 'UI_APPLY_INITIAL_VIEW', plan: applied });
       }
-      if (plan.page === null) return;
-      // The OPEN_FILE dispatch and the workspace index land over the next
-      // renders, so poll the (idempotent) jump and stop on the first success —
-      // `openPathAtPage`'s own bounded shape, for the same reason.
-      let landed = false;
-      for (let i = 0; i < 15 && !landed; i++) {
-        landed = getCanvasServices()?.jumpToFilePage(path, plan.page) ?? false;
-        if (!landed) await new Promise((r) => setTimeout(r, 120));
-      }
-      if (!landed) return;
-      const canvas = getCanvasServices()?.canvas();
-      if (plan.zoomPercent !== null) canvas?.setZoomPercent?.(plan.zoomPercent);
-      else if (plan.fitWidth) canvas?.fitWidth?.();
+      if (applied.seed) seedReadingView(path, applied.seed);
     },
-    [call, dispatch],
+    [call, dispatch, readState],
   );
 
   // Open files, then focus the last opened document's tab (opening a file is
@@ -1304,12 +1317,10 @@ function AppContent(): React.ReactElement {
     const successfulOpens: typeof recent = [];
     let lastOpened: string | null = null;
     let inserted = 0;
-    // The file that was really OPENED (not re-activated) and became the
-    // landing tab. Only a fresh open applies an initial view: re-activating a
-    // tab must not undo a layout the user chose while it was open.
-    // Asserted, not annotated: the open steps assign it inside callbacks, which
-    // the compiler's flow narrowing does not follow.
-    let freshlyOpened = null as { path: string; workingPath: string } | null;
+    // The files this batch really OPENED (not re-activated). Only a fresh open
+    // applies an initial view: re-activating a tab must not undo a layout the
+    // user chose while it was open.
+    const freshlyOpened: { path: string; workingPath: string }[] = [];
     let changed = false;
     // Claimed but not yet accounted for — released in the finally.
     let unopened = new Set<string>();
@@ -1411,7 +1422,6 @@ function AppContent(): React.ReactElement {
             const recorded = recent.find((entry) => entry.path === filePath);
             if (recorded) successfulOpens.push(recorded);
             lastOpened = filePath;                  // must not pollute Recent (regression)
-            freshlyOpened = null;
             changed = true;
           },
           open: () => sourcePathOperations.current.run([filePath], async () => {
@@ -1483,7 +1493,7 @@ function AppContent(): React.ReactElement {
             const recorded = recent.find((entry) => entry.path === filePath);
             if (recorded) successfulOpens.push(recorded);
             lastOpened = filePath;
-            freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
+            freshlyOpened.push({ path: filePath, workingPath: prepared.workingPath });
             changed = true;
             return true;
           }),
@@ -1515,9 +1525,10 @@ function AppContent(): React.ReactElement {
     }
     // Outside the finally: an initial view is a courtesy on top of a
     // completed open, never a reason for the open itself to report a failure.
-    if (freshlyOpened && lastOpened === freshlyOpened.path && opts?.focus !== false) {
-      await applyInitialView(freshlyOpened.path, freshlyOpened.workingPath);
-    }
+    const landing = opts?.focus !== false ? lastOpened : null;
+    await Promise.all(
+      freshlyOpened.map((f) => applyInitialView(f.path, f.workingPath, f.path === landing)),
+    );
     const summary = summarizeOpenOutcomes(outcomes);
     // Unawaited, like every other notice this funnel raises: the notice is
     // dismissed by the user, and an open that has already done everything it
@@ -3201,6 +3212,7 @@ function AppContent(): React.ReactElement {
     // An order that did not land is not flushed: exiting on it would record an
     // arrangement this window has already superseded, so the exit is called off
     // the same way an unanswered peer calls it off.
+    flushReadingViewHistory();
     if (!(await flushTabOrder())) {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
       return;
@@ -3326,6 +3338,7 @@ function AppContent(): React.ReactElement {
                   await tabDrag.release(held.token).catch(() => {});
                   return false;
                 }
+                flushReadingViewRecord(path);
                 moved = await tabDrag.commit(held.token);
               } catch (e) {
                 // The write a move costs failed. The document is still held somewhere
@@ -3629,6 +3642,7 @@ function AppContent(): React.ReactElement {
   // there reads as a dead close button.
   const closeOrReport = useCallback(
     async (minimizeToTray: boolean): Promise<GatedClose> => {
+      flushReadingViewHistory();
       const closed = await closeGated((force) => app.closeWindow(minimizeToTray, force));
       if (closed === 'aborted') {
         await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));

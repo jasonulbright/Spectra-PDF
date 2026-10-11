@@ -32,11 +32,36 @@ async function pageRect(): Promise<{ x: number; y: number; w: number; h: number 
   })) as { x: number; y: number; w: number; h: number };
 }
 
-async function dragOnPage(
-  pr: { x: number; y: number; w: number; h: number },
-  from: [number, number],
-  to: [number, number],
-): Promise<void> {
+type Rect = { x: number; y: number; w: number; h: number };
+
+/** The first page cell's box once two reads 150 ms apart agree. Arming a tool
+ * shows its properties bar, which shortens the reading pane; at Fit Page the
+ * page then rescales and re-centres, so a box read earlier names a place the
+ * page has left. */
+async function settledPageRect(): Promise<Rect> {
+  let prev: Rect | null = null;
+  let held: Rect | null = null;
+  await browser.waitUntil(
+    async () => {
+      const now = await pageRect();
+      const same =
+        now !== null &&
+        prev !== null &&
+        Math.abs(now.x - prev.x) < 0.5 &&
+        Math.abs(now.y - prev.y) < 0.5 &&
+        Math.abs(now.w - prev.w) < 0.5 &&
+        Math.abs(now.h - prev.h) < 0.5;
+      prev = now;
+      held = now;
+      return same;
+    },
+    { timeout: 10_000, interval: 150, timeoutMsg: `the page box never settled; last read: ${JSON.stringify(held)}` },
+  );
+  return held!;
+}
+
+async function dragOnPage(from: [number, number], to: [number, number]): Promise<void> {
+  const pr = await settledPageRect();
   await browser
     .action('pointer', { parameters: { pointerType: 'mouse' } })
     .move({ x: Math.round(pr.x + pr.w * from[0]), y: Math.round(pr.y + pr.h * from[1]) })
@@ -48,11 +73,8 @@ async function dragOnPage(
     .perform();
 }
 
-async function clickOnPage(
-  pr: { x: number; y: number; w: number; h: number },
-  at: [number, number],
-  double = false,
-): Promise<void> {
+async function clickOnPage(at: [number, number], double = false): Promise<void> {
+  const pr = await settledPageRect();
   let chain = browser
     .action('pointer', { parameters: { pointerType: 'mouse' } })
     .move({ x: Math.round(pr.x + pr.w * at[0]), y: Math.round(pr.y + pr.h * at[1]) })
@@ -65,7 +87,6 @@ async function clickOnPage(
 describe('drawing shapes and callouts', () => {
   let tmp: string;
   let doc: { docId: string; pageId: string };
-  let pr: { x: number; y: number; w: number; h: number };
 
   before(async () => {
     await waitForHarness();
@@ -79,13 +100,12 @@ describe('drawing shapes and callouts', () => {
       timeout: 15_000,
       timeoutMsg: 'no page cell appeared',
     });
-    pr = await pageRect();
     doc = { docId: '', pageId: '' }; // resolved from the first drawn annotation
   });
 
   it('draws a rectangle with the band gesture', async () => {
     await invokeAppCommand('tools.shape'); // arms 'shape', default figure: rect
-    await dragOnPage(pr, [0.1, 0.1], [0.3, 0.25]);
+    await dragOnPage([0.1, 0.1], [0.3, 0.25]);
     const first = await getFirstAnnotation();
     expect(first).not.toBeNull();
     doc = { docId: first!.docId, pageId: first!.pageId };
@@ -100,7 +120,7 @@ describe('drawing shapes and callouts', () => {
 
   it('draws an arrow with a two-point drag', async () => {
     await browser.$('[data-testid="shape-type-arrow"]').click();
-    await dragOnPage(pr, [0.5, 0.1], [0.8, 0.1]); // deliberately FLAT
+    await dragOnPage([0.5, 0.1], [0.8, 0.1]); // deliberately FLAT
     const annots = await getPageAnnotations(doc.docId, doc.pageId);
     const arrow = annots.find((a) => a.shapeType === 'arrow')!;
     expect(arrow).toBeDefined();
@@ -110,10 +130,10 @@ describe('drawing shapes and callouts', () => {
 
   it('draws a polygon with vertex clicks finished by a double-click', async () => {
     await browser.$('[data-testid="shape-type-polygon"]').click();
-    await clickOnPage(pr, [0.1, 0.45]);
-    await clickOnPage(pr, [0.3, 0.45]);
-    await clickOnPage(pr, [0.2, 0.58]);
-    await clickOnPage(pr, [0.2, 0.58], true); // double-click the last vertex
+    await clickOnPage([0.1, 0.45]);
+    await clickOnPage([0.3, 0.45]);
+    await clickOnPage([0.2, 0.58]);
+    await clickOnPage([0.2, 0.58], true); // double-click the last vertex
     await browser.waitUntil(
       async () => (await getPageAnnotations(doc.docId, doc.pageId)).some((a) => a.shapeType === 'polygon'),
       { timeout: 5_000, timeoutMsg: 'the vertex sequence never committed a polygon' },
@@ -122,11 +142,11 @@ describe('drawing shapes and callouts', () => {
 
   it('draws a cloud with vertex clicks', async () => {
     await browser.$('[data-testid="shape-type-cloud"]').click();
-    await clickOnPage(pr, [0.58, 0.45]);
-    await clickOnPage(pr, [0.8, 0.45]);
-    await clickOnPage(pr, [0.8, 0.56]);
-    await clickOnPage(pr, [0.58, 0.56]);
-    await clickOnPage(pr, [0.58, 0.56], true);
+    await clickOnPage([0.58, 0.45]);
+    await clickOnPage([0.8, 0.45]);
+    await clickOnPage([0.8, 0.56]);
+    await clickOnPage([0.58, 0.56]);
+    await clickOnPage([0.58, 0.56], true);
     await browser.waitUntil(
       async () => (await getPageAnnotations(doc.docId, doc.pageId)).some((a) => a.shapeType === 'cloud'),
       { timeout: 5_000, timeoutMsg: 'the vertex sequence never committed a cloud' },
@@ -143,15 +163,15 @@ describe('drawing shapes and callouts', () => {
   it('ends a live vertex sequence when the figure changes', async () => {
     const before = (await getPageAnnotations(doc.docId, doc.pageId)).length;
     await browser.$('[data-testid="shape-type-polygon"]').click();
-    await clickOnPage(pr, [0.36, 0.44]);
-    await clickOnPage(pr, [0.48, 0.44]);
+    await clickOnPage([0.36, 0.44]);
+    await clickOnPage([0.48, 0.44]);
     // Switch mid-sequence. The half-drawn polygon is abandoned, not banked.
     await browser.$('[data-testid="shape-type-cloud"]').click();
     await browser.pause(300);
-    await clickOnPage(pr, [0.36, 0.5]);
-    await clickOnPage(pr, [0.48, 0.5]);
-    await clickOnPage(pr, [0.48, 0.57]);
-    await clickOnPage(pr, [0.48, 0.57], true);
+    await clickOnPage([0.36, 0.5]);
+    await clickOnPage([0.48, 0.5]);
+    await clickOnPage([0.48, 0.57]);
+    await clickOnPage([0.48, 0.57], true);
     await browser.waitUntil(
       async () => (await getPageAnnotations(doc.docId, doc.pageId)).length > before,
       { timeout: 5_000, timeoutMsg: 'nothing committed after the figure switch' },
@@ -166,12 +186,12 @@ describe('drawing shapes and callouts', () => {
 
   it('draws a callout whose editor opens for the text', async () => {
     await invokeAppCommand('tools.callout');
-    await dragOnPage(pr, [0.55, 0.32], [0.85, 0.4]);
+    await dragOnPage([0.55, 0.32], [0.85, 0.4]);
     const editor = await browser.$('.page-annot-editor');
     await editor.waitForDisplayed({ timeout: 5_000 });
     await browser.keys('review this');
     // Click empty page area to blur-commit the text.
-    await clickOnPage(pr, [0.42, 0.2]);
+    await clickOnPage([0.42, 0.2]);
     await browser.waitUntil(
       async () =>
         (await getPageAnnotations(doc.docId, doc.pageId)).some(

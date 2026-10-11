@@ -40,11 +40,8 @@ import { createServer } from 'node:net';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { scanText } from './scan-run-log.js';
 import { launchOwnedProcess } from './support/owned-process.js';
+import { APP_BINARY, APP_DATA_ROOT, resetLaunchRestoreState } from './support/app-data.js';
 
-const REPO_ROOT = resolve(__dirname, '..');
-const APP_BINARY = process.env.SPECTRAPDF_E2E_APP
-  ? resolve(process.env.SPECTRAPDF_E2E_APP)
-  : resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 const NATIVE_DRIVER = resolve(__dirname, 'msedgedriver.exe');
 const TAURI_DRIVER_PORT = 4444;
 const RUN_LOG_DIR = resolve(__dirname, 'logs');
@@ -153,7 +150,7 @@ export const config: WebdriverIO.Config = {
     // presentation removes this file (or drives the state through the
     // harness's pin) and puts it back, so the unanswered state stays reachable
     // for the one spec that is about it.
-    const portableData = resolve(APP_BINARY, '..', 'data');
+    const portableData = APP_DATA_ROOT;
     mkdirSync(portableData, { recursive: true });
     writeFileSync(
       resolve(portableData, 'icc-assent.json'),
@@ -173,6 +170,8 @@ export const config: WebdriverIO.Config = {
   beforeSession: async (_config, _caps, specs: string[]) => {
       await reapTestProcesses();
       await requireFreeDriverPort();
+      // `browser.reloadSession()` does not re-run this hook, so a spec's own relaunches keep the restore flag it set.
+      resetLaunchRestoreState();
 
       // Set SPECTRAPDF_E2E so the Tauri binary skips single-instance + tray —
       // each WDIO session needs a clean launch and a clean exit.
@@ -224,6 +223,21 @@ export const config: WebdriverIO.Config = {
           '127.0.0.1 is refused as a private destination.',
       );
     }
+    // Remembered reading views persist in shared localStorage across sessions: a spec's zoom or page must not leak into the next spec file's open.
+    await browser.execute(() => localStorage.removeItem('spectra-view-history'));
+    // `beforeSession` resets startup.json before launch; the preferences dialog reads spectra-settings, which only a window can reach.
+    await browser.execute(() => {
+      try {
+        const raw = localStorage.getItem('spectra-settings');
+        const settings = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+        if (settings && settings.restoreWindowsOnLaunch === true) {
+          settings.restoreWindowsOnLaunch = false;
+          localStorage.setItem('spectra-settings', JSON.stringify(settings));
+        }
+      } catch {
+        /* an unreadable record loads as the defaults, where restore is off */
+      }
+    });
   },
   // Every refusal the webview's content security policy raised during a test
   // becomes an ERROR row in the run log, so the inventory lists it as

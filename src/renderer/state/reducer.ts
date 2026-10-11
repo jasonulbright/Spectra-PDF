@@ -93,8 +93,6 @@ export const initialUiState: UiState = {
   // is also why the board survives untouched as an equal, one-click peer rather
   // than being replaced.
   docViewMode: 'document',
-  pageLayout: 'single',
-  twoUpCover: true,
   spreadDirection: 'l2r',
   readingMode: false,
   propertiesBar: false,
@@ -2112,21 +2110,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_DOC_VIEW_MODE':
       if (action.mode === state.ui.docViewMode) return state;
       return { ...state, ui: { ...state.ui, docViewMode: action.mode } };
-    case 'UI_SET_PAGE_LAYOUT':
-      if (action.layout === state.ui.pageLayout) return state;
-      return { ...state, ui: { ...state.ui, pageLayout: action.layout } };
-    case 'UI_TOGGLE_TWOUP_COVER':
-      return { ...state, ui: { ...state.ui, twoUpCover: !state.ui.twoUpCover } };
     case 'UI_TOGGLE_READING_MODE':
       return { ...state, ui: { ...state.ui, readingMode: !state.ui.readingMode } };
     case 'UI_APPLY_INITIAL_VIEW': {
-      // One act, so a document that states a layout AND a page mode cannot
+      // One act, so a document that states a page mode AND a reading mode cannot
       // land as two renders with a half-applied view in between. A null field
       // is the document saying nothing — the user's current setting stands.
       const { plan } = action;
       const ui = { ...state.ui, spreadDirection: plan.spreadDirection };
-      if (plan.pageLayout !== null) ui.pageLayout = plan.pageLayout;
-      if (plan.twoUpCover !== null) ui.twoUpCover = plan.twoUpCover;
       if (plan.readingMode !== null) ui.readingMode = plan.readingMode;
       if (plan.navPane !== null) {
         ui.navPane = {

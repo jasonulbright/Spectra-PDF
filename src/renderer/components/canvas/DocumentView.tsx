@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from 'react';
@@ -28,28 +29,71 @@ import type { FormFieldValue, FormValuePhase } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 import type { ShapeType, SpreadDirection } from '../../state/types';
 import type { MeasureScale } from '../../lib/measure';
-import type { CanvasHandle } from '../../canvas/canvas-handle';
+import type { CanvasHandle, LinkedZoom } from '../../canvas/canvas-handle';
 import { displayWidthAt } from '../../canvas/layout';
 import { isEditable } from '../../commands/keymap';
 import { pushEscapeInterceptor } from '../../commands/context';
 import {
   actualSizeZoom,
-  anchorHolds,
-  clampZoom,
-  currentPageFor,
-  fitWidthZoom,
+  clampReadingZoom,
+  readingZoomRange,
   realTopFor,
+  renderableMaxZoom,
   scrollMapFor,
   virtualTopOf,
   visibleRange,
   READING_BASE_HEIGHT,
-  READING_PAGE_GAP as PAGE_GAP,
   ZOOM_SETTLE_MS,
   ZOOM_STEP,
   type JumpAnchor,
 } from '../../canvas/reading-page';
+import {
+  anchoredScroll,
+  fitAvailable,
+  fitZoom,
+  gridGeometry,
+  hitTest,
+  fitAvailableHeight,
+  pagedRowAt,
+  pagedTarget,
+  pageInView,
+  pageRect,
+  OVERFLOW_EPS,
+  jumpTop,
+  pagesInRowOf,
+  rowOfPage as gridRowOfPage,
+  steppedZoom,
+
+  viewportCentre,
+
+
+  wheelDeltaPx,
+  wheelStep,
+  widestOf,
+  zoomForColumns,
+  type FitBasis,
+  type GridGeometry,
+  type GridInput,
+  type LinkedGeometry,
+  type PageHit,
+  type WheelStepState,
+} from '../../canvas/reading-layout';
+import { WHEEL_ZOOM_SPEED } from '../../canvas/zoom-constants';
+import {
+  initialReadingViewFor,
+  publishReadingView,
+  subscribeReadingViewSeed,
+  takeReadingViewSeed,
+} from '../../lib/reading-view-store';
+import type {
+  LayoutMode,
+  ReadingPaneId,
+  ReadingViewSeed,
+  ReadingViewSnapshot,
+  ScrollMode,
+  ZoomMode,
+} from '../../lib/reading-view-types';
 import { PageCell } from './PageCell';
-import { pagesInRow, rowCountOf, rowOfPage, type PageLayout } from '../../canvas/spread-layout';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import type { PageQuads } from '../../lib/text-selection-markup';
 import type { GuideAxis, PageGuide } from '../../lib/guides';
@@ -58,24 +102,21 @@ import { DEFAULT_MEASURE_SCALE, measureUnitsPerPoint } from '../../lib/measure';
 import { tChrome, tNumber } from '../../i18n';
 import { pointerScope } from '../../lib/pointer-scope';
 
-// The continuous reading view: one document, a single
-// vertical column of the SAME PageCells the board uses (the reuse
-// seam), laid out by a plain scroller with a scalar zoom instead of the d3
-// world transform. Every tool works here because the cells are identical; the
-// d3 camera and page-reorder drag stay Organize-view-only. Virtualized: only
-// pages within the viewport (± overscan) are mounted, so a 1,000-page doc is a
-// handful of live cells. Zoom drives `pageHeight` (PageCell sizes the whole
-// cell — raster, overlays, font — off it), so the reading `CanvasHandle` is
-// pure scroll + a scale number, no world matrix.
+// The reading view: one document laid out in rows of the SAME PageCells the
+// board uses (the reuse seam) — one page per row, or a responsive grid whose
+// column count follows the pane width — by a plain scroller with a scalar
+// zoom instead of the d3 world transform. Every tool works here because the
+// cells are identical; the d3 camera and page-reorder drag stay
+// Organize-view-only. Virtualized: only rows within the viewport (± overscan)
+// are mounted, so a 1,000-page doc is a handful of live cells. Zoom drives
+// `pageHeight` (PageCell sizes the whole cell — raster, overlays, font — off
+// it), so the reading `CanvasHandle` is pure scroll + a scale number, no
+// world matrix. All geometry is the pure `canvas/reading-layout.ts`.
 
-const OVERSCAN = 2; // pages rendered beyond each viewport edge
-// Breathing room Fit Width leaves either side of the page. Exactly double the
-// 8px custom scrollbar (styles.css), so if the fit's own zoom change flips the
-// scrollbar's visibility the row can only come out narrower than the pane,
-// never wider — the delta is absorbed rather than clipping.
-const FIT_WIDTH_GUTTER = 16;
-// MIN_ZOOM / MAX_ZOOM / ZOOM_STEP / clampZoom live in canvas/reading-page.ts —
-// the range is load-bearing for the presets (see its header) and tested there.
+const OVERSCAN = 2; // rows rendered beyond each viewport edge
+// ZOOM_STEP and the zoom range (`clampReadingZoom`: the percent bounds of a
+// reference page, capped by renderability) live in canvas/reading-page.ts,
+// tested there. Every stored zoom enters through `clampReadingZoom`.
 
 // The reading view has no page-reorder drag (Organize-view-only), so a page
 // press in select mode is a no-op; the annotate/redact/form tools handle their
@@ -89,15 +130,17 @@ const RULER_PX = 18;
 
 export interface DocumentViewProps {
   doc: OpenDocument;
+  /** Which split pane this view is; the reading-view store keys its live
+   * view by (path, pane). */
+  paneId: ReadingPaneId;
+  /** 0-based position of `doc` among its file's documents (.pdfx
+   * partitions); 0 otherwise. */
+  docIndex: number;
   /** Author link regions over a text selection (reading view only). */
   onCreateLinks?: (selection: PageQuads[], url: string) => Promise<void>;
-  /** Page layout: one page per row, or two-up facing spreads. */
-  pageLayout?: PageLayout;
-  /** Two-up only: show the first page alone (the book/cover convention). */
-  twoUpCover?: boolean;
-  /** Facing-page order, from the open document's /ViewerPreferences
-   * /Direction. Reverses which side of a spread the leading page takes;
-   * a single-page column has no facing order, so it is inert there. */
+  /** Reading order across a row, from the open document's
+   * /ViewerPreferences /Direction: right-to-left mirrors the grid's column
+   * order. A single-page column has no facing order, so it is inert there. */
   spreadDirection?: SpreadDirection;
   /** Rotate View's render-only quarter-turn for this file; composed
    * with each page's own pending rotation for every display/capture read. */
@@ -298,9 +341,15 @@ export interface DocumentViewProps {
   onMeasureContextMenu: (docId: string, pageId: string, annotationId: string, x: number, y: number) => void;
   onMarqueeSelect: (docId: string, pageId: string, annotationIds: string[], additive: boolean) => void;
   onRegroupCountMarks: (docId: string, pageId: string, annotationIds: string[], group: import('../../lib/count-marks').CountGroup) => void;
-  // Marquee zoom applied locally — the split layer syncs sibling panes'
-  // zoom to the returned value (quad zoom must stay equal).
-  onMarqueeZoomApplied?: (zoom: number) => void;
+  /** Quad split only: every zoom this pane applies, for the split layer to
+   * hand to the sibling panes (`CanvasHandle.followZoom`). */
+  onZoomLinked?: (zoom: LinkedZoom) => void;
+  /** Quad split only: the geometry the four panes share, so the mirrored
+   * scroll offsets name the same document point (see `linkQuadGeometry`). */
+  linkedGeometry?: LinkedGeometry;
+  /** Quad split only: this pane's own measurement, from which the split
+   * layer derives `linkedGeometry`. */
+  onFitBasis?: (basis: FitBasis) => void;
   onAddRedactionMark: (
     docId: string,
     pageId: string,
@@ -320,12 +369,60 @@ export interface DocumentViewProps {
   onCurrentPageChange?: (pageNumber: number) => void;
 }
 
-/** The height (px) a page occupies in the column at the given zoom, aspect-
- * correct. Mirrors PageCell's own sizing so the virtualizer's offsets match
- * the DOM exactly. */
-function pageHeightAt(zoom: number): number {
-  return READING_BASE_HEIGHT * zoom;
+/** A page at its EFFECTIVE rotation: its own pending turn plus Rotate View. */
+function effectivePage(p: PageRef, viewRotation: 0 | 90 | 180 | 270): PageRef {
+  if (viewRotation === 0) return p;
+  return { ...p, rotation: ((((p.rotation + viewRotation) % 360) + 360) % 360) as 0 | 90 | 180 | 270 };
 }
+
+/** The view's internal zoom for a stored mode: `custom` and `actual` are
+ * percentages of the reference page's actual size; the fits resolve at
+ * render and need no stored value. */
+function storedZoomFor(mode: ZoomMode, percent: number, refPage: PageRef | undefined): number {
+  if (!refPage) return 1;
+  const actual = actualSizeZoom(refPage, READING_BASE_HEIGHT);
+  if (mode === 'actual') return actual;
+  if (mode === 'custom' && Number.isFinite(percent) && percent > 0) {
+    return clampReadingZoom((actual * percent) / 100, refPage);
+  }
+  return 1;
+}
+
+/** Percent of actual size of `page` at internal zoom `z`, to 0.01. */
+function percentFor(z: number, page: PageRef | undefined): number {
+  if (!page) return 100;
+  const actual = actualSizeZoom(page, READING_BASE_HEIGHT);
+  return actual > 0 ? Math.round((z / actual) * 10_000) / 100 : 100;
+}
+
+function isFitMode(mode: ZoomMode): mode is 'fitPage' | 'fitWidth' | 'fitHeight' {
+  return mode === 'fitPage' || mode === 'fitWidth' || mode === 'fitHeight';
+}
+
+/** A scroll position the next layout must establish. `gAt` is the geometry
+ * the request was made against: when the next render still has that
+ * geometry, the request changed nothing and is dropped, its horizontal
+ * centring with it, so it can never fire late against a later scroll.
+ * `null` applies at the first measured layout. Every request forces that
+ * next render, so a request whose state write was a no-op is still consumed
+ * at once. */
+type PendingView =
+  | {
+      kind: 'anchor';
+      /** The page points kept under `pointer` on each axis. They differ only
+       * for a quad pane following a sibling's zoom (`followZoom`). */
+      hitX: PageHit;
+      hitY: PageHit;
+      pointer: { x: number; y: number };
+      zTarget: number;
+      gAt: GridGeometry | null;
+      hCenter: boolean;
+    }
+  | { kind: 'page'; index: number; gAt: GridGeometry | null; hCenter: boolean };
+
+/** Wheel-step and line-scroll distances for paged keys (CSS px). */
+const PAGED_LINE_PX = 40;
+const PAGED_PAGE_FRACTION = 0.9;
 
 export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function DocumentView(
   props,
@@ -335,14 +432,42 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     doc,
     proxies,
     viewRotation = 0,
-    pageLayout = 'single',
-    twoUpCover = false,
     spreadDirection = 'l2r',
+    paneId,
+    docIndex,
   } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [zoomState, setZoom] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+  const [viewportW, setViewportW] = useState(0);
+  // The pane's height without a horizontal scrollbar, and the scrollbar's
+  // thickness: the fits solve against these, so their answer does not depend
+  // on the scrollbar their own result shows or hides.
+  const [frame, setFrame] = useState({ fullH: 0, bar: 0 });
+
+  // The view this pane opens with — its own live snapshot, a sibling's, the
+  // saved record or the defaults — resolved ONCE per mount.
+  const [opening] = useState(() =>
+    initialReadingViewFor(doc.path, paneId, docIndex, doc.pages.length),
+  );
+  const [zoomMode, setZoomModeState] = useState<ZoomMode>(opening.state.zoomMode);
+  // The internal zoom for `custom` and `actual`. The fit modes resolve every
+  // render from the viewport (sticky) and ignore it, except before the pane is
+  // measured.
+  const [zStored, setZStored] = useState(() =>
+    storedZoomFor(
+      opening.state.zoomMode,
+      opening.state.zoomPercent,
+      doc.pages[opening.state.page - 1]
+        ? effectivePage(doc.pages[opening.state.page - 1], viewRotation)
+        : undefined,
+    ),
+  );
+  const [layoutMode, setLayoutModeState] = useState<LayoutMode>(opening.state.layoutMode);
+  const [coverAlone, setCoverAloneState] = useState(opening.state.coverAlone);
+  const [scrollMode, setScrollModeState] = useState<ScrollMode>(opening.state.scrollMode);
+  const [page, setPage] = useState(opening.state.page);
+  const [, forceLayout] = useReducer((n: number) => n + 1, 0);
 
   // Rotate View: every DISPLAY read in this component sees the page at
   // its EFFECTIVE rotation — (page.rotation + viewRotation), composed once
@@ -351,17 +476,22 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // page, both zoom presets): a 90° page whose cell swapped aspect under an
   // unswapped row clips and mis-centers.
   const viewPages = useMemo(
-    () =>
-      viewRotation === 0
-        ? doc.pages
-        : doc.pages.map((p) => ({
-            ...p,
-            rotation: (((p.rotation + viewRotation) % 360) + 360) % 360 as 0 | 90 | 180 | 270,
-          })),
+    () => (viewRotation === 0 ? doc.pages : doc.pages.map((p) => effectivePage(p, viewRotation))),
     [doc.pages, viewRotation],
   );
 
   const pageCount = doc.pages.length;
+  // Each page's width at zoom 1 and the widest of them — properties of the
+  // document, so memoised on the page list. The widest page is the fit basis
+  // (a sticky fit never changes while scrolling and no page overflows Fit
+  // Width), the grid's column width, and the width-axis bound of the zoom
+  // range (the spacer's width can blow the element cap just as its height can).
+  const pageWidthsAt1 = useMemo(
+    () => viewPages.map((p) => displayWidthAt(p, READING_BASE_HEIGHT)),
+    [viewPages],
+  );
+  const widestW1 = useMemo(() => widestOf(pageWidthsAt1), [pageWidthsAt1]);
+
   // The EFFECTIVE zoom, re-derived every render — the document's page count is
   // half of what makes a zoom valid (see maxZoomFor), and it changes UNDER a
   // stable zoom: an Undo/Import/merge grows the doc without remounting this view
@@ -371,32 +501,67 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // next Ctrl+= then visibly zoomed OUT. Deriving makes "the zoom is renderable"
   // true by construction rather than something every writer must remember; it
   // also covers the initial state, which no write site ever sees.
-  // The widest page's rendered width AT ZOOM 1 — a property of the document, so
-  // memoised on the page list. Feeds BOTH the zoom ceiling (the spacer's width
-  // can blow the element cap just as its height can) and the spacer's own width.
-  // Two-up: pages tile into uniform-height ROWS — one per page in
-  // single layout (identity: every formula below reduces to the shipped
-  // math), two facing pages per row in two-up. All row↔page mapping is the
-  // pure, tested spread-layout module.
-  const rowCount = rowCountOf(pageCount, pageLayout, twoUpCover);
-  // The widest ROW's rendered width at zoom 1 (single: the widest page; two-up:
-  // the widest PAIR incl. the inner gap). Feeds the zoom ceiling AND the
-  // spacer width — both axes must see the true row extent.
-  const widestAtBase = useMemo(() => {
-    let w = 0;
-    for (let r = 0; r < rowCount; r++) {
-      const idxs = pagesInRow(r, pageLayout, twoUpCover, viewPages.length);
-      let rowW = 0;
-      for (const i of idxs) rowW += displayWidthAt(viewPages[i], READING_BASE_HEIGHT);
-      if (idxs.length > 1) rowW += PAGE_GAP * (idxs.length - 1);
-      w = Math.max(w, rowW);
-    }
-    return w;
-  }, [viewPages, rowCount, pageLayout, twoUpCover]);
-  const zoom = clampZoom(zoomState, rowCount, widestAtBase);
-  const pageHeight = pageHeightAt(zoom);
-  const gap = PAGE_GAP * zoom;
-  const rowH = pageHeight + gap;
+  const { availW } = fitAvailable(viewportW, viewportH);
+  const availH = fitAvailableHeight(frame.fullH, viewportW, widestW1, frame.bar);
+  // A quad pane solves against the geometry the four panes share.
+  const linked = props.linkedGeometry;
+  const fitW = linked ? linked.availW : availW;
+  const fitH = linked ? linked.availH : availH;
+  const fitted = isFitMode(zoomMode) ? fitZoom(zoomMode, fitW, fitH, widestW1) : 0;
+  // The stored zoom was bounded to the percent range at its entry point; only
+  // the renderability cap is re-derived here (the widest page can change).
+  const zoom = fitted > 0 ? fitted : Math.min(zStored, renderableMaxZoom(widestW1));
+  const linkedAvailW = linked?.availW;
+  const linkedSlotH = linked?.slotViewportH;
+
+  const onFitBasisRef = useRef(props.onFitBasis);
+  onFitBasisRef.current = props.onFitBasis;
+  const fitBasisRef = useRef<FitBasis | null>(null);
+  useLayoutEffect(() => {
+    const report = onFitBasisRef.current;
+    if (!report || viewportW <= 0 || viewportH <= 0) return;
+    const prev = fitBasisRef.current;
+    if (prev && prev.availW === availW && prev.availH === availH && prev.viewportH === viewportH) return;
+    const basis = { availW, availH, viewportH };
+    fitBasisRef.current = basis;
+    report(basis);
+  });
+
+  const gridInput = useMemo<GridInput>(
+    () => ({
+      pageWidthsAt1,
+      zoom,
+      layoutMode,
+      coverAlone,
+      direction: spreadDirection,
+      scrollMode,
+      viewportW,
+      viewportH,
+      linked:
+        linkedAvailW !== undefined && linkedSlotH !== undefined
+          ? { availW: linkedAvailW, slotViewportH: linkedSlotH }
+          : undefined,
+    }),
+    [
+      pageWidthsAt1,
+      zoom,
+      layoutMode,
+      coverAlone,
+      spreadDirection,
+      scrollMode,
+      viewportW,
+      viewportH,
+      linkedAvailW,
+      linkedSlotH,
+    ],
+  );
+  const g = useMemo(() => gridGeometry(gridInput), [gridInput]);
+  const pageHeight = g.pageH;
+  const rowCount = g.rowCount;
+  // A row's vertical pitch: the row itself when continuous, at least one
+  // viewport when paged. Every row-space consumer (virtualizer, current page,
+  // jump anchor) reads slots, so paged scrolling needs no second code path.
+  const slotH = g.slotH;
 
   // A "settle" signal for the raster: PageView's detail layer only re-renders
   // when its `version` changes; on the board that comes from <Canvas onSettle>,
@@ -411,38 +576,37 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     return () => clearTimeout(t);
   }, [zoom]);
 
-  // Cumulative Y offset of each row. Rows are uniform-height (widths vary by
-  // aspect), so offsets are a simple arithmetic series — the virtualizer needs
-  // only counts, and centerOn/current-page are O(1).
-  const contentHeight = rowCount * rowH;
+  const contentHeight = g.contentH;
   // The scaled-spacer scroll map. The DOM spacer caps at
   // SAFE_ELEMENT_EXTENT and rows translate under it; every document-space
   // consumer below reads VIRTUAL offsets, and only the DOM write/read
   // converts. k === 1 (any doc under the cap) is the bit-for-bit identity.
+  // Paged slots inflate the extent, so the map must see the slotted height.
   const smap = useMemo(() => scrollMapFor(contentHeight, viewportH), [contentHeight, viewportH]);
   const virtualTop = virtualTopOf(scrollTop, smap);
 
-  // The scrollable WIDTH. Without a real width the spacer is only as
-  // wide as the pane, and a page wider than it — routine at Actual Size on
-  // anything landscape or large-format — is clipped symmetrically by the
-  // centring with no way to reach its edges, making "Actual Size" useless on
-  // exactly the documents that need it. Paired with `min-width: 100%` in CSS so
-  // a doc narrower than the pane still centres instead of hugging the left edge.
-  // Widest-of-ALL-pages (not just the rendered window) so the width doesn't
-  // jitter as you scroll past a wide page.
-  // Exact, NOT ceil'd: CSS takes fractional widths, and rounding UP can make the
-  // spacer a fraction of a pixel wider than a pane the page genuinely fits,
-  // opening a scrollbar over nothing (regression — a ~0.2px band of pane
-  // widths, reachable under display scaling).
-  const contentWidth = widestAtBase * (pageHeight / READING_BASE_HEIGHT);
-
-  // Track the scroll position + viewport height (drives virtualization + the
-  // current-page report). ResizeObserver keeps viewportH live on pane resize.
+  // Track the scroll position + the viewport box (drives virtualization, the
+  // fits, the column count and the current-page report). WIDTH is observed
+  // too: a side panel opening narrows the pane without changing its height,
+  // and the fits and the grid must re-resolve. `scrollbar-gutter: stable` on
+  // the scroller keeps clientWidth independent of overflow, so a fit that
+  // adds a scrollbar cannot shrink its own basis and oscillate.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    setViewportH(el.clientHeight);
-    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    const measure = (): void => {
+      setViewportH(el.clientHeight);
+      setViewportW(el.clientWidth);
+      // `scrollbar-gutter: stable` keeps the vertical gutter, so its width is
+      // the scrollbar thickness at all times; the horizontal scrollbar is
+      // whatever the box loses below clientHeight.
+      const bar = Math.max(0, el.offsetWidth - el.clientWidth - 2 * el.clientLeft);
+      const hBar = Math.max(0, el.offsetHeight - el.clientHeight - 2 * el.clientTop);
+      const fullH = el.clientHeight + hBar;
+      setFrame((f) => (f.fullH === fullH && f.bar === bar ? f : { fullH, bar }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -461,113 +625,103 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     if (!isEditable(document.activeElement)) scrollRef.current?.focus({ preventScroll: true });
   }, []);
 
+  // Imperative paths (the handle, the native wheel listener, the paged keys)
+  // read the LAST RENDERED geometry through refs, so their identity is stable.
+  const geomRef = useRef(g);
+  geomRef.current = g;
+  const inputRef = useRef(gridInput);
+  inputRef.current = gridInput;
+  const smapRef = useRef(smap);
+  smapRef.current = smap;
+  const viewportHRef = useRef(viewportH);
+  viewportHRef.current = viewportH;
+  // The scroll position as of the last scroll event or programmatic write, in
+  // (real left, VIRTUAL top) — what an implicit re-anchor measures against.
+  const posRef = useRef({ left: 0, virtualTop: 0 });
+
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop);
+    const el = e.currentTarget;
+    posRef.current = { left: el.scrollLeft, virtualTop: virtualTopOf(el.scrollTop, smapRef.current) };
+    setScrollTop(el.scrollTop);
   }, []);
 
   // Visible page range [first, last], padded by OVERSCAN — pure + tested
   // (canvas/reading-page.ts), because an unclamped `first` could exceed `last`
   // after a page-tier delete and the row loop would emit no cells at all.
   // visibleRange/currentPageFor are pure ROW math — `pageCount` in their
-  // metrics is the row count (single layout: rows == pages, so the shipped
-  // inputs are bit-identical).
+  // metrics is the row count and `rowH` the slot pitch (single continuous
+  // layout: rows == pages and slots == rows, so the shipped inputs are
+  // bit-identical).
   const { first, last } = visibleRange(
-    { scrollTop: virtualTop, viewportH, rowH, pageHeight, pageCount: rowCount, contentHeight },
+    { scrollTop: virtualTop, viewportH, rowH: slotH, pageHeight, pageCount: rowCount, contentHeight },
     OVERSCAN,
   );
 
   // A jump's recorded intent — see JumpAnchor's header for why scroll position
   // alone cannot answer this at the extremes.
   const jumpAnchorRef = useRef<JumpAnchor | null>(null);
-  // A page-layout switch remaps rows under a STATIONARY scrollTop — rowH and
-  // viewportH both survive it, so anchorHolds' geometry checks cannot see the
-  // change and a pre-switch anchor would keep reporting a page the pane no
-  // longer shows (regression: jump to 5, switch two-up → the box said
-  // "5" over pages 8-9, durably, and fitWidth sized the wrong spread). Treat a
-  // layout change exactly like a resize: drop the anchor. Render-time ref
-  // write, so it lands before the reporter effect (whose deps include the
-  // layout) re-runs and lets the view speak for itself.
-  const layoutKey = `${pageLayout}:${twoUpCover}`;
+  // A page-layout switch remaps rows under a STATIONARY scrollTop — the slot
+  // pitch and viewportH can both survive it, so anchorHolds' geometry checks
+  // cannot see the change and a pre-switch anchor would keep reporting a page
+  // the pane no longer shows (regression: jump to 5, switch two-up → the box
+  // said "5" over pages 8-9, durably). Treat a layout change exactly like a
+  // resize: drop the anchor. Render-time ref write, so it lands before the
+  // reporter effect (whose deps include the layout) re-runs and lets the view
+  // speak for itself.
+  const layoutKey = `${layoutMode}:${coverAlone}:${g.columns}:${scrollMode}`;
   const prevLayoutKeyRef = useRef(layoutKey);
   if (prevLayoutKeyRef.current !== layoutKey) {
     prevLayoutKeyRef.current = layoutKey;
     jumpAnchorRef.current = null;
   }
   // The page the reader is on, mirrored for the zoom presets. Actual Size and
-  // Fit Width act on the current page because pages in one file can differ in
-  // size and rotation), and the presets are imperative-handle calls, not
-  // renders, so they need it off a ref rather than through the parent.
-  const currentPageRef = useRef(1);
+  // the percent setter act on the current page because pages in one file can
+  // differ in size and rotation, and the presets are imperative-handle calls,
+  // not renders, so they need it off a ref rather than through the parent.
+  const currentPageRef = useRef(opening.state.page);
 
   // Report the current page. Debounced to a rAF-ish cadence by React's
   // batching; the parent dedupes.
   const onCurrentPageChange = props.onCurrentPageChange;
   const onCurrentPageChangeRef = useRef(onCurrentPageChange);
   onCurrentPageChangeRef.current = onCurrentPageChange;
+  const reportPage = useCallback((p: number) => {
+    currentPageRef.current = p;
+    setPage(p);
+    onCurrentPageChangeRef.current?.(p);
+  }, []);
   useEffect(() => {
-    if (!onCurrentPageChange || pageCount === 0 || viewportH === 0) return;
-    // Row metrics for the geometric half; the anchor's bounds check needs the
-    // REAL page count (anchor.page is a PAGE number, which in two-up exceeds
-    // the row count for most of the document).
-    // Document math reads VIRTUAL offsets (identity for docs under the
-    // element cap). Anchors record virtual too, so the comparison is uniform.
-    const mRows = {
-      scrollTop: virtualTop,
-      viewportH,
-      rowH,
-      pageHeight,
-      pageCount: rowCount,
-      contentHeight,
-    };
-    const mAnchor = { ...mRows, pageCount };
+    if (pageCount === 0 || viewportH === 0) return;
     // A jump wins until the user scrolls away from where it landed; then the
     // anchor is dropped and the view speaks for itself. Both halves are pure
-    // (canvas/reading-page.ts) — the tie-break and the extremes are subtle
-    // enough to own tests; see that module's header.
-    const a = jumpAnchorRef.current;
+    // (`pageInView`; the tie-break and the extremes live in
+    // canvas/reading-page.ts). Document math reads VIRTUAL offsets (identity
+    // for docs under the element cap); anchors record virtual too.
     // `doc.pages` is the composition guard: a page-tier edit renumbers pages
-    // without remounting this view, so the anchor must re-prove that the page it
-    // meant still sits in that slot.
-    if (anchorHolds(a, mAnchor, a ? doc.pages[a.page - 1]?.id : null)) {
-      currentPageRef.current = a!.page;
-      onCurrentPageChange(a!.page);
-      return;
-    }
-    jumpAnchorRef.current = null;
-    // Current ROW → its first page (a spread reports its leading page, the
-    // usual normalization for facing-page readers).
-    const row = currentPageFor(mRows);
-    const rowPages = pagesInRow(row - 1, pageLayout, twoUpCover, pageCount);
-    const p = rowPages.length > 0 ? rowPages[0] + 1 : 1;
-    currentPageRef.current = p;
-    onCurrentPageChange(p);
-  }, [
-    scrollTop,
-    virtualTop,
-    rowH,
-    pageHeight,
-    pageCount,
-    rowCount,
-    pageLayout,
-    twoUpCover,
-    viewportH,
-    contentHeight,
-    doc.pages,
-    onCurrentPageChange,
-  ]);
+    // without remounting this view, so the anchor must re-prove that the page
+    // it meant still sits in that slot.
+    const a = jumpAnchorRef.current;
+    const res = pageInView(g, gridInput, virtualTop, a, a ? doc.pages[a.page - 1]?.id : null);
+    if (!res.anchored) jumpAnchorRef.current = null;
+    reportPage(res.page);
+  }, [scrollTop, virtualTop, pageCount, g, gridInput, viewportH, doc.pages, reportPage]);
 
-  // The reading CanvasHandle — pure scroll + scale, no world matrix.
-  const centerOn = useCallback(
-    (pageId: string) => {
-      const idx = doc.pages.findIndex((p) => p.id === pageId);
+  // Lands a page's row in view: a paged row at its slot, a continuous row
+  // centred when shorter than the pane, else top-aligned. Records the jump's
+  // intent (see JumpAnchor) and reports immediately — a jump that doesn't
+  // move the view fires no scroll event, so the reporter would never re-run.
+  const jumpToIndex = useCallback(
+    (idx: number) => {
       const el = scrollRef.current;
-      if (idx < 0 || !el) return;
-      // Center the page's ROW in the viewport when it's shorter than the pane;
-      // otherwise align its top. The target is VIRTUAL; the DOM write converts
-      // (identity for docs under the element cap).
-      const top = rowOfPage(idx, pageLayout, twoUpCover) * rowH;
-      const offset = Math.max(0, (el.clientHeight - pageHeight) / 2);
-      el.scrollTo({ top: realTopFor(Math.max(0, top - offset), smap), behavior: 'auto' });
+      const pages = doc.pages;
+      if (!el || idx < 0 || idx >= pages.length) return;
+      const geo = geomRef.current;
+      const inp = inputRef.current;
+      const map = smapRef.current;
+      // The target is VIRTUAL; the DOM write converts (identity for docs under
+      // the element cap).
+      const top = jumpTop(geo, inp, idx, el.clientHeight);
+      el.scrollTo({ top: realTopFor(top, map), behavior: 'auto' });
       // Record where it actually LANDED (behavior:'auto' settles scrollTop
       // synchronously, so this is the browser's own clamp applied) together with
       // what it meant, so the scroll event this fires can't "correct" a jump to
@@ -577,43 +731,146 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // stop the anchor from ever holding. Recorded VIRTUAL, the space
       // the reporter's metrics carry.
       jumpAnchorRef.current = {
-        scrollTop: virtualTopOf(el.scrollTop, smap),
+        scrollTop: virtualTopOf(el.scrollTop, map),
         page: idx + 1,
-        pageId,
-        rowH,
-        viewportH,
+        pageId: pages[idx].id,
+        rowH: geo.slotH,
+        viewportH: viewportHRef.current,
       };
-      // Report immediately: a jump that doesn't move the view (already parked
-      // there) fires no scroll event, so the effect above would never re-run.
-      currentPageRef.current = idx + 1;
-      onCurrentPageChangeRef.current?.(idx + 1);
+      posRef.current = { left: el.scrollLeft, virtualTop: virtualTopOf(el.scrollTop, map) };
+      reportPage(idx + 1);
     },
-    [doc.pages, rowH, pageHeight, viewportH, pageLayout, twoUpCover, smap],
+    [doc.pages, reportPage],
   );
 
-  // Both presets act on the CURRENT page — pages within one file can differ in
-  // size and rotation, so "actual size" and "fit width" are per-page answers.
-  // The EFFECTIVE pages — currentPage() feeds the zoom presets' sizing math,
-  // which must see the rotation the display shows.
+  // A user act on this pane (a zoom, a mode, a wheel, a key, a press, a jump).
+  // A document's own initial view applies only while this is false.
+  const touchedRef = useRef(false);
+  const markTouched = useCallback(() => {
+    touchedRef.current = true;
+  }, []);
+  // A discrete command (a mode, a preset, a stepper) publishes in the commit
+  // that applies it, so the controls reflecting the store never lag the pane.
+  // Continuous input (wheel bursts, scrolling, re-fits on resize) keeps the
+  // settle beat.
+  const publishNowRef = useRef(false);
+  const discrete = useCallback(() => {
+    touchedRef.current = true;
+    publishNowRef.current = true;
+  }, []);
+  // Requests the next measured layout settles; see PendingView.
+  const pendingRef = useRef<PendingView | null>(
+    opening.state.page > 1 ? { kind: 'page', index: opening.state.page - 1, gAt: null, hCenter: false } : null,
+  );
+  // Centre the current page horizontally at the first measured layout when
+  // the content is wider than the pane, so an open or a restore never leaves
+  // the horizontal position at 0. A mode change asks through its request.
+  const hCenterRef = useRef(true);
+  // A seeded two-column request waits for the first measured layout: the zoom
+  // that yields N columns is a function of the pane width.
+  const seedColumnsRef = useRef<number | null>(null);
+  const prevGeomRef = useRef<{ g: GridGeometry; input: GridInput } | null>(null);
+
+  const linkedRef = useRef(linked);
+  linkedRef.current = linked;
+  const centre = useCallback((): { x: number; y: number } => {
+    const el = scrollRef.current;
+    return el ? viewportCentre(el.clientWidth, el.clientHeight, linkedRef.current) : { x: 0, y: 0 };
+  }, []);
+
+  /** The page under a scroller-relative point, in the last rendered geometry. */
+  const hitNow = useCallback((pointer: { x: number; y: number }): PageHit | null => {
+    const el = scrollRef.current;
+    if (!el) return null;
+    return hitTest(
+      geomRef.current,
+      inputRef.current,
+      el.scrollLeft + pointer.x,
+      virtualTopOf(el.scrollTop, smapRef.current) + pointer.y,
+    );
+  }, []);
+
+  // The page tier, the widest page and the effective zoom, for imperative
+  // callers. The steppers must step from the EFFECTIVE zoom, not the raw
+  // state: stepping from a state the derivation has already clamped down
+  // would move the wrong way (or not at all).
   const pagesRef = useRef(viewPages);
   pagesRef.current = viewPages;
-  // The zoom ceiling depends on the page COUNT (see maxZoomFor), and the
-  // handle's zoom calls are imperative, so they read it off a ref.
-  const widestAtBaseRef = useRef(widestAtBase);
-  widestAtBaseRef.current = widestAtBase;
-  const rowCountRef = useRef(rowCount);
-  rowCountRef.current = rowCount;
-  const layoutRef = useRef({ pageLayout, twoUpCover });
-  layoutRef.current = { pageLayout, twoUpCover };
-  // The steppers must step from the EFFECTIVE zoom, not the raw state: stepping
-  // from a state the derivation has already clamped down would move the wrong
-  // way (or not at all).
+  const widestRef = useRef(widestW1);
+  widestRef.current = widestW1;
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   const currentPage = useCallback((): PageRef | null => {
     const pages = pagesRef.current;
     return pages[Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1] ?? null;
   }, []);
+
+  /**
+   * Zoom to `zTarget` (custom mode) keeping `hit` — by default the page point
+   * under `pointer` — under `pointer`. A burst (several wheel events or key
+   * repeats before the next render) continues from the pending target and
+   * keeps the burst's original hit, which was measured in the geometry the
+   * user actually saw.
+   */
+  // `z` arrives bounded to the percent range by the caller, which names the
+  // reference page; the renderability cap applies here. In the quad every
+  // zoom is handed on, so the four panes keep one zoom.
+  const onZoomLinkedRef = useRef(props.onZoomLinked);
+  onZoomLinkedRef.current = props.onZoomLinked;
+  const zoomTo = useCallback(
+    (
+      z: number,
+      pointer: { x: number; y: number },
+      opts: { hit?: PageHit | null; mode?: 'custom' | 'actual'; hCenter?: boolean } = {},
+    ) => {
+      const z1 = Math.min(z, renderableMaxZoom(widestRef.current));
+      const mode = opts.mode ?? 'custom';
+      const hCenter = opts.hCenter ?? false;
+      const pend = pendingRef.current;
+      const burst = pend?.kind === 'anchor' && pend.gAt === geomRef.current ? pend : null;
+      const hit = opts.hit !== undefined ? opts.hit : burst ? burst.hitX : hitNow(pointer);
+      pendingRef.current = hit
+        ? { kind: 'anchor', hitX: hit, hitY: hit, pointer, zTarget: z1, gAt: geomRef.current, hCenter }
+        : null;
+      setZStored(z1);
+      setZoomModeState(mode);
+      forceLayout();
+      onZoomLinkedRef.current?.({ zoom: z1, mode, hit, pointer, hCenter });
+    },
+    [hitNow],
+  );
+  const zoomBy = useCallback(
+    (factor: number, pointer: { x: number; y: number }) => {
+      const pend = pendingRef.current;
+      const base = pend?.kind === 'anchor' && pend.gAt === geomRef.current ? pend.zTarget : zoomRef.current;
+      zoomTo(steppedZoom(base, factor, readingZoomRange(currentPage(), widestRef.current)), pointer);
+    },
+    [zoomTo, currentPage],
+  );
+  // The sibling half of the quad link. The zoom is the origin's, bounded
+  // against the origin's reference page and not re-bounded against this
+  // pane's, so the four panes stay equal; nothing is handed on.
+  const followZoom = useCallback(
+    (l: LinkedZoom, axes: { x: boolean; y: boolean }) => {
+      touchedRef.current = true;
+      const c = centre();
+      const pointer = { x: axes.x ? l.pointer.x : c.x, y: axes.y ? l.pointer.y : c.y };
+      const z1 = Math.min(l.zoom, renderableMaxZoom(widestRef.current));
+      const pend = pendingRef.current;
+      const burst = pend?.kind === 'anchor' && pend.gAt === geomRef.current ? pend : null;
+      const own = burst ? null : hitNow(pointer);
+      const hitX = axes.x ? l.hit : burst ? burst.hitX : own;
+      const hitY = axes.y ? l.hit : burst ? burst.hitY : own;
+      pendingRef.current =
+        hitX && hitY
+          ? { kind: 'anchor', hitX, hitY, pointer, zTarget: z1, gAt: geomRef.current, hCenter: l.hCenter }
+          : null;
+      setZStored(z1);
+      setZoomModeState(l.mode);
+      forceLayout();
+    },
+    [centre, hitNow],
+  );
 
   // Hand mode's drag-scroll. Window-level move/up listeners — the
   // canvas pattern — with the full usePageDrag session hygiene, all
@@ -627,12 +884,35 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   useEffect(() => {
     if (props.tool !== 'hand') handDragTeardown.current?.();
   }, [props.tool]);
+
+  /** Paged: settle on the slot that holds the viewport centre, unless the
+   * viewport already lies wholly inside one (tall) slot. */
+  const snapPaged = useCallback(() => {
+    const el = scrollRef.current;
+    const geo = geomRef.current;
+    if (!el || inputRef.current.scrollMode !== 'paged' || geo.rowCount === 0) return;
+    const map = smapRef.current;
+    const vh = el.clientHeight;
+    const vt = virtualTopOf(el.scrollTop, map);
+    const r = pagedRowAt(geo, vt, vh);
+    const slotTop = r * geo.slotH;
+    const slotEnd = slotTop + Math.max(0, geo.slotH - vh);
+    // One real pixel of slack, in virtual units.
+    const eps = map.k;
+    if (vt >= slotTop - eps && vt <= slotEnd + eps) return;
+    const target = Math.min(slotEnd, Math.max(slotTop, vt));
+    el.scrollTo({ top: realTopFor(target, map), behavior: 'auto' });
+  }, []);
+  const snapPagedRef = useRef(snapPaged);
+  snapPagedRef.current = snapPaged;
+
   const handleHandDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const el = scrollRef.current;
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
+    touchedRef.current = true;
     const startX = e.clientX;
     const startY = e.clientY;
     const startLeft = el.scrollLeft;
@@ -654,6 +934,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       // tool-change effect above tears down BEFORE React re-renders the
       // style prop away, so 'grab' never outlives hand mode visibly.
       el.style.cursor = 'grab';
+      // Paged snapping waits for the release: every move above fires its
+      // own scrollend, and a snap mid-drag would yank the paper away.
+      snapPagedRef.current();
     };
     handDragTeardown.current = teardown;
     const popEscape = pushEscapeInterceptor(() => {
@@ -667,121 +950,313 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     pointers.add('blur', teardown);
   }, []);
 
-  const actualSize = useCallback(() => {
-    const page = currentPage();
-    if (!page) return;
-    setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), rowCountRef.current, widestAtBaseRef.current));
-  }, [currentPage]);
+  // ── Paged stepping ────────────────────────────────────────────────────
+  /** Move within a tall paged row first; at its edge (or for `step`) go to
+   * the neighbouring row. Stepping back into a tall row lands on its end, so
+   * reading backwards continues where the reader left it. */
+  const pagedMove = useCallback(
+    (dir: -1 | 1 | 'home' | 'end', within: 'step' | 'line' | 'page') => {
+      const el = scrollRef.current;
+      const geo = geomRef.current;
+      if (!el || geo.rowCount === 0) return;
+      const map = smapRef.current;
+      const vh = el.clientHeight;
+      const vt = virtualTopOf(el.scrollTop, map);
+      const scrollBy = within === 'step' ? 0 : within === 'line' ? PAGED_LINE_PX : vh * PAGED_PAGE_FRACTION;
+      const target = pagedTarget(geo, vt, vh, dir, scrollBy, map.k);
+      if (target === null) return;
+      el.scrollTo({ top: realTopFor(target, map), behavior: 'auto' });
+    },
+    [],
+  );
 
-  const setZoomPercent = useCallback((percent: number) => {
-    const page = currentPage();
-    if (!page || !Number.isFinite(percent) || percent <= 0) return;
-    setZoom(
-      clampZoom(
-        actualSizeZoom(page, READING_BASE_HEIGHT) * (percent / 100),
-        rowCountRef.current,
-        widestAtBaseRef.current,
-      ),
-    );
-  }, [currentPage]);
+  const wheelRef = useRef<WheelStepState>({ acc: 0, lockedUntil: 0 });
+  const pagedWheel = useCallback(
+    (dy: number, now: number) => {
+      const el = scrollRef.current;
+      const geo = geomRef.current;
+      if (!el || geo.rowCount === 0) return;
+      const map = smapRef.current;
+      const vh = el.clientHeight;
+      const vt = virtualTopOf(el.scrollTop, map);
+      const r = pagedRowAt(geo, vt, vh);
+      const slotTop = r * geo.slotH;
+      const slotEnd = slotTop + Math.max(0, geo.slotH - vh);
+      const eps = map.k;
+      // A row taller than the viewport scrolls inside its slot first.
+      if ((dy > 0 && vt < slotEnd - eps) || (dy < 0 && vt > slotTop + eps)) {
+        const target = Math.min(slotEnd, Math.max(slotTop, vt + dy));
+        el.scrollTop = realTopFor(target, map);
+        wheelRef.current = { acc: 0, lockedUntil: wheelRef.current.lockedUntil, lastAt: now };
+        return;
+      }
+      const res = wheelStep(wheelRef.current, dy, now);
+      wheelRef.current = res.s;
+      if (res.step !== 0) pagedMove(res.step, 'step');
+    },
+    [pagedMove],
+  );
 
-  const fitWidth = useCallback(() => {
-    const page = currentPage();
+  // Native, NON-passive wheel listener: React's root wheel listener is
+  // passive, so it cannot preventDefault. Ctrl/Meta+wheel zooms at the
+  // pointer; Alt+wheel pans horizontally; Shift+wheel stays the native
+  // horizontal scroll; a plain wheel is native when continuous and steps one
+  // row when paged.
+  useEffect(() => {
     const el = scrollRef.current;
-    if (!page || !el) return;
-    // clientWidth already excludes a vertical scrollbar; the gutter keeps the
-    // page off the pane's edges. In two-up the
-    // unit being fitted is the current SPREAD (both widths + the inner gap).
-    const available = el.clientWidth - FIT_WIDTH_GUTTER;
-    const { pageLayout: lay, twoUpCover: cover } = layoutRef.current;
-    const pages = pagesRef.current;
-    // Clamp like currentPage() does — after a page-tier delete the ref can
-    // briefly exceed the list; pagesInRow would answer [] (safe fallback), but
-    // fitting the page's ACTUAL row is strictly better than degrading.
-    const pageIdx = Math.min(pages.length, Math.max(1, currentPageRef.current)) - 1;
-    const row = rowOfPage(pageIdx, lay, cover);
-    const idxs = pagesInRow(row, lay, cover, pages.length);
-    let rowW = 0;
-    for (const i of idxs) rowW += displayWidthAt(pages[i], READING_BASE_HEIGHT);
-    if (idxs.length > 1) rowW += PAGE_GAP * (idxs.length - 1);
-    const z = fitWidthZoom(available, rowW > 0 ? rowW : displayWidthAt(page, READING_BASE_HEIGHT));
-    if (z <= 0) return; // pane not measured yet — leave the zoom alone
-    setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current));
-  }, [currentPage]);
+    if (!el) return;
+    const onWheel = (e: WheelEvent): void => {
+      const vh = el.clientHeight;
+      const dy = wheelDeltaPx(e.deltaY, e.deltaMode, vh);
+      const dx = wheelDeltaPx(e.deltaX, e.deltaMode, vh);
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        touchedRef.current = true;
+        const box = el.getBoundingClientRect();
+        const pointer = { x: e.clientX - box.left - el.clientLeft, y: e.clientY - box.top - el.clientTop };
+        const clamped = Math.max(-50, Math.min(50, dy));
+        zoomBy(Math.pow(2, -clamped * WHEEL_ZOOM_SPEED), pointer);
+        return;
+      }
+      if (e.altKey) {
+        e.preventDefault();
+        touchedRef.current = true;
+        el.scrollLeft += dy !== 0 ? dy : dx;
+        return;
+      }
+      if (e.shiftKey || inputRef.current.scrollMode !== 'paged') return;
+      e.preventDefault();
+      touchedRef.current = true;
+      if (dx !== 0) el.scrollLeft += dx;
+      if (dy !== 0) pagedWheel(dy, e.timeStamp);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomBy, pagedWheel]);
 
-  // Marquee zoom: zoom so the banded page region fills the pane, then
-  // scroll it centered. The scroll runs after the new layout exists (double
-  // rAF), computed analytically from the applied zoom — same row math the
-  // virtualizer uses. Returns the applied zoom so the split layer can sync
-  // sibling panes (quad zoom must stay equal; their scroll follows the
-  // frozen-pane DOM links on their own).
+  // Paged: a scrollbar drag, a programmatic jump or a quad-link mirror ends
+  // between slots; settle on the slot under the viewport centre. Hand drags
+  // snap at their release instead (see handleHandDown).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onEnd = (): void => {
+      if (handDragTeardown.current) return;
+      snapPaged();
+    };
+    el.addEventListener('scrollend', onEnd);
+    return () => el.removeEventListener('scrollend', onEnd);
+  }, [snapPaged]);
+
+  // Paged keys on the scroller. Skipped for editable targets (PageDown in the
+  // paragraph editor or a form widget must not turn the page), for chords,
+  // and for the arrows while an annotation or edit selection owns them as
+  // nudges. Space is not here: app-wide it is the temporary Hand.
+  const selectionOwnsArrows =
+    props.selectedAnnotationIds.length > 0 || props.editSelection !== null;
+  const selectionOwnsArrowsRef = useRef(selectionOwnsArrows);
+  selectionOwnsArrowsRef.current = selectionOwnsArrows;
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (inputRef.current.scrollMode !== 'paged') return;
+      if (isEditable(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = scrollRef.current;
+      if (!el) return;
+      const arrowsFree = !selectionOwnsArrowsRef.current;
+      const hOverflow = el.scrollWidth > el.clientWidth + 1;
+      let dir: -1 | 1 | 'home' | 'end';
+      let within: 'line' | 'page' = 'page';
+      switch (e.key) {
+        case 'PageDown':
+          dir = 1;
+          break;
+        case 'PageUp':
+          dir = -1;
+          break;
+        case 'ArrowDown':
+          if (!arrowsFree) return;
+          dir = 1;
+          within = 'line';
+          break;
+        case 'ArrowUp':
+          if (!arrowsFree) return;
+          dir = -1;
+          within = 'line';
+          break;
+        case 'ArrowRight':
+          if (!arrowsFree || hOverflow) return;
+          dir = 1;
+          break;
+        case 'ArrowLeft':
+          if (!arrowsFree || hOverflow) return;
+          dir = -1;
+          break;
+        case 'Home':
+          dir = 'home';
+          break;
+        case 'End':
+          dir = 'end';
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      touchedRef.current = true;
+      pagedMove(dir, within);
+    },
+    [pagedMove],
+  );
+
+  // ── Mode setters ──────────────────────────────────────────────────────
+  // A mode change keeps the reader's place: zoom modes anchor at the
+  // viewport centre, layout and scroll modes re-land the current page.
+  const setZoomMode = useCallback(
+    (mode: ZoomMode) => {
+      discrete();
+      const pointer = centre();
+      const hit = hitNow(pointer);
+      if (mode === 'custom' || mode === 'actual') {
+        // A stored zoom: through zoomTo, so the quad siblings follow it.
+        let z = zoomRef.current;
+        if (mode === 'actual') {
+          const p = currentPage();
+          if (!p) return;
+          z = clampReadingZoom(actualSizeZoom(p, READING_BASE_HEIGHT), p, widestRef.current);
+        }
+        zoomTo(z, pointer, { hit, mode, hCenter: true });
+        return;
+      }
+      pendingRef.current = hit
+        ? { kind: 'anchor', hitX: hit, hitY: hit, pointer, zTarget: zoomRef.current, gAt: geomRef.current, hCenter: true }
+        : null;
+      setZoomModeState(mode);
+      forceLayout();
+    },
+    [centre, hitNow, currentPage, discrete, zoomTo],
+  );
+  const relandCurrentPage = useCallback(() => {
+    discrete();
+    pendingRef.current = { kind: 'page', index: currentPageRef.current - 1, gAt: geomRef.current, hCenter: true };
+    forceLayout();
+  }, [discrete]);
+  const setLayoutMode = useCallback(
+    (mode: LayoutMode) => {
+      relandCurrentPage();
+      setLayoutModeState(mode);
+    },
+    [relandCurrentPage],
+  );
+  const setCoverAlone = useCallback(
+    (on: boolean) => {
+      relandCurrentPage();
+      setCoverAloneState(on);
+    },
+    [relandCurrentPage],
+  );
+  const setScrollMode = useCallback(
+    (mode: ScrollMode) => {
+      relandCurrentPage();
+      setScrollModeState(mode);
+    },
+    [relandCurrentPage],
+  );
+
+  const setZoomPercent = useCallback(
+    (percent: number) => {
+      const p = currentPage();
+      if (!p || !Number.isFinite(percent) || percent <= 0) return;
+      discrete();
+      zoomTo(clampReadingZoom(actualSizeZoom(p, READING_BASE_HEIGHT) * (percent / 100), p, widestRef.current), centre());
+    },
+    [currentPage, zoomTo, centre, discrete],
+  );
+
+  // Marquee zoom: zoom so the banded page region fills the pane, with the
+  // band's centre landing on the viewport centre — the cursor-anchored zoom
+  // with the band centre as the hit, so it is grid-aware by construction.
+  // Returns the applied zoom.
   const zoomToPageRect = useCallback(
     (pageId: string, rect: { x: number; y: number; w: number; h: number }): number | null => {
       const el = scrollRef.current;
       const idx = doc.pages.findIndex((p) => p.id === pageId);
       if (!el || idx < 0 || rect.w <= 0 || rect.h <= 0) return null;
-      const page = viewPages[idx];
       const z0 = zoomRef.current;
-      const bandW = rect.w * displayWidthAt(page, READING_BASE_HEIGHT) * z0;
-      const bandH = rect.h * pageHeightAt(z0);
+      const bandW = rect.w * (pagesRef.current[idx] ? displayWidthAt(pagesRef.current[idx], READING_BASE_HEIGHT) : 0) * z0;
+      const bandH = rect.h * READING_BASE_HEIGHT * z0;
       if (bandW <= 0 || bandH <= 0) return null;
+      discrete();
       const factor = Math.min(el.clientWidth / bandW, el.clientHeight / bandH);
-      const z = clampZoom(z0 * factor, rowCountRef.current, widestAtBaseRef.current);
-      setZoom(z);
-      const cxNorm = rect.x + rect.w / 2;
-      const cyNorm = rect.y + rect.h / 2;
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          const elc = scrollRef.current;
-          if (!elc) return;
-          const pageH = pageHeightAt(z);
-          const rowHz = pageH + PAGE_GAP * z;
-          const row = rowOfPage(idx, pageLayout, twoUpCover);
-          const rowTop = row * rowHz;
-          // The target is VIRTUAL — convert through the map AT THE NEW
-          // ZOOM (this runs two frames later, but the map depends only on the
-          // new extent and the live viewport, both known here).
-          const mapZ = scrollMapFor(rowCountRef.current * rowHz, elc.clientHeight);
-          elc.scrollTop = realTopFor(
-            Math.max(0, rowTop + cyNorm * pageH - elc.clientHeight / 2),
-            mapZ,
-          );
-          // Horizontal: rows centre in the spacer; walk the row for this
-          // page's offset (two-up pairs included).
-          const idxs = pagesInRow(row, pageLayout, twoUpCover, viewPages.length);
-          let before = 0;
-          let rowW = 0;
-          for (const i of idxs) {
-            const w = displayWidthAt(viewPages[i], READING_BASE_HEIGHT) * z;
-            // Which pages lie to the LEFT of this one, which is the reading
-            // order only while the row is not reversed.
-            const leftOf = spreadDirection === 'r2l' ? i > idx : i < idx;
-            if (leftOf) before += w + PAGE_GAP * z;
-            rowW += w;
-          }
-          rowW += PAGE_GAP * z * (idxs.length - 1);
-          const pageW = displayWidthAt(page, READING_BASE_HEIGHT) * z;
-          const rowLeft = Math.max(0, (elc.scrollWidth - rowW) / 2);
-          elc.scrollLeft = Math.max(0, rowLeft + before + cxNorm * pageW - elc.clientWidth / 2);
-        }),
-      );
+      // The banded page is the reference: it is the page the zoom lands on.
+      const z = clampReadingZoom(z0 * factor, pagesRef.current[idx], widestRef.current);
+      zoomTo(z, centre(), { hit: { pageIndex: idx, u: rect.x + rect.w / 2, v: rect.y + rect.h / 2 } });
       return z;
     },
-    [doc.pages, viewPages, pageLayout, twoUpCover, spreadDirection],
+    [doc.pages, zoomTo, centre, discrete],
+  );
+
+  // The snapshot this pane publishes: the zoom as a percent of the CURRENT
+  // page's actual size, and the resolved column count.
+  const pathRef = useRef(doc.path);
+  pathRef.current = doc.path;
+  const docIndexRef = useRef(docIndex);
+  docIndexRef.current = docIndex;
+  const viewRef = useRef({ zoomMode, layoutMode, coverAlone, scrollMode, measured: false });
+  viewRef.current = { zoomMode, layoutMode, coverAlone, scrollMode, measured: viewportW > 0 && viewportH > 0 };
+  const snapshotNow = useCallback((): ReadingViewSnapshot => {
+    const v = viewRef.current;
+    const pages = pagesRef.current;
+    const pg = Math.min(Math.max(1, pages.length), Math.max(1, currentPageRef.current));
+    return {
+      zoomMode: v.zoomMode,
+      zoomPercent: percentFor(zoomRef.current, pages[pg - 1]),
+      layoutMode: v.layoutMode,
+      coverAlone: v.coverAlone,
+      scrollMode: v.scrollMode,
+      page: pg,
+      columns: geomRef.current.columns,
+      pageCount: pages.length,
+      docIndex: docIndexRef.current,
+    };
+  }, []);
+
+  const centerOn = useCallback(
+    (pageId: string) => {
+      const idx = doc.pages.findIndex((p) => p.id === pageId);
+      if (idx < 0) return;
+      touchedRef.current = true;
+      // Before the first measured layout the geometry is not the one the view
+      // will show: a fit has not resolved, so a row offset computed now lands
+      // on another page once it does. The jump waits for that layout, and it
+      // replaces the opening page and any seed re-land.
+      if (!viewRef.current.measured) {
+        pendingRef.current = { kind: 'page', index: idx, gAt: null, hCenter: false };
+        forceLayout();
+        return;
+      }
+      jumpToIndex(idx);
+    },
+    [doc.pages, jumpToIndex],
   );
 
   useImperativeHandle(
     ref,
     (): CanvasHandle => ({
-      // Every zoom path goes through clampZoom — the view's range plus the
-      // WIDTH-axis element bound (maxZoomFor). The height axis no longer
-      // bounds zoom at all — the spacer caps and rows translate under it
+      // Every stored zoom goes through clampReadingZoom: the percent range of
+      // its reference page plus the WIDTH-axis element bound. The height axis
+      // does not bound zoom: the spacer caps and rows translate under it
       // (scrollMapFor), so presets are honest at any page count.
-      zoomIn: () => setZoom(clampZoom(zoomRef.current * ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
-      zoomOut: () => setZoom(clampZoom(zoomRef.current / ZOOM_STEP, rowCountRef.current, widestAtBaseRef.current)),
-      reset: () => setZoom(clampZoom(1, rowCountRef.current, widestAtBaseRef.current)),
-      actualSize,
-      fitWidth,
+
+      zoomIn: () => {
+        discrete();
+        zoomBy(ZOOM_STEP, centre());
+      },
+      zoomOut: () => {
+        discrete();
+        zoomBy(1 / ZOOM_STEP, centre());
+      },
+      reset: () => setZoomMode('fitPage'),
+      actualSize: () => setZoomMode('actual'),
+      fitWidth: () => setZoomMode('fitWidth'),
       // The reading view has no world transform; tools resolve coordinates
       // element-relative (PageCell reads its own getBoundingClientRect), so the
       // camera-space projection the board exposes for its drop math isn't
@@ -789,13 +1264,219 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       clientToWorld: () => null,
       centerOn,
       zoomToPageRect,
-      setZoomAbsolute: (z: number) =>
-        setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current)),
+      setZoomAbsolute: (z: number) => {
+        discrete();
+        zoomTo(clampReadingZoom(z, currentPage(), widestRef.current), centre());
+      },
+      followZoom,
       setZoomPercent,
+      setZoomMode,
+      setLayoutMode,
+      setCoverAlone,
+      setScrollMode,
+      viewState: () => (viewRef.current.measured ? snapshotNow() : null),
     }),
-    [centerOn, actualSize, fitWidth, zoomToPageRect, setZoomPercent],
+    [
+      centerOn,
+      zoomToPageRect,
+      setZoomPercent,
+      setZoomMode,
+      setLayoutMode,
+      setCoverAlone,
+      setScrollMode,
+      zoomBy,
+      zoomTo,
+      followZoom,
+      currentPage,
+      centre,
+      snapshotNow,
+      discrete,
+    ],
   );
 
+  // ── Settling the scroll position after a layout change ────────────────
+  // Runs after EVERY render, before paint. It consumes at most one pending
+  // request (an anchored zoom or a page re-land), re-anchors at the top
+  // centre when the geometry moved with no request (a fit re-resolving on a
+  // resize or a panel toggle, a column count changing), and centres the
+  // current page horizontally when asked. Writing state here re-renders
+  // synchronously, so the virtualized window never paints one frame of the
+  // old scroll position. Every render, deliberately: a request must be
+  // consumed or dropped on the render right after it is made, and the one
+  // state write is guarded (it fires only when the DOM moved), so it settles.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || viewportW <= 0 || viewportH <= 0) return;
+    const viewport = { w: viewportW, h: viewportH };
+
+    // A seeded column count resolves once the pane width is known; its zoom
+    // change re-renders, and the pending re-land applies on that render.
+    const cols = seedColumnsRef.current;
+    if (cols !== null) {
+      seedColumnsRef.current = null;
+      const z = zoomForColumns(cols, fitW, widestW1);
+      if (z > 0) {
+        setZStored(clampReadingZoom(z, currentPage(), widestW1));
+        setZoomModeState('custom');
+        return;
+      }
+    }
+
+    const prev = prevGeomRef.current;
+    prevGeomRef.current = { g, input: gridInput };
+    const pending = pendingRef.current;
+    let pendingLive = false;
+    if (pending) {
+      // Consumed either way: a request whose render left the geometry where
+      // it was asked against changed nothing and must not fire later.
+      pendingRef.current = null;
+      pendingLive = pending.gAt === null || pending.gAt !== g;
+    }
+
+    let left: number | null = null;
+    let topVirtual: number | null = null;
+    const keepPagedRow = (pageIndex: number, t: number): number =>
+      scrollMode === 'paged' && g.rowH <= viewportH ? gridRowOfPage(g, pageIndex, coverAlone) * g.slotH : t;
+
+    if (pendingLive && pending?.kind === 'anchor') {
+      const resX = anchoredScroll(g, gridInput, pending.hitX, pending.pointer, viewport);
+      const resY =
+        pending.hitY === pending.hitX ? resX : anchoredScroll(g, gridInput, pending.hitY, pending.pointer, viewport);
+      left = resX.left;
+      topVirtual = keepPagedRow(pending.hitY.pageIndex, resY.topVirtual);
+    } else if (pendingLive && pending?.kind === 'page') {
+      jumpToIndex(Math.min(pageCount - 1, Math.max(0, pending.index)));
+    } else if (
+      prev &&
+      prev.input.pageWidthsAt1 === pageWidthsAt1 &&
+      (prev.input.zoom !== zoom || prev.g.columns !== g.columns || prev.g.slotH !== g.slotH)
+    ) {
+      const pointer = { x: viewportW / 2, y: 0 };
+      const pos = posRef.current;
+      const hit = hitTest(prev.g, prev.input, pos.left + pointer.x, pos.virtualTop + pointer.y);
+      if (hit) {
+        const res = anchoredScroll(g, gridInput, hit, pointer, viewport);
+        left = res.left;
+        topVirtual = keepPagedRow(hit.pageIndex, res.topVirtual);
+      }
+    }
+
+    const centreNow = hCenterRef.current || (pendingLive && pending !== null && pending.hCenter);
+    hCenterRef.current = false;
+    if (centreNow && g.contentW > viewportW && pageCount > 0) {
+      if (linked) {
+        // Quad panes centre the content, not their own current page: the
+        // panes of one column share horizontal offsets but not the current
+        // page, and only the content width is common to them.
+        left = (g.contentW - viewportW) / 2;
+      } else {
+        const r = pageRect(g, gridInput, Math.min(pageCount, Math.max(1, currentPageRef.current)) - 1);
+        left = Math.min(g.contentW - viewportW, Math.max(0, r.left + r.width / 2 - viewportW / 2));
+      }
+    }
+
+    if (topVirtual !== null) el.scrollTop = realTopFor(topVirtual, smap);
+    if (left !== null) el.scrollLeft = left;
+    posRef.current = { left: el.scrollLeft, virtualTop: virtualTopOf(el.scrollTop, smap) };
+    if (el.scrollTop !== scrollTop) setScrollTop(el.scrollTop);
+  });
+
+  // Declared after the settle effect, and reads the page off the scroll
+  // position that effect just wrote: the passive reporter runs later, and a
+  // snapshot taken before it would carry the page the view was on BEFORE the
+  // command (a split opened in that window would clone it).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !publishNowRef.current || viewportW <= 0 || viewportH <= 0) return;
+    publishNowRef.current = false;
+    if (pageCount > 0) {
+      const a = jumpAnchorRef.current;
+      const vt = virtualTopOf(el.scrollTop, smap);
+      reportPage(pageInView(g, gridInput, vt, a, a ? doc.pages[a.page - 1]?.id : null).page);
+    }
+    publishReadingView(pathRef.current, paneId, snapshotNow());
+  });
+
+  // ── The document's own initial view (seed) ────────────────────────────
+  // Every fresh open parks a seed without knowing how the view will resolve,
+  // so pane a always consumes it and applies it only when this mount opened
+  // from the DEFAULTS and the user has not acted on the pane yet; otherwise
+  // it is discarded. It overrides only the axes the document states. Split
+  // panes never take it: they clone pane a, and a seed is consumed once.
+  useEffect(() => {
+    if (paneId !== 'a') return;
+    const path = doc.path;
+    const apply = (seed: ReadingViewSeed): void => {
+      const st = seed.state;
+      const pages = pagesRef.current;
+      const n = pages.length;
+      const target = st.page !== undefined && n > 0 ? Math.min(n, Math.max(1, Math.floor(st.page))) - 1 : currentPageRef.current - 1;
+      if (st.layoutMode) setLayoutModeState(st.layoutMode);
+      if (st.coverAlone !== undefined) setCoverAloneState(st.coverAlone);
+      if (st.scrollMode) setScrollModeState(st.scrollMode);
+      if (st.zoomMode) {
+        const z = storedZoomFor(st.zoomMode, st.zoomPercent ?? 100, pages[target]);
+        setZStored(clampReadingZoom(z, pages[target], widestRef.current));
+        setZoomModeState(st.zoomMode);
+      } else if (seed.columnsHint !== null && seed.columnsHint > 1) {
+        seedColumnsRef.current = seed.columnsHint;
+      }
+      if (n > 0) pendingRef.current = { kind: 'page', index: target, gAt: null, hCenter: true };
+      else hCenterRef.current = true;
+      // The page re-land must run even when the seed changed no state.
+      forceLayout();
+    };
+    const tryTake = (): void => {
+      const seed = takeReadingViewSeed(path);
+      if (!seed || opening.source !== 'defaults' || touchedRef.current) return;
+      touchedRef.current = true;
+      apply(seed);
+    };
+    tryTake();
+    return subscribeReadingViewSeed(path, tryTake);
+    // Mount-only: the opening source and the path are fixed for this mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Publishing the view ───────────────────────────────────────────────
+  // On the settle beat, so a wheel burst publishes once; and on unmount, so a
+  // remount after a document switch reopens exactly where this one left off.
+  const zoomPercent = percentFor(zoom, viewPages[Math.min(viewPages.length, Math.max(1, page)) - 1]);
+  useEffect(() => {
+    if (viewportW <= 0 || viewportH <= 0) return;
+    const t = setTimeout(() => publishReadingView(pathRef.current, paneId, snapshotNow()), ZOOM_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [
+    zoomMode,
+    zoomPercent,
+    layoutMode,
+    coverAlone,
+    scrollMode,
+    page,
+    g.columns,
+    pageCount,
+    viewportW,
+    viewportH,
+    paneId,
+    snapshotNow,
+  ]);
+  // Pane a only. An unmount cannot tell a split close from a document
+  // switch or close: a split pane keeps its settled entry, so a switch back
+  // restores it, and the split layer forgets it when the split itself closes.
+  useEffect(
+    () => () => {
+      // `final`: the store keeps this snapshot even when the active path has
+      // already moved to the next document (a switch changes it in a layout
+      // effect, before this passive cleanup runs).
+      if (paneId === 'a' && viewRef.current.measured) {
+        publishReadingView(pathRef.current, paneId, snapshotNow(), { final: true });
+      }
+    },
+    // Unmount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   // ── Rulers and guides ─────────────────────────────────────────────────
   // The rulers read against the page nearest the top of the viewport, and
   // their origin is that page's own top-left corner — a ruler that measured
@@ -857,7 +1538,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         ? prev
         : next,
     );
-  }, [showRulers, scrollTop, virtualTop, zoom, viewportH, first, last, contentWidth, pageHeight]);
+  }, [showRulers, scrollTop, virtualTop, zoom, viewportH, viewportW, first, last, g.contentW, pageHeight]);
 
   const rulerPage = rulerGeom ? viewPages.find((p) => p.id === rulerGeom.pageId) ?? null : null;
   const unitsPerPt = measureUnitsPerPoint(props.measureScale ?? DEFAULT_MEASURE_SCALE);
@@ -957,21 +1638,21 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // Rows are computed inline each render (PageCell is memo'd, so unchanged
   // cells skip re-render; the per-page overlay maps come pre-grouped from WCV).
   const rows: React.JSX.Element[] = [];
-  const innerGap = PAGE_GAP * zoom; // between facing pages of a spread
   for (let r = first; r <= last; r++) {
-    const rowPageIdxs = pagesInRow(r, pageLayout, twoUpCover, viewPages.length);
+    const rowPageIdxs = pagesInRowOf(g, r, coverAlone, viewPages.length);
     if (rowPageIdxs.length === 0) continue;
-    // MUST be the same widths PageCell renders (exact aspect — `textLayer` is
-    // set below). This row is what CENTRES its content, so a divergent formula
-    // offsets it in the pane and over-reports the scrollable width — the
-    // same drift, relocated one level up (regression). Two-up: the row
-    // width is both cells + the inner gap; cells sit flex-side-by-side inside.
-    const width =
-      rowPageIdxs.reduce((acc, i) => acc + displayWidthAt(viewPages[i], pageHeight), 0) +
-      innerGap * (rowPageIdxs.length - 1);
-    const cells = rowPageIdxs.map((i) => {
+    // Every box comes from pageRect — the same geometry the hit test, the
+    // anchored zoom and the fits solve against — and its widths are the
+    // widths PageCell renders (exact aspect — `textLayer` is set below). A
+    // divergent formula offsets the row in the pane and over-reports the
+    // scrollable width (regression).
+    const rects = rowPageIdxs.map((i) => pageRect(g, gridInput, i));
+    const rowLeft = Math.min(...rects.map((b) => b.left));
+    const rowRight = Math.max(...rects.map((b) => b.left + b.width));
+    const multi = rowPageIdxs.length > 1;
+    const cells = rowPageIdxs.map((i, k) => {
       const page = viewPages[i];
-      return (
+      const cell = (
         <PageCell
           key={page.id}
           docId={doc.id}
@@ -1116,14 +1797,34 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onMarqueeSelect={props.onMarqueeSelect}
           onRegroupCountMarks={props.onRegroupCountMarks}
           onZoomToRect={(pid, r) => {
-            const z = zoomToPageRect(pid, r);
-            if (z != null) props.onMarqueeZoomApplied?.(z);
+            zoomToPageRect(pid, r);
           }}
+
           onAddRedactionMark={props.onAddRedactionMark}
           onRemoveRedactionMark={props.onRemoveRedactionMark}
           onSetSignaturePlacement={props.onSetSignaturePlacement}
           onClearSignaturePlacement={props.onClearSignaturePlacement}
         />
+      );
+      if (!multi) return cell;
+      // Several pages share the row: the paper look moves from the row to
+      // each page, so the gaps between them show the pane, not white.
+      return (
+        <div
+          key={page.id}
+          style={{
+            position: 'absolute',
+            left: rects[k].left - rowLeft,
+            top: 0,
+            width: rects[k].width,
+            height: pageHeight,
+            background: '#ffffff',
+            boxShadow: 'var(--page-shadow)',
+            forcedColorAdjust: 'none',
+          }}
+        >
+          {cell}
+        </div>
       );
     });
     rows.push(
@@ -1134,24 +1835,16 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           position: 'absolute',
           // Rows sit at their virtual offset, corrected by the window's
           // slide (scrollTop − virtualTop). Under the cap the correction is
-          // EXACTLY 0 (k = 1), so this is the shipped `r * rowH` bit-for-bit;
-          // past it, the rendered window rides with the real scroll position
-          // while the virtual offset slides the document under it.
-          top: r * rowH - (virtualTop - scrollTop),
+          // EXACTLY 0 (k = 1), so this is `r * rowH` bit-for-bit; past it,
+          // the rendered window rides with the real scroll position while the
+          // virtual offset slides the document under it.
+          top: rects[0].top - (virtualTop - scrollTop),
           height: pageHeight,
-          width,
-          left: '50%',
-          marginLeft: -width / 2,
+          left: rowLeft,
+          width: rowRight - rowLeft,
           display: 'flex',
-          // Reversing the ROW reverses which side of a spread the leading
-          // page takes without touching the row math: `pagesInRow` still
-          // answers reading order and the row's total width is unchanged, so
-          // the vertical virtualizer is untouched. The one HORIZONTAL
-          // consumer (the marquee zoom's scroll-left) reads the same
-          // direction and walks the row the matching way.
-          flexDirection: spreadDirection === 'r2l' ? 'row-reverse' : 'row',
           alignItems: 'flex-start',
-          gap: innerGap,
+          ...(multi ? { background: 'transparent', boxShadow: 'none' } : null),
         }}
       >
         {cells}
@@ -1234,17 +1927,40 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         ref={scrollRef}
         className="docview-scroll"
         data-testid="document-view"
+        data-zoom-mode={zoomMode}
+        data-zoom-percent={Math.round(zoomPercent)}
+        data-layout-mode={layoutMode}
+        data-columns={g.columns}
+        data-scroll-mode={scrollMode}
+        data-current-page={page}
         tabIndex={0}
         onScroll={onScroll}
-        style={props.tool === 'hand' ? { cursor: 'grab' } : undefined}
+        onKeyDown={onKeyDown}
+        style={{
+          // clientWidth must not depend on overflow, or a fit that adds a
+          // scrollbar shrinks its own basis and the columns oscillate.
+          scrollbarGutter: 'stable',
+          // Every scroll position is set explicitly (anchors, re-lands,
+          // snaps); browser anchoring would move it a second time.
+          overflowAnchor: 'none',
+          ...(props.tool === 'hand' ? { cursor: 'grab' } : null),
+        }}
         // Hand: drag-scroll the reading pane. CAPTURE phase, so the
         // press never reaches a page cell — hand must not select, band, or
         // start an edit; it only holds the paper.
-        onPointerDownCapture={props.tool === 'hand' ? handleHandDown : undefined}
+        onPointerDownCapture={props.tool === 'hand' ? handleHandDown : markTouched}
       >
         <div
           className="docview-spacer"
-          style={{ height: smap.spacerHeight, width: contentWidth, position: 'relative' }}
+          style={{
+            height: smap.spacerHeight,
+            // Wider than the pane only when the content is: CSS min-width keeps
+            // it at least the pane, and a fractional clientWidth must never
+            // open a scrollbar over nothing (regression — a ~0.2px band of
+            // pane widths, reachable under display scaling).
+            width: g.contentW > viewportW + OVERFLOW_EPS ? g.contentW : undefined,
+            position: 'relative',
+          }}
         >
           {rows}
         </div>

@@ -12,6 +12,7 @@ import {
   initialViewPlan,
   parseInitialView,
   planIsInert,
+  planMovesWorkbench,
   type InitialView,
 } from '../src/renderer/lib/initial-view';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
@@ -150,8 +151,7 @@ describe('initialViewChanges', () => {
 describe('initialViewPlan', () => {
   it('says nothing about layout, pane or reading mode for a document that states nothing', () => {
     const plan = initialViewPlan(view());
-    expect(plan.pageLayout).toBeNull();
-    expect(plan.twoUpCover).toBeNull();
+    expect(plan.seed).toBeNull();
     expect(plan.navPane).toBeNull();
     expect(plan.readingMode).toBeNull();
     expect(plan.page).toBeNull();
@@ -161,21 +161,22 @@ describe('initialViewPlan', () => {
   it('maps single-column layouts to one page per row', () => {
     for (const value of ['single-page', 'one-column'] as const) {
       const plan = initialViewPlan(view({ page_layout: value }));
-      expect(plan.pageLayout).toBe('single');
-      expect(plan.twoUpCover).toBe(false);
+      expect(plan.seed?.state.layoutMode).toBe('single');
+      expect(plan.seed?.state.coverAlone).toBe(false);
     }
   });
 
   it('maps the two-up layouts, with the cover alone only for the "right" pair', () => {
     for (const value of ['two-column-left', 'two-page-left'] as const) {
       const plan = initialViewPlan(view({ page_layout: value }));
-      expect(plan.pageLayout).toBe('two');
-      expect(plan.twoUpCover).toBe(false);
+      expect(plan.seed?.state.layoutMode).toBe('grid');
+      expect(plan.seed?.state.coverAlone).toBe(false);
+      expect(plan.seed?.columnsHint).toBe(2);
     }
     for (const value of ['two-column-right', 'two-page-right'] as const) {
       const plan = initialViewPlan(view({ page_layout: value }));
-      expect(plan.pageLayout).toBe('two');
-      expect(plan.twoUpCover).toBe(true);
+      expect(plan.seed?.state.layoutMode).toBe('grid');
+      expect(plan.seed?.state.coverAlone).toBe(true);
     }
   });
 
@@ -202,25 +203,39 @@ describe('initialViewPlan', () => {
     expect(full.readingMode).toBe(true);
   });
 
-  it('carries a percent magnification and refuses to invent one for a fit form', () => {
-    expect(initialViewPlan(view({ open_page: 2, zoom: 'percent', zoom_percent: 150 })).zoomPercent)
-      .toBe(150);
-    for (const zoom of ['fit-page', 'fit-height', 'fit-visible', 'default'] as const) {
-      expect(initialViewPlan(view({ open_page: 2, zoom })).zoomPercent).toBeNull();
+  it('carries a percent magnification as a custom zoom', () => {
+    const seed = initialViewPlan(view({ open_page: 2, zoom: 'percent', zoom_percent: 150 })).seed;
+    expect(seed?.state).toEqual({ zoomMode: 'custom', zoomPercent: 150, page: 2 });
+  });
+
+  it('carries every fit form the reading view has', () => {
+    const cases = {
+      'fit-page': 'fitPage',
+      'fit-visible': 'fitPage',
+      'fit-width': 'fitWidth',
+      'fit-height': 'fitHeight',
+    } as const;
+    for (const [zoom, mode] of Object.entries(cases)) {
+      expect(initialViewPlan(view({ open_page: 2, zoom: zoom as keyof typeof cases })).seed?.state.zoomMode).toBe(mode);
     }
   });
 
-  it('claims fit-width, the one fit form the reading view has', () => {
-    expect(initialViewPlan(view({ open_page: 2, zoom: 'fit-width' })).fitWidth).toBe(true);
-    expect(initialViewPlan(view({ open_page: 2, zoom: 'fit-page' })).fitWidth).toBe(false);
-    expect(HONORED_ZOOMS).toContain('fit-width');
-    expect(HONORED_ZOOMS).toContain('percent');
+  it('claims exactly the magnifications the reading view reproduces', () => {
+    expect([...HONORED_ZOOMS].sort()).toEqual(['fit-height', 'fit-page', 'fit-visible', 'fit-width', 'percent']);
+    expect(HONORED_ZOOMS).not.toContain('custom');
+    expect(HONORED_ZOOMS).not.toContain('default');
   });
 
-  it('applies a magnification only alongside a page to apply it to', () => {
-    const plan = initialViewPlan(view({ open_page: null, zoom: 'percent', zoom_percent: 150 }));
-    expect(plan.zoomPercent).toBeNull();
-    expect(plan.fitWidth).toBe(false);
+  it('states no zoom for a stored view rectangle or an unstated magnification', () => {
+    for (const zoom of ['custom', 'default'] as const) {
+      expect(initialViewPlan(view({ open_page: 2, zoom })).seed?.state).toEqual({ page: 2 });
+    }
+  });
+
+  it('carries the opening page in the plan and in the seed', () => {
+    const plan = initialViewPlan(view({ open_page: 4 }));
+    expect(plan.page).toBe(4);
+    expect(plan.seed).toEqual({ state: { page: 4 }, columnsHint: null });
   });
 
   it('always states the direction, so a previous document cannot leave a spread reversed', () => {
@@ -241,12 +256,29 @@ describe('planIsInert', () => {
   it('is not inert when the document names an opening page alone', () => {
     expect(planIsInert(initialViewPlan(view({ open_page: 4 })), 'l2r')).toBe(false);
   });
+
+  it('is not inert when the document states a layout alone', () => {
+    expect(planIsInert(initialViewPlan(view({ page_layout: 'two-page-left' })), 'l2r')).toBe(false);
+  });
+});
+
+describe('planMovesWorkbench', () => {
+  it('ignores the reading-view half', () => {
+    const plan = initialViewPlan(view({ page_layout: 'two-page-left', open_page: 3, zoom: 'fit-width' }));
+    expect(planMovesWorkbench(plan, 'l2r')).toBe(false);
+  });
+
+  it('moves for a direction, a nav pane or a reading mode', () => {
+    expect(planMovesWorkbench(initialViewPlan(view()), 'r2l')).toBe(true);
+    expect(planMovesWorkbench(initialViewPlan(view({ page_mode: 'outlines' })), 'l2r')).toBe(true);
+    expect(planMovesWorkbench(initialViewPlan(view({ page_mode: 'full-screen' })), 'l2r')).toBe(true);
+  });
 });
 
 describe('UI_APPLY_INITIAL_VIEW', () => {
   const baseState = () => initialState;
 
-  it('applies layout, pane and reading mode as one act', () => {
+  it('applies direction, pane and reading mode as one act', () => {
     const state = baseState();
     const next = appReducer(state, {
       type: 'UI_APPLY_INITIAL_VIEW',
@@ -254,8 +286,6 @@ describe('UI_APPLY_INITIAL_VIEW', () => {
         view({ page_layout: 'two-column-right', page_mode: 'outlines', direction: 'R2L' }),
       ),
     });
-    expect(next.ui.pageLayout).toBe('two');
-    expect(next.ui.twoUpCover).toBe(true);
     expect(next.ui.spreadDirection).toBe('r2l');
     expect(next.ui.navPane.open).toBe(true);
     expect(next.ui.navPane.panel).toBe('bookmarks');
@@ -264,13 +294,11 @@ describe('UI_APPLY_INITIAL_VIEW', () => {
 
   it('leaves the user’s own settings alone for a document that states nothing', () => {
     let state = baseState();
-    state = appReducer(state, { type: 'UI_SET_PAGE_LAYOUT', layout: 'two' });
     state = appReducer(state, { type: 'UI_OPEN_NAV_PANEL', panel: 'layers' });
     const next = appReducer(state, {
       type: 'UI_APPLY_INITIAL_VIEW',
       plan: initialViewPlan(view()),
     });
-    expect(next.ui.pageLayout).toBe('two');
     expect(next.ui.navPane).toEqual(state.ui.navPane);
     expect(next.ui.readingMode).toBe(state.ui.readingMode);
   });

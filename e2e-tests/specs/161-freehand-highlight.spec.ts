@@ -27,6 +27,7 @@ import {
   getFirstAnnotation,
   getActiveDocPages,
   getPageAnnotations,
+  setReactInputValue,
 } from '../support/harness.js';
 
 // The committed image-only fixture: one page rendered to a JPEG, ZERO
@@ -74,6 +75,34 @@ async function pageRect(pageId: string): Promise<CellRect | null> {
     if (right - left < 10 || bottom - top < 10) return null;
     return { x: left, y: top, w: right - left, h: bottom - top };
   }, pageId);
+}
+
+/** Bring a page cell to the middle of the reading pane and return its
+ * on-screen rect. A reopened document comes back at its remembered page, so
+ * the cell asked for may be unmounted or off-screen until it is scrolled to. */
+async function visiblePageRect(pageId: string, pageNumber: number): Promise<CellRect> {
+  let rect: CellRect | null = null;
+  await browser.waitUntil(
+    async () => {
+      const found = await browser.execute(function (id) {
+        const el = Array.from(document.querySelectorAll('[data-page-id]')).find(
+          (n) => n.getAttribute('data-page-id') === id,
+        );
+        el?.scrollIntoView({ block: 'center' });
+        return el !== undefined;
+      }, pageId);
+      if (!found) {
+        await $('[data-testid="page-nav-box"]').click();
+        await setReactInputValue('[data-testid="page-nav-box"]', String(pageNumber));
+        await browser.keys(['Enter']);
+        return false;
+      }
+      rect = await pageRect(pageId);
+      return rect !== null;
+    },
+    { timeout: 10_000, interval: 250, timeoutMsg: `page ${pageId} never came on screen` },
+  );
+  return rect!;
 }
 
 async function drawStroke(
@@ -291,8 +320,8 @@ describe('freehand highlighting on a scanned document', () => {
     });
 
     const pages = await getActiveDocPages();
-    const r = await pageRect(pages[0].id);
-    await drawStroke(r!, [0.15, 0.2], [0.75, 0.22]);
+    const r = await visiblePageRect(pages[0].id, 1);
+    await drawStroke(r, [0.15, 0.2], [0.75, 0.22]);
     await browser.waitUntil(
       async () =>
         (await $('[data-testid="tool-inkhighlight"]').getAttribute('aria-pressed')) === 'false',

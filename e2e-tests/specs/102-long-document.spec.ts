@@ -18,13 +18,17 @@ import {
 // mitigation rendered long docs SMALL), and the tail stays reachable: the
 // page box lands the LAST page, and scrolling to the bottom reports it.
 //
-// The fixture: 600 blank pages. At max zoom (64) the true extent is
-// 600 × 984 × 64 ≈ 37.8M px — past the cap. The OLD ceiling clamped zoom to
-// ~50× here (pages rendered ~20% small); the NEW path keeps the full zoom
-// (page height ~61,440px — the discriminating assert) while the spacer stays
-// under the cap and page 600 still lands.
+// The fixture: 600 blank 400 × 1000 pt pages. The zoom ceiling is 6400% of
+// the current page (`readingZoomRange`; the width-axis render cap is far
+// above it here), so a page renders 64,000 px tall and the true extent is
+// 38.4M px — past the cap. A page-count ceiling would clamp the zoom below
+// 6400%; the translated window keeps it while the spacer stays under the cap
+// and page 600 still lands.
 
 const PAGE_COUNT = 600;
+const PAGE_PT: [number, number] = [400, 1000];
+const CEILING_PERCENT = 6400;
+const PAGE_PX_AT_CEILING = (PAGE_PT[1] * CEILING_PERCENT) / 100;
 
 describe('long documents past the element ceiling', () => {
   let tmp: string;
@@ -34,7 +38,7 @@ describe('long documents past the element ceiling', () => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-longdoc-'));
     pdfPath = resolve(tmp, 'long.pdf');
     const doc = await PDFDocument.create();
-    for (let i = 0; i < PAGE_COUNT; i++) doc.addPage([400, 500]);
+    for (let i = 0; i < PAGE_COUNT; i++) doc.addPage(PAGE_PT);
     writeFileSync(pdfPath, await doc.save());
   });
 
@@ -57,8 +61,20 @@ describe('long documents past the element ceiling', () => {
       { timeout: 30_000, timeoutMsg: 'the page total never reflected the fixture' },
     );
 
-    // Drive zoom to the ceiling (1.2^n saturates at MAX_ZOOM = 64).
-    for (let i = 0; i < 25; i++) await invokeAppCommand('view.zoomIn');
+    const zoomPercent = async (): Promise<number> =>
+      Number(
+        await browser.execute(
+          () => document.querySelector('[data-testid="document-view"]')?.getAttribute('data-zoom-percent') ?? 'NaN',
+        ),
+      );
+    for (let i = 0; i < 60 && (await zoomPercent()) < CEILING_PERCENT; i++) {
+      const before = await zoomPercent();
+      await invokeAppCommand('view.zoomIn');
+      await browser.waitUntil(async () => (await zoomPercent()) > before, {
+        timeout: 10_000,
+        timeoutMsg: `zoom in did not step up from ${before}%`,
+      });
+    }
 
     // The spacer must stay under the element cap...
     const spacerH = await browser.execute(
@@ -68,21 +84,27 @@ describe('long documents past the element ceiling', () => {
     );
     expect(spacerH).toBeLessThanOrEqual(30_000_000);
 
-    // ...while the page renders at the FULL zoom — the old pageCount ceiling
-    // clamped this fixture to ~50× (~48,800px); the translated window keeps
-    // 64× (~61,440px). This is the "long docs render small" fix, observed.
-    await browser.waitUntil(
-      async () => {
-        const h = await browser.execute(() => {
-          const el = document.querySelector(
-            '[data-testid="document-view"] .docview-row',
-          ) as HTMLElement | null;
-          return el ? el.offsetHeight : 0;
-        });
-        return h > 55_000;
-      },
-      { timeout: 20_000, timeoutMsg: 'zoom stayed clamped below the honest maximum' },
-    );
+    // ...while the page renders at the full 6400%: a row is one page tall.
+    let last: unknown = null;
+    try {
+      await browser.waitUntil(
+        async () => {
+          const read = await browser.execute(() => {
+            const view = document.querySelector('[data-testid="document-view"]');
+            const row = view?.querySelector('.docview-row') as HTMLElement | null;
+            return {
+              percent: Number(view?.getAttribute('data-zoom-percent') ?? 'NaN'),
+              rowH: row ? row.offsetHeight : 0,
+            };
+          });
+          last = read;
+          return read.percent === CEILING_PERCENT && Math.abs(read.rowH - PAGE_PX_AT_CEILING) <= 2;
+        },
+        { timeout: 20_000, interval: 200 },
+      );
+    } catch {
+      throw new Error(`zoom stayed clamped below the 6400% ceiling; last read: ${JSON.stringify(last)}`);
+    }
 
     // The tail is reachable: jump to the LAST page and the box must HOLD it
     // (the old failure read e.g. "600 / 600" over page ~532, durably).

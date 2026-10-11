@@ -58,6 +58,8 @@ describe('bookmark draft sessions and destination identity', () => {
       await openByPaths([b]); await shown('Original B'); const bw = (await getState()).activeFile!.workingPath, beforeB = readFileSync(bw);
       await focusTab({ doc: a }); await shown('Only A');
       await $('[data-testid="navicon-pages"]').click(); await panel(); await shown('Only A');
+      // The unmount's flush is still in flight here; writes allowed before its refusal lands let it save and retire the retry.
+      await $('[data-testid="bookmarks-retry"]').waitForEnabled();
       expect(readFileSync(aw).equals(before)).toBe(true); expect(readFileSync(bw).equals(beforeB)).toBe(true);
       expect((await history()).undo).toHaveLength(0);
     } finally { allowWrites(aw); }

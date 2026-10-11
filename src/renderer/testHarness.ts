@@ -54,6 +54,8 @@ import {
   type IccAssentState,
 } from './lib/icc-assent';
 import type { FocusedTab } from './state/types';
+import { activeReadingView, subscribeActiveReadingView } from './lib/reading-view-store';
+import type { ReadingViewSnapshot } from './lib/reading-view-types';
 
 export interface TestStateSnapshot {
   // Legacy projection of the tab model — kept so legacy specs'
@@ -83,6 +85,9 @@ export interface TestStateSnapshot {
     pageCount: number;
     dirty: boolean;
   } | null;
+  /** The active reading pane's view, from the reading-view store. The
+   * harness fills it on every read; App's snapshot leaves it out. */
+  readingView?: ReadingViewSnapshot | null;
 }
 
 export interface TestHistoryState {
@@ -2643,6 +2648,11 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     }
   };
 
+  const stateSnapshot = (): TestStateSnapshot => ({
+    ...deps.getStateSnapshot(),
+    readingView: activeReadingView(),
+  });
+
   const harness: TestHarness = {
     cspViolations: () => [...cspViolationLog.values()],
     openByPaths: async (paths, opts) => {
@@ -2778,26 +2788,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     setTool: (tool) => deps.setTool(tool),
     setDocViewMode: (mode) => deps.setDocViewMode(mode),
     getActiveDocPages: () => deps.getActiveDocPages(),
-    getState: () => deps.getStateSnapshot(),
+    getState: () => stateSnapshot(),
     getHistoryState: () => deps.getHistoryState(),
     waitForState: (predicate, timeoutMs = 10_000) =>
       new Promise<TestStateSnapshot>((resolve, reject) => {
-        const initial = deps.getStateSnapshot();
+        const initial = stateSnapshot();
         if (predicate(initial)) {
           resolve(initial);
           return;
         }
+        // The reading view changes without an app-state change, so the
+        // store is a second wake-up source.
+        const check = (): void => {
+          const s = stateSnapshot();
+          if (!predicate(s)) return;
+          clearTimeout(timer);
+          unsubscribe();
+          unsubscribeView();
+          resolve(s);
+        };
         const timer = setTimeout(() => {
           unsubscribe();
+          unsubscribeView();
           reject(new Error(`waitForState: timeout after ${timeoutMs}ms`));
         }, timeoutMs);
-        const unsubscribe = deps.subscribe((s) => {
-          if (predicate(s)) {
-            clearTimeout(timer);
-            unsubscribe();
-            resolve(s);
-          }
-        });
+        const unsubscribe = deps.subscribe(check);
+        const unsubscribeView = subscribeActiveReadingView(check);
       }),
     consumeLastError: () => {
       const e = lastError;

@@ -2,12 +2,16 @@ import { describe, it, expect } from 'vitest';
 import {
   actualSizeZoom,
   anchorHolds,
+  clampReadingZoom,
   clampZoom,
   currentPageFor,
+  fitHeightZoom,
   fitWidthZoom,
   maxZoomFor,
   naturalDisplayHeight,
+  readingZoomRange,
   realTopFor,
+  renderableMaxZoom,
   scrollMapFor,
   virtualTopOf,
   visibleRange,
@@ -17,6 +21,7 @@ import {
   type JumpAnchor,
   type ReadingMetrics,
 } from '../src/renderer/canvas/reading-page';
+import { READING_ZOOM_PERCENT_MAX, READING_ZOOM_PERCENT_MIN } from '../src/renderer/lib/reading-view-types';
 import { BASE_PAGE_HEIGHT, displayWidthAt, displayWidthOf } from '../src/renderer/canvas/layout';
 
 // Mirrors DocumentView's real constants so these cases are the ones a user hits.
@@ -453,6 +458,25 @@ describe('zoom presets — Actual Size / Fit Width', () => {
     });
   });
 
+  describe('fitHeightZoom', () => {
+    it('renders every page at exactly the available height', () => {
+      for (const avail of [300, 752, 1392.5]) {
+        expect(READING_BASE_HEIGHT * fitHeightZoom(avail, READING_BASE_HEIGHT)).toBeCloseTo(avail, 9);
+      }
+    });
+
+    it('does not depend on the page: rotation and size leave it unchanged', () => {
+      const z = fitHeightZoom(800, READING_BASE_HEIGHT);
+      expect(z).toBe(800 / READING_BASE_HEIGHT);
+    });
+
+    it('returns 0 for an unmeasured pane so the caller leaves the zoom alone', () => {
+      expect(fitHeightZoom(0, READING_BASE_HEIGHT)).toBe(0);
+      expect(fitHeightZoom(-48, READING_BASE_HEIGHT)).toBe(0);
+      expect(fitHeightZoom(800, 0)).toBe(0);
+    });
+  });
+
   // The clamp is what makes a preset LIE: it runs, nothing errors, and the view
   // simply isn't at actual size / fit width — with no zoom readout to notice by.
   // So the shipped range must be wide enough that no realistic page or pane
@@ -600,5 +624,66 @@ describe('zoom presets — Actual Size / Fit Width', () => {
         expect(map.k).toBeGreaterThanOrEqual(1);
       }
     });
+  });
+});
+
+describe('readingZoomRange — the percent bounds in internal zoom', () => {
+  const letter = { width: 612, height: 792 };
+  const letterW1 = READING_BASE_HEIGHT * (612 / 792);
+  const pct = (z: number, page: { width: number; height: number }): number =>
+    (z / actualSizeZoom(page, READING_BASE_HEIGHT)) * 100;
+
+  it('converts 1..6400 percent through the reference page', () => {
+    const { min, max } = readingZoomRange(letter, letterW1);
+    expect(pct(min, letter)).toBeCloseTo(READING_ZOOM_PERCENT_MIN, 10);
+    expect(pct(max, letter)).toBeCloseTo(READING_ZOOM_PERCENT_MAX, 10);
+  });
+
+  it('a request at 1% renders at 1%, and the ceiling is 6400% of the same page', () => {
+    const a = actualSizeZoom(letter, READING_BASE_HEIGHT);
+    expect(pct(clampReadingZoom(a / 100, letter, letterW1), letter)).toBeCloseTo(1, 10);
+    expect(pct(clampReadingZoom(1000, letter, letterW1), letter)).toBeCloseTo(6400, 10);
+    expect(pct(clampReadingZoom(0, letter, letterW1), letter)).toBeCloseTo(1, 10);
+  });
+
+  it('a larger page has its own bounds in internal zoom, the same in percent', () => {
+    const a0 = { width: 2384, height: 3370 };
+    const w1 = READING_BASE_HEIGHT * (2384 / 3370);
+    const { min, max } = readingZoomRange(a0, w1);
+    expect(pct(min, a0)).toBeCloseTo(1, 10);
+    expect(pct(max, a0)).toBeCloseTo(6400, 10);
+    expect(max).toBeGreaterThan(readingZoomRange(letter, letterW1).max);
+  });
+
+  it('a rotated page converts through its displayed height', () => {
+    const turned = { width: 612, height: 792, rotation: 90 };
+    expect(pct(readingZoomRange(turned).max, turned)).toBeCloseTo(6400, 10);
+    expect(readingZoomRange(turned).max).toBeCloseTo((612 / READING_BASE_HEIGHT) * 64, 12);
+  });
+
+  it('the renderability cap applies on top of the percent ceiling', () => {
+    // A Letter reference page in a document whose widest page is 10^6 px wide
+    // at zoom 1: the width axis caps below 6400% of the reference page.
+    const w1 = 1e6;
+    const { min, max } = readingZoomRange(letter, w1);
+    expect(max).toBe(renderableMaxZoom(w1));
+    expect(max).toBeLessThan((actualSizeZoom(letter, READING_BASE_HEIGHT) * READING_ZOOM_PERCENT_MAX) / 100);
+    expect(max * w1).toBeLessThanOrEqual(SAFE_ELEMENT_EXTENT);
+    expect(min).toBeLessThanOrEqual(max);
+    expect(clampReadingZoom(1e9, letter, w1)).toBe(max);
+  });
+
+  it('the floor never exceeds the ceiling', () => {
+    const page = { width: 600, height: 72000 };
+    const w1 = 1e12;
+    const { min, max } = readingZoomRange(page, w1);
+    expect(min).toBe(max);
+  });
+
+  it('an unmeasured reference page converts as US Letter; NaN answers the floor', () => {
+    expect(readingZoomRange(null)).toEqual(readingZoomRange({ width: 0, height: 0 }));
+    expect(readingZoomRange(undefined).max).toBeCloseTo((792 / READING_BASE_HEIGHT) * 64, 12);
+    expect(clampReadingZoom(Number.NaN, letter)).toBe(readingZoomRange(letter).min);
+    expect(renderableMaxZoom(0)).toBe(Infinity);
   });
 });

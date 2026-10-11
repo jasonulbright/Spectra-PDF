@@ -22,13 +22,17 @@ async function scrollTopOf(): Promise<number> {
   })) as number;
 }
 
-async function dragBy(dx: number, dy: number): Promise<void> {
-  const box = (await browser.execute(() => {
-    const el = document.querySelector('[data-page-id]');
+/** `from`: the centre of the first page cell (the board), or the centre of
+ * the reading pane's visible box. A scrolled reading pane can hold the first
+ * page's centre above its top edge, where the press lands on the chrome. */
+async function dragBy(dx: number, dy: number, from: 'page' | 'view' = 'page'): Promise<void> {
+  const box = (await browser.execute((origin: string) => {
+    const el = document.querySelector(origin === 'view' ? '[data-testid="document-view"]' : '[data-page-id]');
     if (!el) return null;
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  })) as { x: number; y: number };
+  }, from)) as { x: number; y: number } | null;
+  expect(box).not.toBeNull();
   // Interpolated, not one jump: the canvas drag runs on window-level native
   // pointer listeners, and a single large pointermove is both the least
   // realistic input and the most load-fragile (this leg went red in a
@@ -38,12 +42,12 @@ async function dragBy(dx: number, dy: number): Promise<void> {
   const STEPS = 5;
   let act = browser
     .action('pointer', { parameters: { pointerType: 'mouse' } })
-    .move({ x: Math.round(box.x), y: Math.round(box.y) })
+    .move({ x: Math.round(box!.x), y: Math.round(box!.y) })
     .down()
     .pause(60);
   for (let i = 1; i <= STEPS; i++) {
     act = act
-      .move({ x: Math.round(box.x + (dx * i) / STEPS), y: Math.round(box.y + (dy * i) / STEPS) })
+      .move({ x: Math.round(box!.x + (dx * i) / STEPS), y: Math.round(box!.y + (dy * i) / STEPS) })
       .pause(30);
   }
   await act.pause(60).up().perform();
@@ -74,7 +78,7 @@ describe('hand tool', () => {
     const before = await scrollTopOf();
     expect(before).toBeGreaterThan(0);
 
-    await dragBy(0, 150);
+    await dragBy(0, 150, 'view');
     await browser.waitUntil(async () => (await scrollTopOf()) < before - 100, {
       timeoutMsg: 'the hand drag did not scroll the reading view',
     });
@@ -172,9 +176,23 @@ describe('hand tool', () => {
     await browser.waitUntil(async () => (await getState()).docViewMode === 'document', {
       timeoutMsg: 'double-click did not open the reading view',
     });
-    await browser.waitUntil(async () => (await getState()).currentPageId === targetId, {
-      timeoutMsg: 'the reading view did not land on the double-clicked page',
-    });
+    // The store's current page and the pane's own readout must both name page three.
+    let last: unknown = null;
+    try {
+      await browser.waitUntil(
+        async () => {
+          const currentPageId = (await getState()).currentPageId;
+          const shown = await browser.execute(() =>
+            document.querySelector('[data-testid="document-view"]')?.getAttribute('data-current-page') ?? null,
+          );
+          last = { targetId, currentPageId, shown };
+          return currentPageId === targetId && shown === '3';
+        },
+        { timeout: 10_000, interval: 100 },
+      );
+    } catch {
+      throw new Error(`the reading view did not land on the double-clicked page; last read: ${JSON.stringify(last)}`);
+    }
     // Nothing renders the retired overlay.
     expect(
       await browser.execute(() => document.querySelector('.page-inspector, [data-testid="page-inspector"]') !== null),
