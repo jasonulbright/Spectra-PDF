@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026.1011.155
+
+*Released 2026-10-11*
+
+**Reading view: 4 zoom fits, 2 page layouts, 2 scroll modes, remembered per document**
+
+### New
+- Choose Actual Size, Fit Page, Fit Width or Fit Height beside the zoom control.
+- Zoom with Ctrl+wheel around the pointer; pan sideways with Alt+wheel.
+- Switch between a single page and as many pages as fit side by side.
+- Switch between continuous scrolling and one row of pages at a time.
+- Set the default zoom, layout and scrolling for new documents in Preferences.
+- Reopen a document at the page, zoom, layout and scrolling you left.
+- Follow links while reading: jump to pages, open other PDFs, open or copy web addresses.
+
+### Fixed
+- Centre pages that are narrower than the window instead of aligning them left.
+- Show the arrow cursor across the app; the hand appears only on document links and buttons.
+- Keep a text selection inside the page instead of spilling into panels and toolbars.
+- Read screenshot-quality pages at their own resolution instead of enlarging them for recognition.
+
 ## 2026.1007.154
 
 *Released 2026-10-07*
