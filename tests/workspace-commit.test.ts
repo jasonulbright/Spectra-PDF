@@ -1565,3 +1565,16 @@ describe('symbol stamp round-trip', () => {
     expect(styles![0][0].spectraSymbolParts).toBeUndefined();
   });
 });
+
+describe('carriesLiveSignature over an escaped catalog key', () => {
+  it('finds a signed field under /Acr#6fForm, which the rebuilt file holds as /AcroForm', async () => {
+    const doc = await PDFDocument.load(await makeSourcePdf(1, 100));
+    const ctx = doc.context;
+    const field = ctx.register(ctx.obj({ FT: 'Sig', T: PDFString.of('approval'), V: ctx.register(ctx.obj({ Type: 'Sig' })) }));
+    doc.catalog.set(PDFName.of('AcrZZZForm'), ctx.register(ctx.obj({ Fields: [field] })));
+    const text = Buffer.from(await doc.save({ useObjectStreams: false })).toString('latin1');
+    expect(text).toContain('/AcrZZZForm');
+    const bytes = new Uint8Array(Buffer.from(text.replace('/AcrZZZForm', '/Acr#6fForm'), 'latin1'));
+    expect(await carriesLiveSignature(bytes)).toBe(true);
+  });
+});

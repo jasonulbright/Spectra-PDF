@@ -16,8 +16,9 @@ import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
+import { normalizeEscapedNames } from './pdf-name-normalize';
 import { decodePdfTextString, pdfNameKey, pdfNameText, pdfStringCodes } from './pdf-text-string';
-import { contentsHolder, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
+import { annotationDictionaryIsAmbiguous, contentsHolder, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import {
   LEGEND_FONT_SIZE,
   LEGEND_PAD,
@@ -279,6 +280,9 @@ function stripImportedOriginals(
     } catch {
       continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
     }
+    // Never imported, so never a strip candidate, even when a fingerprint of
+    // another annotation happens to fit it.
+    if (annotationDictionaryIsAmbiguous(dict)) continue;
     // Typed lookups throw on a value of the wrong type. A key whose value
     // breaks Table 166's typing (ISO 32000-2 12.5.2) reads as absent here,
     // which is how the importer's pdf.js reading sees it too, so both sides
@@ -1588,6 +1592,7 @@ async function assemblePages(
   const contributions: FormContribution[] = [];
   for (const [key, g] of groups) {
     const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true, updateMetadata: false });
+    normalizeEscapedNames(doc);
     if (sourceHasXfa(doc)) {
       // Page surgery on an XFA form detaches the form from its pages
       // (the XFA template lays out its own) — refuse with the reason rather
@@ -1678,7 +1683,7 @@ async function assemblePages(
     // Document ownership is independent of retained page membership. Zero
     // own pages still carries its language, preferences, dates and behavior;
     // page-relative entries use an empty map, never the donor's namespace.
-    const ownDoc = own?.doc ?? (ownBytes ? await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false }) : undefined);
+    const ownDoc = own?.doc ?? (ownBytes ? await loadNormalized(ownBytes) : undefined);
     if (ownDoc) {
       owner = { doc: ownDoc, pairs: ownPairs ?? [] };
     }
@@ -1706,12 +1711,20 @@ async function assemblePages(
   if (!ownCarry && owner) ownCarry = { doc: owner.doc, copier: PDFObjectCopier.for(owner.doc.context, output.context) };
   else if (!ownCarry && ownBytes) {
     try {
-      const doc = await PDFDocument.load(ownBytes, { ignoreEncryption: true, updateMetadata: false });
+      const doc = await loadNormalized(ownBytes);
       ownCarry = { doc, copier: PDFObjectCopier.for(doc.context, output.context) };
     } catch { ownCarry = undefined; }
   }
   carryEmbeddedFiles(output, ownCarry, [...sources].filter(([key]) => key !== ownKey).map(([, s]) => s));
   carryFormatDeclarations(output, formatSources);
+}
+
+/** A source document as the build copies from it: loaded, then its names
+ *  rewritten to the spelling pdf.js reads (`normalizeEscapedNames`). */
+async function loadNormalized(bytes: Uint8Array): Promise<PDFDocument> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  normalizeEscapedNames(doc);
+  return doc;
 }
 
 // Info entries this builder generates for itself. A carried value would be

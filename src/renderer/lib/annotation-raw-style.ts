@@ -7,10 +7,11 @@
 // commit-time strip. No sidecar (encrypted file, parse failure) degrades to
 // pdf.js-only import: the shape kinds then stay UNIMPORTED rather than
 // imported blind — faithful-or-untouched.
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFNumber, PDFString } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFNumber, PDFRef, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
-import { entryOf, importedRect, rawEntry } from './annotation-fingerprint';
+import { annotationDictionaryIsAmbiguous, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import { pdfNameKey } from './pdf-text-string';
+import { normalizeEscapedNames } from './pdf-name-normalize';
 
 export interface RawAnnotStyle {
   subtype: string;
@@ -55,6 +56,13 @@ export interface RawAnnotStyle {
    * appearance already carries the look; this is what lets the drawing
    * re-EDIT as the highlighter it was drawn with. */
   spectraInkStyle?: string;
+  /** The annotation's object, spelt as pdf.js spells an annotation id (`12R`,
+   *  `12R3`); absent for an annotation written directly in /Annots. */
+  ref?: string;
+  /** The annotation reads differently here and in pdf.js
+   *  (`annotationDictionaryIsAmbiguous`). Nothing else is recorded for it,
+   *  and the importer leaves it untouched. */
+  ambiguous?: boolean;
 }
 
 function num(v: unknown): number | undefined {
@@ -132,6 +140,9 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           ? new Uint8Array(buffer)
           : Uint8Array.from(buffer);
     doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    // The commit reads the same bytes after this rewrite; the sidecar reads
+    // what the commit will match against.
+    normalizeEscapedNames(doc);
   } catch {
     return null;
   }
@@ -155,6 +166,13 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           try {
             dict = annots.lookup(i, PDFDict);
           } catch {
+            continue;
+          }
+          const raw = annots.get(i);
+          const ref = raw instanceof PDFRef
+            ? `${raw.objectNumber}R${raw.generationNumber === 0 ? '' : raw.generationNumber}` : undefined;
+          if (annotationDictionaryIsAmbiguous(dict)) {
+            styles.push({ subtype: '', rect: [0, 0, 0, 0], ref, ambiguous: true });
             continue;
           }
           const subtypeObj = entryOf(dict, 'Subtype');
@@ -185,6 +203,7 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           styles.push({
             subtype,
             rect: rect as [number, number, number, number],
+            ref,
             strokeWidth: num(bs ? typedEntry(bs, 'W', isNumber) : undefined),
             opacity: num(typedEntry(dict, 'CA', isNumber)),
             fillColor: colorHex(typedEntry(dict, 'IC', isArray)),
@@ -229,7 +248,7 @@ export function takeRawStyle(
   for (let i = 0; i < styles.length; i++) {
     if (consumed.has(i)) continue;
     const s = styles[i];
-    if (s.subtype !== subtype) continue;
+    if (s.ambiguous || s.subtype !== subtype) continue;
     if (s.rect.every((v, k) => Math.abs(v - rect[k]) <= 0.5)) {
       consumed.add(i);
       return s;

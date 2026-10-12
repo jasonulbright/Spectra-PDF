@@ -296,3 +296,66 @@ export function importedRect(dict: PDFDict, subtype: string): Rect {
       return rect;
   }
 }
+
+const isHexCode = (code: number | undefined): boolean => code !== undefined
+  && ((code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x46) || (code >= 0x61 && code <= 0x66));
+
+/** Whether pdf.js's reading of a parsed name depends on a file spelling the
+ *  parse no longer holds (7.3.5): a `#` before one hex digit and anything
+ *  that is not a hex digit came from a `#` pdf.js reads as a failed escape.
+ *  A failed escape followed by an escape the parser decodes leaves no such
+ *  trace (`/#6#41` parses as `#6A`, pdf.js reads `#6#41`); only the importer's
+ *  rectangle cross-check catches that, and only when the reading changes the
+ *  rectangle. A name with an undecoded lowercase escape is not counted: the
+ *  load rewrites it (`normalizeEscapedNames`). */
+export function nameSpellingIsLost(name: PDFName): boolean {
+  const bytes = name.asBytes();
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== 0x23 || !isHexCode(bytes[i + 1])) continue;
+    if (!isHexCode(bytes[i + 2])) return true;
+  }
+  return false;
+}
+
+function keysAreAmbiguous(dict: PDFDict): boolean {
+  const seen = new Set<string>();
+  for (const key of dict.keys()) {
+    if (nameSpellingIsLost(key)) return true;
+    const decoded = pdfNameKey(key);
+    if (seen.has(decoded)) return true;
+    seen.add(decoded);
+  }
+  return false;
+}
+
+/**
+ * Whether this annotation reads differently in pdf.js and in its parsed
+ * dictionary, so no fingerprint taken from one can be compared with the
+ * other: a key of the annotation, of its /BS, /BE, /AP or /AP /N, or a name
+ * the fingerprint and the sidecar read (/Subtype, /AS, /RT, /IT, /LE,
+ * /BS /Type, /BE /S, a name-typed /Contents, the /AP /N keys) holds a spelling
+ * the parse has lost (`nameSpellingIsLost`), or two keys of one dictionary
+ * decode to one name, which leaves which of them pdf.js keeps to file order
+ * the parse has also lost. Such an annotation is left as it is: not imported,
+ * so never stripped or re-authored.
+ */
+export function annotationDictionaryIsAmbiguous(dict: PDFDict): boolean {
+  if (keysAreAmbiguous(dict)) return true;
+  const names: unknown[] = ['Subtype', 'AS', 'RT', 'IT', 'Contents'].map((key) => entryOf(dict, key));
+  const le = entryOf(dict, 'LE');
+  if (le instanceof PDFArray) {
+    for (let i = 0; i < le.size(); i++) names.push(le.lookup(i));
+  } else names.push(le);
+  for (const key of ['BS', 'BE', 'AP']) {
+    const inner = entryOf(dict, key);
+    if (!(inner instanceof PDFDict)) continue;
+    if (keysAreAmbiguous(inner)) return true;
+    if (key === 'BS') names.push(entryOf(inner, 'Type'));
+    if (key === 'BE') names.push(entryOf(inner, 'S'));
+    if (key === 'AP') {
+      const normal = entryOf(inner, 'N');
+      if (normal instanceof PDFDict && keysAreAmbiguous(normal)) return true;
+    }
+  }
+  return names.some((value) => value instanceof PDFName && nameSpellingIsLost(value));
+}
