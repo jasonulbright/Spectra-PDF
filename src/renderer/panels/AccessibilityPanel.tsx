@@ -24,6 +24,7 @@ import {
   authoredCall,
   draftKey,
   fixFor,
+  namesReportAddress,
   suggestionFor,
   type AuthoredFix,
   type FixOffer,
@@ -208,6 +209,11 @@ function placeable(check: Check): PlaceableFinding[] {
   return out;
 }
 
+/** How "declare the rest decoration" ended: written, refused because the
+ * report no longer addresses the live pages, or stopped (declined, failed,
+ * or nothing to declare). */
+type RestOutcome = 'fixed' | 'refused' | 'stopped';
+
 /** Every draft editor on screen, keyed by `draftKey`. */
 type Drafts = Record<string, string>;
 
@@ -375,6 +381,17 @@ export function AccessibilityPanel(): React.ReactElement {
     [activeFile, performOperation],
   );
 
+  /** Whether the report's addresses still name the live pages, refusing by
+   * name when they do not. The fix's own engine call runs the commit gate, so
+   * the gate runs here first and the report is checked again after it: a
+   * page edit that lands in between is committed by that gate and would
+   * renumber the pages under the call. */
+  const reportStillAddresses = useCallback(async (): Promise<boolean> => {
+    if (!liveOrRefuse(report, readState(), workingPath, setStatus)) return false;
+    if (workingPath) await runCommitGate([workingPath]);
+    return liveOrRefuse(report, readState(), workingPath, setStatus);
+  }, [report, readState, workingPath]);
+
   /** Declare every run this check named page furniture, a page at a time.
    *
    * Running heads and folios are the common case behind untagged content, and
@@ -382,16 +399,20 @@ export function AccessibilityPanel(): React.ReactElement {
    * per line. Marked-content ids are page-scoped, so each page is its own
    * call and its own undoable step. */
   const declareRestDecoration = useCallback(
-    async (check: Check): Promise<boolean> => {
-      if (!activeFile) return false;
+    async (check: Check): Promise<RestOutcome> => {
+      if (!activeFile) return 'stopped';
       const calls = artifactCalls(check, true);
       if (calls.length === 0) {
         setStatus(tChrome('panel.a11y.nothingToShow'));
-        return false;
+        return 'stopped';
       }
+      // Busy before the guard: its gate is an await, and a second click must
+      // not start a second fix while it waits. The guard sits inside the try:
+      // a failed gate commit is the panel's error, and `finally` clears busy.
       setBusy(true);
-      setStatus(tChrome('panel.a11y.fixing'));
       try {
+        if (!(await reportStillAddresses())) return 'refused';
+        setStatus(tChrome('panel.a11y.fixing'));
         // One call per page, each its own undoable step. The first declined
         // one stops the run: the gate remembers a Continue per file, so a
         // decline is a decline for the whole set rather than for one page.
@@ -399,21 +420,21 @@ export function AccessibilityPanel(): React.ReactElement {
           const r = await performOperation(activeFile.path, call.method, call.params);
           if (r === EDIT_DECLINED) {
             setStatus('');
-            return false;
+            return 'stopped';
           }
         }
         setStatus(tChrome('panel.a11y.fixed'));
-        return true;
+        return 'fixed';
       } catch (e: unknown) {
         setStatus(
           tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
         );
-        return false;
+        return 'stopped';
       } finally {
         setBusy(false);
       }
     },
-    [activeFile, performOperation],
+    [activeFile, performOperation, reportStillAddresses],
   );
 
   /** Write one authored value at one finding. */
@@ -427,8 +448,9 @@ export function AccessibilityPanel(): React.ReactElement {
         return;
       }
       setBusy(true);
-      setStatus(tChrome('panel.a11y.fixing'));
       try {
+        if (namesReportAddress(spec) && !(await reportStillAddresses())) return;
+        setStatus(tChrome('panel.a11y.fixing'));
         const r = await performOperation(activeFile.path, spec.method, spec.params);
         if (r === EDIT_DECLINED) {
           setStatus('');
@@ -447,7 +469,7 @@ export function AccessibilityPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, drafts, performOperation],
+    [activeFile, drafts, performOperation, reportStillAddresses],
   );
 
   const toggleCategory = useCallback((id: string) => {
@@ -568,6 +590,7 @@ export function AccessibilityPanel(): React.ReactElement {
             }
           : null,
       recheck: run,
+      clearStatus: () => setStatus(''),
       jump: async (checkId, index) => {
         const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
         const finding = check?.findings[index];
@@ -597,9 +620,11 @@ export function AccessibilityPanel(): React.ReactElement {
       artifactRest: async (checkId) => {
         const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
         if (!check) throw new Error(`no check ${checkId}`);
-        if (!(await declareRestDecoration(check))) {
-          throw new Error(`a11yArtifactRest: ${checkId} did not run`);
+        const outcome = await declareRestDecoration(check);
+        if (outcome === 'refused') {
+          throw new Error('a11yArtifactRest: the report no longer addresses the live pages');
         }
+        if (outcome !== 'fixed') throw new Error(`a11yArtifactRest: ${checkId} did not run`);
       },
       authoredFix: async (checkId, index, value) => {
         const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
@@ -615,6 +640,9 @@ export function AccessibilityPanel(): React.ReactElement {
         if (!activeFile) throw new Error('a11yAuthoredFix: no document is open');
         setBusy(true);
         try {
+          if (namesReportAddress(spec) && !(await reportStillAddresses())) {
+            throw new Error('a11yAuthoredFix: the report no longer addresses the live pages');
+          }
           await performOperation(activeFile.path, spec.method, spec.params);
           touchedDrafts.current.delete(draftKey(checkId, index));
         } finally {
@@ -637,6 +665,7 @@ export function AccessibilityPanel(): React.ReactElement {
     editDraft,
     performOperation,
     declareRestDecoration,
+    reportStillAddresses,
   ]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.a11y.open')} />;

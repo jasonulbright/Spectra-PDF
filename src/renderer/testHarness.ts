@@ -445,6 +445,8 @@ export interface AccessibilityHandlers {
     shownCheck: string | null;
   } | null;
   recheck: () => Promise<void>;
+  /** Empties the panel's status line. */
+  clearStatus: () => void;
   jump: (checkId: string, index: number) => Promise<void>;
   show: (checkId: string) => Promise<void>;
   exportTo: (destPath: string) => Promise<string>;
@@ -2024,6 +2026,8 @@ export interface TestHarness {
   /** The accessibility report (the panel must be open — `tools.panel.accessibility`). */
   a11ySnapshot: () => ReturnType<AccessibilityHandlers['snapshot']> | null;
   a11yRecheck: () => Promise<void>;
+  /** Empties the accessibility panel's status line. */
+  a11yClearStatus: () => void;
   /** Click one finding row: the same jump the row performs. */
   a11yJump: (checkId: string, index: number) => Promise<void>;
   /** Draw one check's page findings on the document. */
@@ -3572,6 +3576,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     a11ySnapshot: () => accessibility?.snapshot() ?? null,
+    a11yClearStatus: () => accessibility?.clearStatus(),
     a11yRecheck: async () => {
       if (!accessibility) {
         const msg = 'a11yRecheck: the accessibility panel is not mounted';

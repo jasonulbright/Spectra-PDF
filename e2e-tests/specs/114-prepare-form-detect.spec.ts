@@ -6,8 +6,10 @@
 //   · the checkbox decides — an unchecked candidate does not become a field,
 //   · ONE undo removes the whole accepted batch, which is what proves the
 //     accept is a single operation rather than N,
-//   · and a detection whose document changed while it ran places nothing:
-//     its page numbers name pages of a revision that is gone.
+//   · a detection whose document changed while it ran places nothing:
+//     its page numbers name pages of a revision that is gone,
+//   · and a detection that lands after a tab switch places nothing on the
+//     document now shown, and leaves its own document's panel empty.
 import { resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,12 +48,12 @@ const LABELS = [
 
 /** A ruled fill-in form: four labelled rules, plus a two-row table whose rules
  * carry no label — those must be reported and not offered. */
-async function makeRuledForm(path: string): Promise<void> {
+async function makeRuledForm(path: string, labels: readonly string[] = LABELS): Promise<void> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const page = doc.addPage([612, 792]);
   let y = 700;
-  for (const label of LABELS) {
+  for (const label of labels) {
     page.drawText(label, { x: 72, y: y + 3, size: 11, font });
     page.drawLine({
       start: { x: 170, y },
@@ -132,6 +134,25 @@ async function overlayCount(): Promise<number> {
   return browser.execute(
     () => document.querySelectorAll('[data-testid^="field-candidate-"]').length,
   );
+}
+
+async function candidateRowNames(): Promise<string[]> {
+  return browser.execute(() =>
+    [...document.querySelectorAll('[data-testid^="prepare-form-check-"]')]
+      .map((node) => (node.getAttribute('data-testid') ?? '').slice('prepare-form-check-'.length))
+      .sort(),
+  );
+}
+
+async function detectIdle(): Promise<boolean> {
+  return browser.execute(() => {
+    const button = document.querySelector('[data-testid="prepare-form-detect"]') as HTMLButtonElement | null;
+    return button !== null && !button.disabled;
+  });
+}
+
+async function showsDocument(path: string): Promise<boolean> {
+  return (await getState()).activeFile?.path === path;
 }
 
 describe('Prepare Form field detection', () => {
@@ -252,6 +273,90 @@ describe('Prepare Form field detection', () => {
     expect(await $('[data-testid="prepare-form-create"]').isExisting()).toBe(false);
     expect(await formWidgetCount(twoPage)).toBe(0);
     expect(await PDFDocument.load(readFileSync(working)).then((doc) => doc.getForm().getFields().length)).toBe(0);
+  });
+
+  it("drops a detection that lands after a tab switch, leaving the shown document's set alone", async () => {
+    const first = resolve(tmp, 'switch-a.pdf');
+    const second = resolve(tmp, 'switch-b.pdf');
+    const secondLabels = ['Company:', 'Department:'] as const;
+    await makeRuledForm(first);
+    await makeRuledForm(second, secondLabels);
+    await closeAllFiles();
+    await openByPaths([first, second]);
+    await setView('canvas');
+    await focusTab({ doc: first });
+    await browser.waitUntil(() => showsDocument(first), {
+      timeout: 20_000,
+      interval: 100,
+      timeoutMsg: 'the first document never became the shown one',
+    });
+    await waitForActiveCanvasPageIds();
+    expect(await invokeAppCommand('tools.panel.prepareform')).toBe(true);
+    await $('[data-testid="prepare-form-panel"]').waitForDisplayed({ timeout: 20_000 });
+
+    // The first document's detection is held before its engine step; the
+    // second document is shown when it is released.
+    await holdReaderCopies();
+    try {
+      await clickEl('[data-testid="prepare-form-detect"]');
+      await browser.waitUntil(async () => (await readerCopiesWaiting()) === 1, {
+        timeout: 30_000,
+        interval: 200,
+        timeoutMsg: 'the detection never reached its engine step on a copy',
+      });
+      await focusTab({ doc: second });
+      await browser.waitUntil(() => showsDocument(second), {
+        timeout: 20_000,
+        interval: 100,
+        timeoutMsg: 'the second document never became the shown one',
+      });
+      await waitForActiveCanvasPageIds();
+    } finally {
+      await releaseReaderCopies();
+    }
+
+    // The panel stays mounted across the switch, so its detect button comes
+    // back only when the held detection has finished.
+    await browser.waitUntil(detectIdle, {
+      timeout: 60_000,
+      interval: 200,
+      timeoutMsg: 'the held detection never finished',
+    });
+    expect(await showsDocument(second)).toBe(true);
+    expect(await candidateRowCount()).toBe(0);
+    expect(await overlayCount()).toBe(0);
+    expect(await $('[data-testid="prepare-form-error"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="prepare-form-status"]').isExisting()).toBe(false);
+
+    // The second document's own detection fills its set with its own rows.
+    await clickEl('[data-testid="prepare-form-detect"]');
+    await browser.waitUntil(async () => (await candidateRowCount()) === secondLabels.length, {
+      timeout: 30_000,
+      interval: 200,
+      timeoutMsg: "the second document's detection never produced its rows",
+    });
+    expect(await candidateRowNames()).toEqual(['Company', 'Department']);
+    expect(await overlayCount()).toBe(secondLabels.length);
+
+    // Back on the first document, its panel shows nothing of either detection.
+    await focusTab({ doc: first });
+    await browser.waitUntil(() => showsDocument(first), {
+      timeout: 20_000,
+      interval: 100,
+      timeoutMsg: 'the first document never became the shown one again',
+    });
+    await browser.waitUntil(async () => (await candidateRowCount()) === 0, {
+      timeout: 20_000,
+      interval: 100,
+      timeoutMsg: "the first document's panel kept candidate rows",
+    });
+    expect(await overlayCount()).toBe(0);
+    expect(await $('[data-testid="prepare-form-error"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="prepare-form-status"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="prepare-form-unoffered"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="prepare-form-create"]').isExisting()).toBe(false);
+    expect(await formWidgetCount(first)).toBe(0);
+    expect(await formWidgetCount(second)).toBe(0);
   });
 
   it('recovers the same fields from a scan of the same form', async () => {

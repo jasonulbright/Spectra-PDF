@@ -1,4 +1,4 @@
-import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFNumber, PDFObject, PDFObjectCopier, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFObjectCopier, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
 
 import { tChrome } from '../i18n';
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
@@ -16,7 +16,8 @@ import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
-import { decodePdfTextString, pdfNameText, pdfStringCodes } from './pdf-text-string';
+import { decodePdfTextString, pdfNameKey, pdfNameText, pdfStringCodes } from './pdf-text-string';
+import { importedRect } from './annotation-fingerprint';
 import {
   LEGEND_FONT_SIZE,
   LEGEND_PAD,
@@ -284,21 +285,20 @@ function stripImportedOriginals(
     // fingerprint alike. A strict read fails the whole commit over one
     // malformed annotation.
     const subtypeObj = dict.lookup(PDFName.of('Subtype'));
-    const subtype = subtypeObj instanceof PDFName ? subtypeObj.decodeText() : undefined;
+    const subtype = subtypeObj instanceof PDFName ? pdfNameKey(subtypeObj) : undefined;
     const STRIPPABLE = new Set([
       'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
       // The imported drawing shapes re-append like everything else.
       'Circle', 'Line', 'Polygon', 'PolyLine',
     ]);
     if (!subtype || !STRIPPABLE.has(subtype)) continue;
-    const rectArr = dict.lookup(PDFName.of('Rect'));
-    if (!(rectArr instanceof PDFArray) || rectArr.size() !== 4) continue;
-    const rectObjs = [0, 1, 2, 3].map((j) => rectArr.lookup(j));
-    if (!rectObjs.every((n): n is PDFNumber => n instanceof PDFNumber)) continue;
-    // Any two opposite corners make a rectangle (7.9.5); the import side's
-    // rect is normalised, so this one is too.
-    const [ax, ay, bx, by] = rectObjs.map((n) => n.asNumber());
-    const rect = [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
+    // The rectangle the importer was given for this annotation, which is not
+    // always the file's /Rect: an unreadable /Rect and an annotation with no
+    // appearance both read differently.
+    // A box kind seen only at the [0 0 0 0] fallback is never imported, so no
+    // fingerprint names it; markups and ink import from their own geometry
+    // and do match at that rectangle.
+    const rect = importedRect(dict, subtype);
     const contentsObj = dict.lookup(PDFName.of('Contents'));
     const contents = contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
       ? decodePdfTextString(pdfStringCodes(contentsObj)) : undefined;
@@ -307,9 +307,8 @@ function stripImportedOriginals(
         !consumed.has(idx) &&
         fp.subtype === subtype &&
         (fp.contents ?? '') === (contents ?? '') &&
-        // /Text sticky-note rects are REWRITTEN by pdf.js to a fixed icon size
-        // (import reads pdf.js's rect, not the file's /Rect), so a rect compare
-        // would never match — match those on subtype+contents alone.
+        // A /Text note without an appearance is reported at a fixed icon
+        // size; /Text matches on subtype and contents alone.
         (subtype === 'Text' || fp.rect.every((v, k) => Math.abs(v - rect[k]) <= 0.5)),
     );
     if (matchIndex === -1) continue; // no positive match — never guess-remove
@@ -365,7 +364,11 @@ function addAnnotations(
   // position drifts by the crop offset the moment it's edited and re-baked.
   const { x, y, width, height } = copied.getCropBox();
   const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
-  for (const a of annotations) {
+  for (const authored of annotations) {
+    // A name-typed /Contents carried from the original is the note: the
+    // appearance of a text-bearing kind is drawn from it as well as /Contents.
+    const carried = nameContents.get(authored);
+    const a = carried !== undefined && !authored.note ? { ...authored, note: carried } : authored;
     const [rx0, ry0, rx1, ry1] = displayRectToPdf(a, { x, y, width, height }, rotation);
     // Ink strokes, measure lines, and the point-defined shapes are
     // legitimately zero-width/height (a straight horizontal or vertical
@@ -1243,10 +1246,8 @@ function addAnnotations(
       });
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     }
-    const layer = layerGates.get(a);
+    const layer = layerGates.get(authored);
     if (layer !== undefined) annot.set(PDFName.of('OC'), layer);
-    const carried = nameContents.get(a);
-    if (carried !== undefined && !a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(carried));
     const ref = context.register(annot);
     let annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
     if (!annots) {
