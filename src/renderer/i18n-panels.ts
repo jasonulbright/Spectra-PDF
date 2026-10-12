@@ -25,6 +25,8 @@ export const PANEL_STRINGS = {
   'panel.common.pageCount_one': '{{count}} page',
   'panel.common.pageCount_other': '{{count}} pages',
   'panel.common.error': 'Error: {{message}}',
+  // A result read from a revision of the document that is no longer live.
+  'panel.common.documentChanged': 'The document changed after this tool read it. Run it again.',
   'panel.common.working': 'Working…',
   // The outcome line an operation carries when the user consented to losing
   // the document's protection. ONE interpolated sentence, never the result

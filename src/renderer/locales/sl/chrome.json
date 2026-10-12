@@ -4247,6 +4247,7 @@
   "panel.comments.summary_other": "{{count}} komentarjev",
   "panel.comments.summary_two": "{{count}} komentarja",
   "panel.common.error": "Napaka: {{message}}",
+  "panel.common.documentChanged": "Dokument se je spremenil, potem ko ga je to orodje prebralo. Zaženite ga znova.",
   "panel.common.folderRouteHint": "To deluje na odprtem dokumentu. Če želite iste korake izvesti na vsakem dokumentu v mapi, ustvarite dejanje.",
   "panel.common.folderRouteOpen": "Odpri Vodena dejanja",
   "panel.common.gsNotExecutable": "Ghostscript, nastavljen v Nastavitve ▸ Pogon, ne obstaja več. Znova izberite program.",

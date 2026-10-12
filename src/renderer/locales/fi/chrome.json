@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} kommentti",
   "panel.comments.summary_other": "{{count}} kommenttia",
   "panel.common.error": "Virhe: {{message}}",
+  "panel.common.documentChanged": "Asiakirja muuttui sen jälkeen, kun tämä työkalu luki sen. Suorita se uudelleen.",
   "panel.common.folderRouteHint": "Tämä koskee avointa asiakirjaa. Jos haluat ajaa samat vaiheet kansion jokaiselle asiakirjalle, luo toiminto.",
   "panel.common.folderRouteOpen": "Avaa Ohjatut toiminnot",
   "panel.common.gsNotExecutable": "Kohdassa Asetukset ▸ Moottori määritettyä Ghostscriptiä ei ole enää olemassa. Valitse ohjelma uudelleen.",

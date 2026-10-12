@@ -4007,6 +4007,7 @@
   "panel.comments.summaryUnreadable": "批注列表无法读取的页：{{pages}}",
   "panel.comments.summary_other": "{{count}} 条注释",
   "panel.common.error": "错误：{{message}}",
+  "panel.common.documentChanged": "此工具读取文档后，文档已更改。请重新运行。",
   "panel.common.folderRouteHint": "这只作用于当前打开的文档。若要把同样的步骤应用到某个文件夹里的所有文档，请建立一个动作。",
   "panel.common.folderRouteOpen": "打开向导式动作",
   "panel.common.gsNotExecutable": "在“首选项 ▸ 引擎”中设置的 Ghostscript 已不存在。请重新选择该程序。",

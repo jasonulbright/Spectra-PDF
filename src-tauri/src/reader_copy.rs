@@ -19,8 +19,9 @@
 //!   folder in it.
 //!
 //! Each copy is recorded for the window that asked for it. Only that window
-//! removes it; the window's destruction removes what is left once the
-//! window's engine processes stop holding it.
+//! removes it. A destroyed window takes no new copy; what it left is removed
+//! once the engine reports the window's processes stopped, because a request
+//! the drain keeps running, or one queued behind it, still opens its copy.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -92,9 +93,11 @@ const KILL_MARGIN: Duration = Duration::from_secs(60);
 #[derive(Default)]
 struct Records {
     by_window: HashMap<String, Vec<String>>,
-    /// Labels are never reused: a copy finished after its window was
-    /// destroyed is removed at once.
+    /// Destroyed windows. Labels are never reused: a copy finished after its
+    /// window was destroyed is removed at once.
     closed: HashSet<String>,
+    /// Destroyed windows whose engine processes have stopped.
+    stopped: HashSet<String>,
 }
 
 /// The reader copies of each window, as the paths `create_reader_copy`
@@ -139,7 +142,7 @@ impl ReaderCopies {
             Err(error) => {
                 eprintln!("[reader copy] removal deferred to the window's close: {error}");
                 let mut records = self.lock();
-                if records.closed.contains(label) {
+                if records.stopped.contains(label) {
                     drop(records);
                     retry_in_background(vec![PathBuf::from(copy)]);
                 } else {
@@ -150,12 +153,19 @@ impl ReaderCopies {
         }
     }
 
-    /// Close `label` and remove its copies. Returns the ones a handle still
-    /// holds.
+    /// Refuse every later copy for `label`. Its copies stay: the window's
+    /// engine processes can still be reading them.
+    fn close_label(&self, label: &str) {
+        self.lock().closed.insert(label.to_string());
+    }
+
+    /// Once `label`'s engine processes have stopped: close it and remove its
+    /// copies. Returns the ones a handle still holds.
     fn release_label(&self, label: &str) -> Vec<PathBuf> {
         let copies = {
             let mut records = self.lock();
             records.closed.insert(label.to_string());
+            records.stopped.insert(label.to_string());
             records.by_window.remove(label).unwrap_or_default()
         };
         copies
@@ -291,17 +301,29 @@ fn retry_in_background(left: Vec<PathBuf>) {
     });
 }
 
-/// Remove a destroyed window's reader copies. Runs after the window's engine
-/// processes are retired: a copy one of them still reads is tried again until
-/// the engine has stopped them.
-pub fn on_window_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    let Some(copies) = app.try_state::<ReaderCopies>() else {
-        return;
-    };
-    let left = copies.release_label(label);
-    if !left.is_empty() {
-        retry_in_background(left);
+/// A window was destroyed: it takes no new reader copy. The copies it has
+/// stay until [`on_processes_stopped`].
+pub fn on_window_closed<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    if let Some(copies) = app.try_state::<ReaderCopies>() {
+        copies.close_label(label);
     }
+}
+
+/// Remove a destroyed window's reader copies once the engine reports every
+/// process of the window stopped. A killed process can hold a copy for a
+/// moment after the kill, so a held copy is tried again, bounded.
+pub fn on_processes_stopped<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(copies) = app.try_state::<ReaderCopies>() else {
+            return;
+        };
+        let left = copies.release_label(&label);
+        if !left.is_empty() {
+            retry_in_background(left);
+        }
+    });
 }
 
 #[tauri::command]
@@ -585,17 +607,47 @@ mod tests {
         assert_eq!(names(work.parent().unwrap()), BTreeSet::from(["doc.pdf".to_string()]));
     }
 
-    /// A copy the window's job process still reads cannot be removed before
-    /// the engine retires that process.
+    /// A copy the window's engine processes can still open is removed only
+    /// from the engine's report that they stopped, never beside the
+    /// retirement that starts their drain.
     #[test]
-    fn the_destroy_hook_runs_after_the_engine_retires_the_window() {
+    fn the_destroy_hook_removes_copies_only_from_the_engine_stop_report() {
         let source = include_str!("app_windows.rs");
         let start = source.find("pub fn on_window_destroyed(").expect("the destroy hook");
         let end = start + source[start..].find("\n}").expect("the end of the destroy hook");
         let body = &source[start..end];
-        let retired = body.find("crate::engine::retire_window(app, label);").expect("the engine retirement");
-        let removed = body.find("crate::reader_copy::on_window_destroyed(app, label);").expect("the reader-copy sweep");
-        assert!(retired < removed);
+        let closed = body.find("crate::reader_copy::on_window_closed(app, label);").expect("the close of new copies");
+        let retired = body.find("crate::engine::retire_window_then(app, label, move || {").expect("the engine retirement");
+        let removed = body.find("crate::reader_copy::on_processes_stopped(").expect("the reader-copy sweep");
+        assert!(closed < retired && retired < removed);
+        let callback = &body[retired..];
+        let callback = &callback[..callback.find("});").expect("the end of the stop report")];
+        assert!(callback.contains("crate::reader_copy::on_processes_stopped("));
+        assert_eq!(body.matches("crate::reader_copy::on_processes_stopped(").count(), 1);
+        assert!(!body.contains("crate::engine::retire_window(app, label)"));
+        assert!(!body.contains("ReaderCopies"));
+    }
+
+    /// A renderer that died mid-call never removes its copy: the window's
+    /// destruction keeps it while the engine drains, then removes it.
+    #[test]
+    fn a_closed_window_keeps_its_copies_until_its_processes_stop() {
+        let root = tempfile::tempdir().unwrap();
+        let own = std::process::id();
+        let work = working(root.path(), own, "doc.pdf", b"%PDF queued");
+        let copies = ReaderCopies::default();
+        let queued = copies.record("doc-3", make_copy(root.path(), own, &work).unwrap().to_string_lossy().into_owned()).unwrap();
+
+        copies.close_label("doc-3");
+        assert!(Path::new(&queued).exists(), "a copy a queued request still opens was removed at the close");
+        let late = make_copy(root.path(), own, &work).unwrap();
+        assert!(copies.record("doc-3", late.to_string_lossy().into_owned()).is_err());
+        assert!(!late.exists());
+        assert_eq!(reader_folders(work.parent().unwrap()).len(), 1);
+
+        assert!(copies.release_label("doc-3").is_empty());
+        assert!(!Path::new(&queued).exists());
+        assert!(reader_folders(work.parent().unwrap()).is_empty());
     }
 
     #[test]
@@ -636,6 +688,8 @@ mod tests {
         assert!(Path::new(&copy).exists());
         assert!(reader.join(RECIPIENT_MARKER).exists(), "a held copy keeps its marker");
         assert_eq!(copies.remove("doc-2", &copy), Ok(false), "the record is kept");
+        copies.close_label("doc-2");
+        assert_eq!(copies.remove("doc-2", &copy), Ok(false), "a closed window whose processes run keeps the record");
 
         let left = copies.release_label("doc-2");
         assert_eq!(left, vec![PathBuf::from(&copy)]);

@@ -4167,6 +4167,7 @@
   "panel.comments.summary_other": "{{count}} הערות",
   "panel.comments.summary_two": "{{count}} הערות",
   "panel.common.error": "שגיאה: {{message}}",
+  "panel.common.documentChanged": "המסמך השתנה לאחר שכלי זה קרא אותו. הפעילו אותו שוב.",
   "panel.common.folderRouteHint": "זה פועל על המסמך הפתוח. כדי להריץ את אותם שלבים על כל מסמך בתיקייה, צרו פעולה.",
   "panel.common.folderRouteOpen": "פתיחת פעולות מונחות",
   "panel.common.gsNotExecutable": "ה-Ghostscript שהוגדר תחת העדפות ▸ מנוע כבר אינו קיים. בחר את התוכנית מחדש.",

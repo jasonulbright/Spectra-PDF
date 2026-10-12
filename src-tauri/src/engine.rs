@@ -2581,18 +2581,36 @@ pub async fn cancel_writes<R: Runtime>(app: &AppHandle<R>, within: Duration) {
 /// still running `CANCEL_GRACE` later is killed. Either way its routes and
 /// leases are released, and the open windows are told when a write was cut.
 pub fn retire_window<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    retire_window_then(app, label, || {});
+}
+
+/// [`retire_window`], then `stopped` once every process of the window has
+/// stopped: each drain has ended, after the last retained write answered or
+/// at the kill. Returning from this call is not that point: the drains run in
+/// spawned tasks, and a retained write can run until the drain deadline.
+pub fn retire_window_then<R: Runtime>(app: &AppHandle<R>, label: &str, stopped: impl FnOnce() + Send + 'static) {
     let state = app.state::<EngineState>();
     let first = app.state::<EngineRouter>().take_label(label);
     let workers = state.retire(label);
     let queued = state.lock_runs().remove_label(label);
     drop_queued(app, queued);
     let taken = Arc::new(std::sync::Mutex::new(first));
-    for worker in workers {
-        let app = app.clone();
-        let label = label.to_string();
-        let taken = taken.clone();
-        tauri::async_runtime::spawn(async move { drain_retired(&app, &label, worker, &taken).await });
-    }
+    let drains: Vec<_> = workers
+        .into_iter()
+        .map(|worker| {
+            let app = app.clone();
+            let label = label.to_string();
+            let taken = taken.clone();
+            tauri::async_runtime::spawn(async move { drain_retired(&app, &label, worker, &taken).await })
+        })
+        .collect();
+    tauri::async_runtime::spawn(async move {
+        for drain in drains {
+            // A drain that panicked has no process left to wait for either.
+            let _ = drain.await;
+        }
+        stopped();
+    });
 }
 
 async fn drain_retired<R: Runtime>(

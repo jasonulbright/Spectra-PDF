@@ -9,7 +9,7 @@ import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-id
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
 import { withHealthInput } from '../lib/doc-health-input';
 import { restoreLostCredentials } from '../lib/credential-recovery';
-import { withReaderCopies, type ReaderCopyIo } from '../lib/reader-copy';
+import { readerRevisionIn, withReaderCopies, type ReaderCopyIo } from '../lib/reader-copy';
 import { releaseStageCredential, shareReaderCredential } from '../lib/stage-credentials';
 import { useReadAppState } from '../state/AppStateProvider';
 import type { PdfBuffer } from '../state/types';
@@ -230,6 +230,7 @@ export function useEngine() {
     remove: readerCopy.remove,
     lend: shareReaderCredential,
     giveBack: releaseStageCredential,
+    revision: (workingPath) => readerRevisionIn(readState(), workingPath),
   }), [readState]);
 
   useEffect(() => {

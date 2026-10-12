@@ -4247,6 +4247,7 @@
   "panel.comments.summary_one": "{{count}} комментарий",
   "panel.comments.summary_other": "{{count}} комментария",
   "panel.common.error": "Ошибка: {{message}}",
+  "panel.common.documentChanged": "Документ изменился после того, как этот инструмент его прочитал. Запустите его снова.",
   "panel.common.folderRouteHint": "Это действует на открытый документ. Чтобы выполнить те же шаги для каждого документа в папке, создайте действие.",
   "panel.common.folderRouteOpen": "Открыть пошаговые действия",
   "panel.common.gsNotExecutable": "Ghostscript, заданный в «Настройки ▸ Механизм», больше не существует. Выберите программу заново.",

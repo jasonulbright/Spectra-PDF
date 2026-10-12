@@ -210,6 +210,7 @@ describe('page commit locks', () => {
       remove: async () => true,
       lend: async () => false,
       giveBack: async () => {},
+      revision: () => undefined,
     };
     const step = deferred();
     const dispatched = deferred();

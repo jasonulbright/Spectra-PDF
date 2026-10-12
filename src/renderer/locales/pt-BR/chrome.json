@@ -4167,6 +4167,7 @@
   "panel.comments.summary_one": "{{count}} comentário",
   "panel.comments.summary_other": "{{count}} comentários",
   "panel.common.error": "Erro: {{message}}",
+  "panel.common.documentChanged": "O documento mudou depois que esta ferramenta o leu. Execute-a novamente.",
   "panel.common.folderRouteHint": "Isto age no documento aberto. Para aplicar os mesmos passos a todos os documentos de uma pasta, crie uma ação.",
   "panel.common.folderRouteOpen": "Abrir Ações guiadas",
   "panel.common.gsNotExecutable": "O Ghostscript definido em Preferências ▸ Mecanismo não está mais lá. Escolha o programa de novo.",
