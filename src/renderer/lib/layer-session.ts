@@ -6,6 +6,7 @@ import type { EngineCall } from './engine-call';
 import type { ProcessingStep } from './processing-steps';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome } from '../i18n';
+import { normalizeEscapedNames } from './pdf-name-normalize';
 import { readableBytes, SealedDecryptError } from './sealed-edit';
 
 export interface Layer { index: number; name: string; visible: boolean; locked: boolean; processing_step: ProcessingStep | null }
@@ -28,6 +29,11 @@ export function parseLayerRead(reply: unknown): Layer[] {
  * evidence. Missing, many-to-one or inconsistent bindings refuse. */
 export async function remapLayerIndex(before: PdfBuffer, after: PdfBuffer, index: number, pairs: [number, number][]): Promise<number> {
   const [src, dst] = await Promise.all([PDFDocument.load(new Uint8Array(before)), PDFDocument.load(new Uint8Array(after))]), N = PDFName.of;
+  // The two revisions are compared key by key, so both read their names as
+  // the commit's output was written: a key such as /Pr#6fperties would
+  // otherwise have no counterpart.
+  normalizeEscapedNames(src);
+  normalizeEscapedNames(dst);
   const groups = (pdf: PDFDocument) => pdf.catalog.lookup(N('OCProperties'), PDFDict).lookup(N('OCGs'), PDFArray).asArray();
   const old = groups(src), next = groups(dst);
   if (old.some(r => !(r instanceof PDFRef)) || next.some(r => !(r instanceof PDFRef)) || !old[index]) throw changed();

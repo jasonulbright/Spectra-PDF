@@ -8,6 +8,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
 import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
 import { entryOf, importedRect } from '../src/renderer/lib/annotation-fingerprint';
+import { holdsLowercaseEscape, normalizeEscapedNames } from '../src/renderer/lib/pdf-name-normalize';
 import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef, Workspace } from '../src/renderer/state/types';
 
@@ -640,5 +641,175 @@ describe('a decoded name holding a `#` pair', () => {
     const once = await commitCycle(source);
     expect(await subtypes(once)).toEqual(['Ink']);
     expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+});
+
+/** A commit that rebuilds the page without touching its annotations. */
+async function commitUntouched(bytes: Uint8Array): Promise<Uint8Array> {
+  const file = makeFile('a.pdf', bytes);
+  const page: PageRef = { id: 'a.pdf#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0 };
+  const doc: OpenDocument = { ...file, id: 'a.pdf#0', name: file.name, pages: [page], pageCount: 1 };
+  const [plan] = planCommit({ documents: [doc] }, new Map([['a.pdf', file]]), ['a.pdf']);
+  return buildCommitBytes(plan);
+}
+
+const inkWith = (extra: (ctx: PDFContext) => Record<string, unknown>) => (ctx: PDFContext) => ctx.obj({
+  Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...extra(ctx),
+});
+
+describe('names the parser left with a lowercase escape are rewritten at load (7.3.5)', () => {
+  it('/B#6frder becomes /Border: the model, the saved bytes and pdf.js agree on width 3', async () => {
+    const source = withKeys(await pageWith(inkWith(() => ({ BZZZrder: [0, 0, 3] }))), [['/BZZZrder', '/B#6frder']]);
+    const doc = await PDFDocument.load(source);
+    normalizeEscapedNames(doc);
+    const annot = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
+    const names: PDFName[] = [];
+    const collect = (value: unknown): void => {
+      if (value instanceof PDFName) names.push(value);
+      else if (value instanceof PDFDict) {
+        for (const [key, inner] of value.entries()) {
+          names.push(key);
+          collect(inner);
+        }
+      } else if (value instanceof PDFArray) value.asArray().forEach(collect);
+    };
+    for (const [, object] of doc.context.enumerateIndirectObjects()) collect(object);
+    expect(names.some(holdsLowercaseEscape)).toBe(false);
+
+    expect((await bothRects(source)).pdfjs).toEqual([94, 94, 156, 156]);
+    // Read back without the load rewrite: the writer emitted /Border itself.
+    const out = await commitUntouched(source);
+    const saved = (await PDFDocument.load(out)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(saved.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
+    expect(saved.keys().some(holdsLowercaseEscape)).toBe(false);
+    expect((await bothRects(out)).pdfjs).toEqual([94, 94, 156, 156]);
+  });
+
+  it('/B#6frder on an Ink with no /AP is imported and replaced once', async () => {
+    const source = withKeys(await pageWith(inkWith(() => ({ BZZZrder: [0, 0, 3] }))), [['/BZZZrder', '/B#6frder']]);
+    expect(await importAll(source)).toHaveLength(1);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+
+  it('/Co#6etents keeps its text for pdf.js after a commit', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Highlight', QuadPoints: QUAD, Rect: [100, 500, 200, 520], C: [1, 1, 0],
+      AP: appearance(ctx), CoZZZtents: PDFString.of('x'),
+    })), [['/CoZZZtents', '/Co#6etents']]);
+    const pdf = await loadPdf(await commitCycle(source));
+    const annots = (await (await pdf.getPage(1)).getAnnotations()) as { subtype: string; contentsObj?: { str: string } }[];
+    await pdf.loadingTask.destroy();
+    expect(annots.map((a) => [a.subtype, a.contentsObj?.str])).toEqual([['Highlight', 'x']]);
+  });
+
+  it('a dimension line keyed /#4deasure keeps a /Measure pdf.js reads after a commit', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Line', Rect: [50, 50, 200, 60], L: [60, 55, 190, 55], C: [0, 0, 0], AP: appearance(ctx),
+      ZZZeasure: ctx.obj({ Type: 'Measure', R: PDFString.of('1 in = 1 ft') }),
+    })), [['/ZZZeasure', '/#4deasure']]);
+    expect(await importAll(source)).toHaveLength(0);
+    const out = await commitCycle(source);
+    const annot = (await PDFDocument.load(out)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.get(PDFName.of('Measure'))).toBeDefined();
+    expect(annot.keys().some(holdsLowercaseEscape)).toBe(false);
+  });
+
+  it('a file that wrote #23 before a lowercase pair is read as the decoded name, the stated limit', async () => {
+    // pdf.js reads this key as `#4fC`; the load rewrites it to /OC, so the
+    // replacement carries the layer.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const layer = ctx.register(ctx.obj({ Type: 'OCG', Name: PDFString.of('Layer') }));
+    doc.catalog.set(PDFName.of('OCProperties'), ctx.obj({ OCGs: [layer], D: { ON: [layer] } }));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [90, 90, 160, 160], C: [0, 0, 1], AP: appearance(ctx),
+      ZZZZZC: layer,
+    }))]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/ZZZZZC', '/#234fC']]);
+    expect(await importAll(source)).toHaveLength(1);
+    const out = await commitCycle(source);
+    expect(await subtypes(out)).toEqual(['Ink']);
+    const annot = (await PDFDocument.load(out)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.get(PDFName.of('OC'))).toBeInstanceOf(PDFRef);
+  });
+
+  it('a plain document gains no new name', async () => {
+    const doc = await PDFDocument.load(await pageWith(inkWith(() => ({ BS: { W: 3 } }))));
+    const created = vi.spyOn(PDFName, 'of');
+    try {
+      normalizeEscapedNames(doc);
+      expect(created).not.toHaveBeenCalled();
+    } finally {
+      created.mockRestore();
+    }
+  });
+
+  it('keeps a # the file wrote as #23 and rewrites only the lowercase escape after it', async () => {
+    const source = withKeys(await pageWith(inkWith(() => ({ BZZZZZZZZx: 1 }))), [['/BZZZZZZZZx', '/B#2353#6fx']]);
+    const doc = await PDFDocument.load(source);
+    normalizeEscapedNames(doc);
+    const annot = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    const keys = annot.keys().map((key) => Buffer.from(key.asBytes()).toString('latin1'));
+    expect(keys).toContain('B#53ox');
+  });
+});
+
+describe('an annotation whose reading the parse has lost is left untouched', () => {
+  const cases: [string, () => Promise<Uint8Array>][] = [
+    ['/B#236frder (pdf.js width 1, rewritten to /Border at load)', async () =>
+      withKeys(await pageWith(inkWith(() => ({ BZZZZZrder: [0, 0, 3] }))), [['/BZZZZZrder', '/B#236frder']])],
+    ['/Border [0 0 1] /B#6frder [0 0 3] /Border [0 0 5]', async () => withKeys(
+      await pageWith(inkWith(() => ({ QQQQQQ: [0, 0, 1], BZZZrder: [0, 0, 3], WWWWWW: [0, 0, 5] }))),
+      [['/QQQQQQ', '/Border'], ['/BZZZrder', '/B#6frder'], ['/WWWWWW', '/Border']])],
+    ['/AS /#6#41 against an /AP /N key /#236A', async () => withKeys(await pageWith(inkWith((ctx) => ({
+      AS: 'ZZZZZ',
+      AP: ctx.obj({ N: ctx.obj({ YYYYY: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })) }) }),
+    }))), [['/ZZZZZ', '/#6#41'], ['/YYYYY', '/#236A']])],
+  ];
+  for (const [label, build] of cases) {
+    it(`${label}: not imported, and one annotation through two commits`, async () => {
+      const source = await build();
+      expect(await importAll(source)).toHaveLength(0);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual(['Ink']);
+      expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+    });
+  }
+
+  it('/IT /LineDimension /I#74 /LineArrow /IT /LineDimension: not imported', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Line', Rect: [50, 50, 200, 60], L: [60, 55, 190, 55], C: [0, 0, 0], AP: appearance(ctx),
+      QQ: 'LineDimension', ZZZZ: 'LineArrow', WW: 'LineDimension',
+    })), [['/QQ', '/IT'], ['/ZZZZ', '/I#74'], ['/WW', '/IT']]);
+    expect(await importAll(source)).toHaveLength(0);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Line']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Line']);
+  });
+
+  it('a plain Ink and a /B#2353 Ink are imported as before', async () => {
+    expect(await importAll(await pageWith(inkWith(() => ({}))))).toHaveLength(1);
+    const escaped = withKeys(await pageWith(inkWith(() => ({ BZZZZZ: { W: 3 } }))), [['/BZZZZZ', '/B#2353']]);
+    expect(await importAll(escaped)).toHaveLength(1);
+  });
+});
+
+describe('a popup with no width or height', () => {
+  it('indexes without failing, and only its note is imported', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const noteRef = ctx.nextRef();
+    const popupRef = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Popup', Rect: [0, 0, 0, 0], Parent: noteRef, Open: false }));
+    const note = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [20, 300, 40, 320], F: 4, Popup: popupRef });
+    note.set(PDFName.of('Contents'), PDFHexString.fromText('note'));
+    ctx.assign(noteRef, note);
+    page.node.set(PDFName.of('Annots'), ctx.obj([noteRef, popupRef]));
+    const imported = await importAll(await doc.save());
+    expect(imported.map((a) => a.importedOriginal?.subtype)).toEqual(['Text']);
   });
 });
