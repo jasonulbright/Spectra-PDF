@@ -3632,7 +3632,7 @@ export async function a11yArtifactRest(checkId: string): Promise<string> {
 }
 
 export async function a11yFindingsOnPage(): Promise<
-  { id: string; page: number; checkId: string; detailKey: string; preview: string }[]
+  { id: string; key: string; page: number; checkId: string; detailKey: string; preview: string; selected: boolean }[]
 > {
   return await browser.execute(function () {
     return (window as any).__SPECTRA_TEST__.a11yFindingsOnPage();

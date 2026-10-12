@@ -12,6 +12,8 @@ import type { NormalizedRect, Quarter } from './table-review';
 
 export interface A11yFinding {
   id: string;
+  /** The report row it was placed from (`findingKey`). */
+  key: string;
   /** File path when the report ran — used only to invalidate on a byte change. */
   path: string;
   pageId: string;
@@ -54,11 +56,30 @@ export function findingsByPage(
 /** What the canvas needs to place one finding: the file's own page number and
  * the rectangle in un-rotated user space. The engine reports both. */
 export interface PlaceableFinding {
+  /** The report row it comes from (`findingKey`). */
+  key: string;
   page: number;
   rect: [number, number, number, number];
   checkId: string;
   detailKey: string;
   preview: string;
+}
+
+/** One report row's identity: its check and its index in that check's findings. */
+export function findingKey(checkId: string, index: number): string {
+  return `${checkId}#${index}`;
+}
+
+/** The live finding a report row was placed as. The live set is pruned to
+ * live pages and skips rows with no place, so a row's position in the report
+ * does not address it: a positional lookup names a different finding. None
+ * when the row was never placed or its page is gone. */
+export function liveFindingFor(
+  live: readonly A11yFinding[],
+  path: string,
+  key: string,
+): A11yFinding | undefined {
+  return live.find((f) => f.path === path && f.key === key);
 }
 
 /** The handlers the page cell needs to draw and select a finding. */

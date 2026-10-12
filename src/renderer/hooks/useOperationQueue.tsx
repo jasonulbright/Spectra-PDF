@@ -322,7 +322,9 @@ const INTERNAL_METHODS = new Set([
   // Listing optional-content groups to seed the Layers panel — a read;
   // set_layer_visibility (mutation) stays gated.
   'list_layers',
-  // The accessibility checker is pure analysis — no mutation.
+  // Pure analysis that reads the bytes as they are. The Accessibility panel runs
+  // the commit gate itself before this read, so its report carries a live
+  // revision; a caller that skips the gate reads past pending page edits.
   'check_accessibility',
   // Listing markup annotations for the Comments overview — a read;
   // delete_all_annotations (mutation) stays gated.

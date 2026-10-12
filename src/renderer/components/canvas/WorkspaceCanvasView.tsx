@@ -2628,6 +2628,7 @@ export function WorkspaceCanvasView({
             skipped: findings.length,
           },
         list: () => [...liveA11yFindingsRef.current],
+        selected: () => selectedFindingIdRef.current,
         clear: () => a11yServiceRef.current?.clear(),
         focus: (findingId) => a11yServiceRef.current?.focus(findingId),
       },
@@ -3199,8 +3200,12 @@ export function WorkspaceCanvasView({
     const kept = prunedFindings(a11yFindings, live);
     return kept.length === a11yFindings.length ? a11yFindings : kept;
   }, [a11yFindings, docs]);
+  // Also assigned by publish, clear and focus: a panel reads `list()` and
+  // `selected()` in the continuation of those calls, before React renders.
   const liveA11yFindingsRef = useRef<A11yFinding[]>(NO_A11Y_FINDINGS);
   liveA11yFindingsRef.current = liveA11yFindings;
+  const selectedFindingIdRef = useRef<string | null>(null);
+  selectedFindingIdRef.current = selectedFindingId;
   const a11yServiceRef = useRef<{
     publish: (
       path: string,
@@ -6491,6 +6496,7 @@ export function WorkspaceCanvasView({
         const delta = quarter(pageRef.rotation ?? 0);
         placed.push({
           id: crypto.randomUUID(),
+          key: finding.key,
           path,
           pageId: pageRef.id,
           page: finding.page,
@@ -6505,6 +6511,12 @@ export function WorkspaceCanvasView({
       }
       setA11yFindings(placed);
       setSelectedFindingId(null);
+      // The geometry awaits above let a commit or a page deletion retire page
+      // ids; the live set never names one, or `focus` jumps to no page.
+      const liveIds = new Set<string>();
+      for (const d of docsRef.current) for (const p of d.pages) liveIds.add(p.id);
+      liveA11yFindingsRef.current = prunedFindings(placed, liveIds);
+      selectedFindingIdRef.current = null;
       return { shown: placed.length, skipped };
     },
     [geometryForPage],
@@ -6515,11 +6527,14 @@ export function WorkspaceCanvasView({
     clear: () => {
       setA11yFindings(NO_A11Y_FINDINGS);
       setSelectedFindingId(null);
+      liveA11yFindingsRef.current = NO_A11Y_FINDINGS;
+      selectedFindingIdRef.current = null;
     },
     focus: (findingId) => {
       const target = liveA11yFindingsRef.current.find((f) => f.id === findingId);
       if (!target) return;
       setSelectedFindingId(findingId);
+      selectedFindingIdRef.current = findingId;
       jumpToPageRef.current(target.pageId);
     },
   };

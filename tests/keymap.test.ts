@@ -360,6 +360,7 @@ describe('dispatchKeyEvent', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
@@ -419,6 +420,7 @@ describe('dispatchKeyEvent', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },

@@ -45,6 +45,8 @@ import {
   readerFolders,
   addAnnotation,
   commandEnabled,
+  getWorkspacePageIds,
+  deleteCanvasPagesAndWait,
 } from '../support/harness.js';
 
 /**
@@ -295,6 +297,15 @@ describe('Print preflight', () => {
     // stays where it is.
     await preflightJump('hairlines_absent', 0);
     expect((await preflightSnapshot())!.shownCheck).toBe('hairlines_absent');
+    // A first-time jump publishes and focuses in one call: the row it names is
+    // the one selected, and the panel shows no notice for it.
+    await browser.waitUntil(
+      async () => (await a11yFindingsOnPage()).find((f) => f.selected)?.key === 'hairlines_absent#0',
+      { timeout: 15000, timeoutMsg: 'the first-time jump never selected its own row' },
+    );
+    expect(await browser.execute(
+      () => document.body.innerText.includes('Nothing in this check has a place on a page.'),
+    )).toBe(false);
     await expectActiveOp('preflight');
 
     // object: the annotation's own panel.
@@ -483,19 +494,11 @@ describe('Print preflight', () => {
       });
     }
 
-    /** One page with a hairline, drawn through pdf-lib's own content writer. */
-    async function buildHairlinePdf(path: string): Promise<void> {
-      const doc = await PDFDocument.create();
-      const font = await doc.embedFont(StandardFonts.Helvetica);
-      const page = doc.addPage([612, 792]);
-      page.drawText('Hairline fixture', { x: 40, y: 700, size: 14, font });
-      page.drawLine({ start: { x: 40, y: 560 }, end: { x: 400, y: 560 }, thickness: 0.05 });
-      writeFileSync(path, await doc.save());
-    }
-
     it('is committed before the check reads, so its findings show on the page', async () => {
-      const edited = resolve(dir, 'hairline-annotated.pdf');
-      await buildHairlinePdf(edited);
+      // The main fixture's sticky note carries /Contents as a name object; the
+      // commit re-authors that note beside the new highlight.
+      const edited = resolve(dir, 'press-job-annotated.pdf');
+      await buildFailingPdf(edited);
       await closeAllFiles();
       await openByPaths([edited]);
       await setView('canvas');
@@ -532,6 +535,55 @@ describe('Print preflight', () => {
         () => document.body.innerText.includes('The document changed after this tool read it.'),
       );
       expect(refused).toBe(false);
+    });
+
+    /** Two pages with one hairline each: one content finding per page. */
+    async function buildTwoHairlinePdf(path: string): Promise<void> {
+      const doc = await PDFDocument.create();
+      for (let i = 0; i < 2; i++) {
+        const page = doc.addPage([612, 792]);
+        page.drawLine({ start: { x: 40, y: 560 }, end: { x: 400, y: 560 }, thickness: 0.05 });
+      }
+      writeFileSync(path, await doc.save());
+    }
+
+    it('refuses a jump on a shown check once a page deletion is pending', async () => {
+      const edited = resolve(dir, 'two-hairlines.pdf');
+      await buildTwoHairlinePdf(edited);
+      await closeAllFiles();
+      await openByPaths([edited]);
+      await setView('canvas');
+      await browser.waitUntil(async () => (await getState()).activeFile?.path === edited,
+        { timeoutMsg: 'the two-page document never became active' });
+      expect(await invokeAppCommand('tools.panel.preflight')).toBe(true);
+      await browser.waitUntil(async () => (await preflightSnapshot()) !== null && await recheckIdle(),
+        { timeout: 30000, timeoutMsg: 'the first check of the two-page document never settled' });
+
+      await preflightShow('hairlines_absent');
+      await browser.waitUntil(async () => {
+        const drawn = await a11yFindingsOnPage();
+        return drawn.every((f) => f.checkId === 'hairlines_absent')
+          && new Set(drawn.map((f) => f.page)).size === 2;
+      }, { timeout: 15000, timeoutMsg: 'the hairlines of both pages never reached the page' });
+
+      // A pending deletion of page 1: the drawn set loses page 1's finding,
+      // and the report on screen still lists both rows.
+      const [first] = await getWorkspacePageIds();
+      await deleteCanvasPagesAndWait([first]);
+      await browser.waitUntil(async () => {
+        const drawn = await a11yFindingsOnPage();
+        return drawn.length > 0 && drawn.every((f) => f.page === 2);
+      }, { timeout: 15000, timeoutMsg: 'page 1 finding never left the drawn set' });
+
+      // The first row is page 1's finding. With the check already shown, the
+      // jump refuses on the stale report instead of focusing page 2's finding.
+      await preflightJump('hairlines_absent', 0);
+      await browser.waitUntil(
+        async () => browser.execute(
+          () => document.body.innerText.includes('The document changed after this tool read it.'),
+        ),
+        { timeout: 15000, timeoutMsg: 'the stale jump was never refused' },
+      );
     });
   });
 });

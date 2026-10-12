@@ -743,6 +743,7 @@ describe('invokeCommand', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
@@ -799,6 +800,7 @@ describe('invokeCommand', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
@@ -874,6 +876,7 @@ describe('invokeCommand', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
@@ -929,6 +932,7 @@ describe('invokeCommand', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
@@ -1193,6 +1197,7 @@ describe('invokeCommand', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
@@ -1249,6 +1254,7 @@ describe('invokeCommand', () => {
       a11yFindings: {
         publish: async () => ({ shown: 0, skipped: 0 }),
         list: () => [],
+        selected: () => null,
         clear: () => {},
         focus: () => {},
       },
