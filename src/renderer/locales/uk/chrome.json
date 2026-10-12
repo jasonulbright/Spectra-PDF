@@ -5645,6 +5645,7 @@
   "panel.sanitize.category.metadata": "Метадані документа та сторінок",
   "panel.sanitize.category.prior_revisions": "Раніші версії цього файлу",
   "panel.sanitize.category.signatures": "Цифрові підписи",
+  "panel.sanitize.identifierKept": "зберігається, оскільки документ лишається зашифрованим",
   "panel.sanitize.category.thumbnails": "Ескізи сторінок",
   "panel.sanitize.category.unreferenced_objects": "Об’єкти, на які ніщо не посилається",
   "panel.sanitize.certified": "Цей документ сертифіковано, і сертифікація визначає, що в ньому дозволено змінювати. Очищення змінює більше, ніж це дозволяє.",

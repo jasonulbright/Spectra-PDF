@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import type { EngineCall } from '../../src/renderer/lib/engine-call';
+import { withReaderCopies } from '../../src/renderer/lib/reader-copy';
 
 // The production `callLocked` and `call` closures of `useEngine`, compiled
 // with their free names bound to `env`. A test of a hand-copied closure would
@@ -29,7 +30,10 @@ function build(code: string, name: string, env: Record<string, unknown>): Engine
   return new Function(...Object.keys(env), `${code}; return ${name};`)(...Object.values(env)) as EngineCall;
 }
 
+/** `readerCopies` defaults to none: every call then reads its working copies
+ * under their locks, as a window with no open document does. */
 export function engineClosures(env: Record<string, unknown>): { call: EngineCall; callLocked: EngineCall } {
+  env = { withReaderCopies, readerCopies: null, ...env };
   const callLocked = build(lockedCode, 'callLocked', env);
   const call = build(callCode, 'call', { ...env, callLocked });
   return { call, callLocked };

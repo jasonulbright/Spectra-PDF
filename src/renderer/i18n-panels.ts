@@ -3318,6 +3318,7 @@ export const PANEL_STRINGS = {
   'panel.sanitize.category.thumbnails': 'Page thumbnails',
   'panel.sanitize.category.attached_structure': 'Tags, language and article threads',
   'panel.sanitize.category.signatures': 'Digital signatures',
+  'panel.sanitize.identifierKept': 'kept because the document stays encrypted',
 
   'panel.sanitize.cost.form_fields':
     'Removing the fields makes the form no longer fillable. Flatten instead to keep how it looks.',

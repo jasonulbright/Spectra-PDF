@@ -5,6 +5,7 @@ credential registered in one worker is unknown to every other worker. A
 worker whose window closed receives end of input: it answers every request
 already queued, honours cancels sent before the end, and then exits."""
 
+import base64
 import io
 import json
 import os
@@ -71,9 +72,9 @@ def test_a_cancel_sent_before_end_of_input_stops_the_queued_request():
 class _Worker:
     """A real engine process, spoken to over its stdio like engine.rs does."""
 
-    def __init__(self):
+    def __init__(self, role: str = "window"):
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "engine"],
+            [sys.executable, "-m", "engine", f"--spectra-role={role}", "--spectra-window=main"],
             cwd=SRC_DIR,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -123,6 +124,43 @@ def test_a_credential_lives_only_in_the_worker_that_registered_it(protected):
     finally:
         first.close()
         second.close()
+
+
+def _protected_with_id(path, document_id):
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    identifier = document_id.ljust(16, b"\0")[:16]
+    pdf.trailer.ID = pikepdf.Array([pikepdf.String(identifier), pikepdf.String(identifier)])
+    pdf.save(path, encryption=pikepdf.Encryption(user=USER, owner=OWNER, R=6))
+    pdf.close()
+    return path
+
+
+def test_a_job_process_given_the_held_credential_refuses_another_documents_bytes(tmp_dir):
+    doc = _protected_with_id(os.path.join(tmp_dir, "doc.pdf"), b"doc.pdf")
+    other = _protected_with_id(os.path.join(tmp_dir, "other.pdf"), b"other.pdf")
+    with open(doc, "rb") as handle:
+        own_bytes = base64.b64encode(handle.read()).decode("ascii")
+    with open(other, "rb") as handle:
+        other_bytes = base64.b64encode(handle.read()).decode("ascii")
+    window, job = _Worker("window"), _Worker("job")
+    try:
+        opened = window.call("open_document", path=doc, password=USER)["result"]
+        assert opened["opener"] == "user"
+        held = {key: opened[key] for key in ("permissions", "revision", "p", "id")}
+        held["opener"] = "user"
+        os.remove(doc)
+        given = job.call("open_document", path=doc, password=USER, held=held)
+        assert given["result"]["registered"] is True
+
+        refused = job.call("sealed_plaintext", path=doc, capabilities="pageTier", data=other_bytes)
+        assert "same document" in refused["error"]["message"]
+        answered = job.call("sealed_plaintext", path=doc, capabilities="pageTier", data=own_bytes)
+        with pikepdf.open(io.BytesIO(base64.b64decode(answered["result"]["data"]))) as plain:
+            assert not plain.is_encrypted
+    finally:
+        window.close()
+        job.close()
 
 
 def _dictionary_pair(folder, tag, words):

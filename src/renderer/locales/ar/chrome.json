@@ -5853,6 +5853,7 @@
   "panel.sanitize.category.metadata": "البيانات الوصفية للمستند والصفحة",
   "panel.sanitize.category.prior_revisions": "المراجعات السابقة لهذا الملف",
   "panel.sanitize.category.signatures": "التوقيعات الرقمية",
+  "panel.sanitize.identifierKept": "يُحتفظ به لأن المستند يظل مشفرًا",
   "panel.sanitize.category.thumbnails": "الصور المصغرة للصفحات",
   "panel.sanitize.category.unreferenced_objects": "الكائنات التي لا يشير إليها شيء",
   "panel.sanitize.certified": "هذا المستند معتمد، والاعتماد يحدّد ما يجوز تغييره فيه. والتنظيف يغيّر أكثر مما يسمح به ذلك.",

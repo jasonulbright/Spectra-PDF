@@ -1,15 +1,17 @@
 """The Rust process table against the engine's own handlers.
 
 `src-tauri/src/engine.rs` names, per engine method, the process that serves
-it (`METHOD_CLASSES`): the window process, the window's job process, a run
-process per call, or the health worker. A method the table does not name runs
-in the window process, so a new long method would land there by omission.
+it (`METHOD_CLASSES`): the window process, the window's work process, the
+window's job process, a run process per call, or the health worker. A
+method the table does not name runs in the window process, so a new long
+method would land there by omission.
 This test reads every ``server.register`` call in ``engine/__main__.py``,
 resolves each handler's signature with ``ast``, and fails when:
 
   * a registered method has no row, or a row names an unregistered method;
   * methods that share per-process state are split across processes;
-  * an in-place credential method is routed away from the window process;
+  * a credential-session method or a page-commit step is routed away from
+    the window process;
   * the health class is anything but the health methods;
   * a run method takes a path parameter that `RUN_PATH_PARAMS` does not list,
     so its process would not be given that working copy's credential.
@@ -25,21 +27,40 @@ ROOT = Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "src" / "engine"
 TABLE = ROOT / "src-tauri" / "src" / "engine.rs"
 
-ROW = re.compile(r'^    \("(\w+)", ProcessClass::(Window|Job|Run|Health)\),$')
+ROW = re.compile(r'^    \("(\w+)", ProcessClass::(Window|Work|Job|Run|Health)\),$')
 NAME = re.compile(r'^    "(\w+)",$')
 
 #: Methods that read or write state another method of the group left in the
 #: process: a split plan, a remote-signing session, a preview folder, the
-#: plate folder of a separation render.
+#: plate folder of a separation render, and the credential `sealed_reseal`
+#: lends its stage, which the commit's `transplant_incremental` then opens.
 AFFINITY_GROUPS = (
     ("split_plan", "split"),
     ("list_csc_credentials", "sign_pdf"),
     ("print_preview", "print_preview_cleanup"),
     ("render_separations", "composite_separations", "inspect_point"),
+    ("sealed_plaintext", "sealed_reseal", "transplant_incremental"),
 )
 
-#: They rewrite the working copy in place, so they run in one process only.
-WINDOW_ONLY = ("open_document", "open_document_attempt", "open_pubkey_document", "unlock")
+#: The page commit's engine steps. The commit runs them while it holds the
+#: publication lane, so a queue they share with a long call stalls every
+#: publication of the window.
+COMMIT_GROUP = ("sealed_plaintext", "sealed_reseal", "transplant_incremental")
+
+#: The credential session. The open methods rewrite the working copy in place;
+#: only window-process writes register a credential in the ledger the other
+#: processes are given; `pubkey_reseal` needs the certificate handler, which
+#: no held credential carries.
+WINDOW_ONLY = (
+    "open_document",
+    "open_document_attempt",
+    "open_pubkey_document",
+    "unlock",
+    "share_document",
+    "close_document",
+    "pubkey_reattach",
+    "pubkey_reseal",
+)
 
 #: Parameters that name a path the run process only reads as a tool or
 #: resource, never a working copy.
@@ -145,9 +166,16 @@ def test_methods_that_share_process_state_share_a_process():
         assert len(processes) == 1, f"{group} split across {sorted(processes)}"
 
 
-def test_in_place_credential_methods_run_only_in_the_window_process():
+def test_credential_session_methods_run_only_in_the_window_process():
     rows = _table()
     for method in WINDOW_ONLY:
+        assert rows[method] == "Window", method
+
+
+def test_the_page_commit_steps_run_in_the_window_process():
+    rows = _table()
+    assert COMMIT_GROUP in AFFINITY_GROUPS
+    for method in COMMIT_GROUP:
         assert rows[method] == "Window", method
 
 

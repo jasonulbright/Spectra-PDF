@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Dokumentum- és oldalmetaadatok",
   "panel.sanitize.category.prior_revisions": "A fájl korábbi változatai",
   "panel.sanitize.category.signatures": "Digitális aláírások",
+  "panel.sanitize.identifierKept": "megmarad, mert a dokumentum titkosítva marad",
   "panel.sanitize.category.thumbnails": "Oldalbélyegképek",
   "panel.sanitize.category.unreferenced_objects": "Objektumok, amelyekre semmi sem mutat",
   "panel.sanitize.certified": "Ez a dokumentum tanúsított, ami rögzíti, mi változhat benne. A tisztítás többet módosít, mint amennyit ez enged.",

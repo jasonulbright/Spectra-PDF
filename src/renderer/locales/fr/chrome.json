@@ -5541,6 +5541,7 @@
   "panel.sanitize.category.metadata": "Métadonnées du document et des pages",
   "panel.sanitize.category.prior_revisions": "Révisions antérieures de ce fichier",
   "panel.sanitize.category.signatures": "Signatures numériques",
+  "panel.sanitize.identifierKept": "conservé, car le document reste chiffré",
   "panel.sanitize.category.thumbnails": "Vignettes de page",
   "panel.sanitize.category.unreferenced_objects": "Objets vers lesquels rien ne pointe",
   "panel.sanitize.certified": "Ce document est certifié, ce qui fixe ce qui peut y changer. Un nettoyage change plus que cela n’autorise.",

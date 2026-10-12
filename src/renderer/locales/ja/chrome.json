@@ -5333,6 +5333,7 @@
   "panel.sanitize.category.metadata": "文書とページのメタデータ",
   "panel.sanitize.category.prior_revisions": "このファイルの以前の版",
   "panel.sanitize.category.signatures": "電子署名",
+  "panel.sanitize.identifierKept": "文書が暗号化されたままのため保持されます",
   "panel.sanitize.category.thumbnails": "ページのサムネール",
   "panel.sanitize.category.unreferenced_objects": "どこからも参照されないオブジェクト",
   "panel.sanitize.certified": "この文書は認証済みで、変更してよい範囲が定められています。クリーンアップはその範囲を超えて変更します。",

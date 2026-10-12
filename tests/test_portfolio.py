@@ -1,6 +1,7 @@
 """PDF portfolios (/Collection over /EmbeddedFiles)."""
 
 import os
+import zlib
 
 import pikepdf
 import pytest
@@ -180,3 +181,83 @@ class TestPortfolio:
         make_portfolio(src, src)
         g = get_portfolio(src)
         assert g["is_portfolio"] is True and g["count"] == 0
+
+
+def test_a_listing_reads_size_and_mime_without_decoding_any_member(tmp_dir, monkeypatch):
+    a = _file(os.path.join(tmp_dir, "notes.txt"), b"hello portfolio")
+    b = os.path.join(tmp_dir, "inner.pdf")
+    _pdf(b)
+    out = os.path.join(tmp_dir, "folio.pdf")
+    create_portfolio(out, [a, b], title="Bundle")
+    inner_size = os.path.getsize(b)
+
+    def decoded(*_args, **_kwargs):
+        raise AssertionError("a listing decoded an embedded file")
+
+    for name in ("read_bytes", "read_raw_bytes", "get_stream_buffer", "get_raw_stream_buffer"):
+        monkeypatch.setattr(pikepdf.Object, name, decoded)
+    with pikepdf.open(out) as pdf:
+        attached_file = type(pdf.attachments["notes.txt"].get_file())
+    monkeypatch.setattr(attached_file, "read_bytes", decoded)
+
+    by_name = {m["name"]: m for m in get_portfolio(out)["members"]}
+    assert by_name["notes.txt"]["size"] == 15
+    assert by_name["notes.txt"]["mime"] == "text/plain"
+    assert by_name["inner.pdf"]["size"] == inner_size
+    assert by_name["inner.pdf"]["mime"] == "application/pdf"
+    listed = {m["name"]: m for m in list_attachments(out)["attachments"]}
+    assert listed == by_name
+
+
+def _member_file(path, shape, payload):
+    """A one-member PDF whose embedded stream declares its size as `shape` says."""
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    pdf.attachments["notes.txt"] = pikepdf.AttachedFileSpec(pdf, payload, filename="notes.txt", mime_type="text/plain")
+    stream = pdf.attachments["notes.txt"].get_file().obj
+    if shape != "params":
+        del stream["/Params"]
+    if shape in ("dl", "neither"):
+        stream.write(zlib.compress(payload), filter=pikepdf.Name.FlateDecode)
+    if shape == "dl":
+        stream.DL = len(payload)
+    # Opens with the empty user password, as a document the listing reads.
+    encryption = pikepdf.Encryption(user="", owner="owner-pw", R=6) if shape == "encrypted-length" else None
+    pdf.save(
+        path,
+        compress_streams=shape not in ("length", "encrypted-length", "dl", "neither"),
+        encryption=encryption or False,
+    )
+    pdf.close()
+
+
+@pytest.mark.parametrize("shape, expected", [
+    ("params", 32768),
+    ("dl", 32768),
+    ("length", 32768),
+    ("neither", None),
+    ("encrypted-length", None),
+])
+def test_a_listing_reports_the_declared_size_and_never_decodes(tmp_dir, monkeypatch, shape, expected):
+    payload = b"spectra " * 4096
+    path = os.path.join(tmp_dir, f"{shape}.pdf")
+    _member_file(path, shape, payload)
+    with pikepdf.open(path) as check:
+        stored = check.attachments["notes.txt"].get_file().obj
+        assert ("/Params" in stored) == (shape == "params")
+        assert ("/DL" in stored) == (shape == "dl")
+        assert (stored.get("/Filter") is None) == (shape in ("length", "encrypted-length"))
+        if shape == "encrypted-length":
+            assert check.is_encrypted and int(stored.Length) != len(payload)
+        attached_file = type(check.attachments["notes.txt"].get_file())
+
+    def decoded(*_args, **_kwargs):
+        raise AssertionError("a listing decoded an embedded file")
+
+    for name in ("read_bytes", "read_raw_bytes", "get_stream_buffer", "get_raw_stream_buffer"):
+        monkeypatch.setattr(pikepdf.Object, name, decoded)
+    monkeypatch.setattr(attached_file, "read_bytes", decoded)
+
+    listed = list_attachments(path)["attachments"]
+    assert [(m["name"], m["size"], m["mime"]) for m in listed] == [("notes.txt", expected, "text/plain")]
+    assert get_portfolio(path)["members"] == listed

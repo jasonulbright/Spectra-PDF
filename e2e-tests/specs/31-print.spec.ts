@@ -7,8 +7,14 @@ import {
   openByPaths,
   closeAllFiles,
   setReactInputValue,
+  setReactSelectValue,
   waitForDisplayedSelector,
   requirePlatformFeatures,
+  getState,
+  holdReaderCopies,
+  releaseReaderCopies,
+  readerCopiesWaiting,
+  readerFolders,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -195,6 +201,55 @@ describe('print', () => {
       async () => (await $(COUNT).getText()).includes('of 2'),
       { timeout: 30_000, timeoutMsg: 'n-up preview never re-rendered' },
     );
+
+    await $('[data-testid="print-cancel"]').click();
+    await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });
+  });
+
+  it('prints from a private copy of the working copy; the preview makes none', async () => {
+    const working = (await getState()).activeFile!.workingPath;
+    await browser.keys(['Control', 'p']);
+    await $('[data-testid="print-dialog"]').waitForDisplayed();
+    await $('[data-testid="print-preview-img"]').waitForDisplayed({
+      timeout: 30_000,
+      timeoutMsg: 'print preview never rendered',
+    });
+    // The preview keeps its folder between renders, so it reads the working copy.
+    expect(readerFolders(working)).toEqual([]);
+
+    // A printer name that cannot exist: the engine refuses it before
+    // Ghostscript starts, so nothing spools.
+    const NO_SUCH_PRINTER = 'OPS E2E No Such Printer';
+    await browser.waitUntil(
+      async () => (await printerOptions()).length > 0,
+      { timeoutMsg: 'printer list never populated' },
+    );
+    await browser.execute((name: string) => {
+      const select = document.querySelector('[data-testid="print-printer"]')!;
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    }, NO_SUCH_PRINTER);
+    await setReactSelectValue('[data-testid="print-printer"]', NO_SUCH_PRINTER);
+
+    await holdReaderCopies();
+    try {
+      await $('[data-testid="print-submit"]').click();
+      await browser.waitUntil(async () => (await readerCopiesWaiting()) === 1,
+        { timeoutMsg: 'the print never reached its engine step on a copy' });
+      expect(readerFolders(working)).toHaveLength(1);
+    } finally {
+      await releaseReaderCopies();
+    }
+    await $('[data-testid="print-error"]').waitForDisplayed({
+      timeout: 30_000,
+      timeoutMsg: 'the print of an unknown printer was never refused',
+    });
+    const refusal = await $('[data-testid="print-error"]').getText();
+    expect(refusal).toContain(NO_SUCH_PRINTER);
+    expect(refusal).not.toMatch(/[\\/]r\d+-[0-9a-f]+[\\/]/i);
+    expect(readerFolders(working)).toEqual([]);
 
     await $('[data-testid="print-cancel"]').click();
     await $('[data-testid="print-dialog"]').waitForDisplayed({ reverse: true });

@@ -776,6 +776,15 @@ export const schedule = {
 // snapshots, and commit temp files all live there.
 const snapshotRaw = (workingPath: string) => withFileLock([workingPath], () => invoke<string>('snapshot', { workingPath }));
 
+/** A private byte copy of a working copy for one long engine read. `create`
+ * rejects any source that is not a working copy of this process; `remove`
+ * answers false while a handle still holds the copy, which the window's
+ * close then removes. */
+export const readerCopy = {
+  create: (workingPath: string) => invoke<string>('create_reader_copy', { workingPath }),
+  remove: (path: string) => invoke<boolean>('remove_reader_copy', { path }),
+};
+
 export const pageCommit = {
   publish: (id: string, entries: import('./page-commit-transaction').PageCommitEntry[]) =>
     invoke('publish_page_commit', { id, entries }),

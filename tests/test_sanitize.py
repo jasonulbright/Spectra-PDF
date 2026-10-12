@@ -1336,3 +1336,92 @@ class TestTextAfterARunTheFontCannotMeasure:
         assert [d["kind"] for d in detail if d["text"] == "VISIBLE"] == ["partially_covered"]
         out, _result = sanitized(path, tmp_dir, ["hidden_text"], name="estimate-out.pdf")
         assert b"VISIBLE" in _drawn_text(out)
+
+
+_USER = "reader-pw"
+_OWNER = "owner-pw"
+
+
+def _user_protected(tmp_dir, revision):
+    path = os.path.join(tmp_dir, f"protected-r{revision}.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.docinfo[Name.Title] = "Quarterly"
+    identifier = b"protected-doc-id"
+    pdf.trailer.ID = Array([String(identifier), String(identifier)])
+    allow = pikepdf.Permissions(modify_annotation=True, modify_other=True)
+    pdf.save(path, encryption=pikepdf.Encryption(user=_USER, owner=_OWNER, R=revision, allow=allow))
+    pdf.close()
+    return path
+
+
+@pytest.mark.parametrize("revision", [4, 6])
+def test_metadata_removal_keeps_an_encrypted_documents_identifier(tmp_dir, revision):
+    import base64
+
+    from engine.credentials import close_document, open_document
+    from engine.sealed_edit import sealed_plaintext
+
+    path = _user_protected(tmp_dir, revision)
+    with pikepdf.open(path, password=_USER) as pdf:
+        before = bytes(pdf.trailer.ID[0])
+    assert open_document(path, _USER)["opener"] == "user"
+    try:
+        result = sanitize_pdf(path, path, categories=["metadata"])
+        assert removed_counts(result)["metadata"] == 1
+        with pikepdf.open(path, password=_USER) as pdf:
+            assert pdf.is_encrypted and not pdf.owner_password_matched
+            assert bytes(pdf.trailer.ID[0]) == before
+            assert "/Info" not in pdf.trailer
+        found = row(audit_hidden_information(path), "metadata")
+        assert {"where": "document identifier", "keys": ["ID"], "replaced": False} in found["detail"]
+        raw = base64.b64encode(open(path, "rb").read()).decode("ascii")
+        reply = sealed_plaintext(path, "commentTier", data=raw)
+        with pikepdf.open(io.BytesIO(base64.b64decode(reply["data"]))) as plain:
+            assert not plain.is_encrypted
+    finally:
+        close_document(path)
+
+
+@pytest.mark.parametrize("password, opener, replaced", [(_USER, "user", False), (_OWNER, "owner", True)])
+def test_the_identifier_is_kept_only_under_the_documents_own_encryption(tmp_dir, password, opener, replaced):
+    from engine.credentials import close_document, open_document
+
+    path = _user_protected(tmp_dir, 6)
+    assert open_document(path, password)["opener"] == opener
+    try:
+        found = row(audit_hidden_information(path), "metadata")
+        assert {"where": "document identifier", "keys": ["ID"], "replaced": replaced} in found["detail"]
+    finally:
+        close_document(path)
+
+
+@pytest.mark.parametrize("revision", [4, 6])
+def test_a_rewrite_that_drops_the_identifier_writes_the_recorded_one_back(tmp_dir, revision):
+    from engine.credentials import close_document, open_document, open_pdf
+    from engine.pdf_save import save_pdf
+
+    path = _user_protected(tmp_dir, revision)
+    out = os.path.join(tmp_dir, "rewritten.pdf")
+    open_document(path, _USER)
+    try:
+        with open_pdf(path) as pdf:
+            del pdf.trailer["/ID"]
+            save_pdf(pdf, out)
+        with pikepdf.open(out, password=_USER) as pdf:
+            assert pdf.is_encrypted and not pdf.owner_password_matched
+            assert bytes(pdf.trailer.ID[0]) == b"protected-doc-id"
+    finally:
+        close_document(path)
+
+
+def test_an_encrypted_document_rewritten_under_new_encryption_reports_its_identifier_replaced(tmp_dir):
+    path = os.path.join(tmp_dir, "empty-passwords.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(path, encryption=pikepdf.Encryption(user="", owner="", R=6))
+    pdf.close()
+    with pikepdf.open(path) as check:
+        assert check.is_encrypted
+    found = row(audit_hidden_information(path), "metadata")
+    assert {"where": "document identifier", "keys": ["ID"], "replaced": True} in found["detail"]

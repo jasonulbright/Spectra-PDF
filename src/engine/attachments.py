@@ -16,18 +16,46 @@ from engine.inplace import is_same_file, staged_write, write_bytes_staged
 from engine.pdf_save import save_pdf
 
 
+def _count(value) -> int | None:
+    return int(value) if isinstance(value, int) and value >= 0 else None
+
+
+def _declared_size(stream, encrypted: bool) -> int | None:
+    """The embedded file's decoded byte size as its stream declares it, or
+    None when it declares none.
+
+    In order: `/Params /Size` (ISO 32000-2 Table 45), the stream's `/DL`
+    (7.3.8.2, the decoded length), and `/Length` only when the stream has no
+    `/Filter` and the document is not encrypted: a filtered stream's
+    `/Length` counts encoded bytes, and an encrypted one's counts the
+    ciphertext, padding and initialization vector included. The stream is
+    never decoded, so a listing costs one dictionary read per file however
+    large the files are."""
+    params = stream.get("/Params")
+    if isinstance(params, pikepdf.Dictionary):
+        size = _count(params.get("/Size"))
+        if size is not None:
+            return size
+    decoded = _count(stream.get("/DL"))
+    if decoded is not None:
+        return decoded
+    if stream.get("/Filter") is None and not encrypted:
+        return _count(stream.get("/Length"))
+    return None
+
+
 def list_attachments(file: str) -> dict:
-    """Every embedded file: name, byte size, description, and MIME type."""
+    """Every embedded file: name, byte size (None when the file declares
+    none), description, and MIME type."""
     with open_pdf(file) as pdf:
         out = []
         for name in pdf.attachments.keys():
             spec = pdf.attachments[name]
-            size = 0
+            size = None
             mime = ""
             try:
                 data = spec.get_file()
-                raw = data.read_bytes()
-                size = len(raw)
+                size = _declared_size(data.obj, pdf.is_encrypted)
                 mime = data.mime_type or ""
             except Exception:
                 pass

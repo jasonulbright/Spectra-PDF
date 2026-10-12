@@ -5541,6 +5541,7 @@
   "panel.sanitize.category.metadata": "Metadades del document i de les pàgines",
   "panel.sanitize.category.prior_revisions": "Revisions anteriors d'aquest fitxer",
   "panel.sanitize.category.signatures": "Signatures digitals",
+  "panel.sanitize.identifierKept": "es conserva perquè el document continua xifrat",
   "panel.sanitize.category.thumbnails": "Miniatures de pàgina",
   "panel.sanitize.category.unreferenced_objects": "Objectes que no apunta res",
   "panel.sanitize.certified": "Aquest document està certificat, cosa que estableix què s'hi pot canviar. Una neteja canvia més del que això permet.",

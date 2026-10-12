@@ -2,18 +2,20 @@
 //!
 //! The unit tests in `engine.rs` cover routing as a table. This file answers
 //! what only real processes can: that a short call from one window completes
-//! while another window's long call is still running, that a cheap call of a
-//! window answers while that window's job process runs a long job, that a
-//! cancel reaches the process holding the request, that one process's death
-//! fails only its own calls, that a destroyed window's processes are stopped
-//! for good, that a job process is given the window's credentials read-only,
-//! and that run calls wait for a slot and end with their answer.
+//! while another window's long call is still running, that a cheap call and a
+//! commit step of a window answer while that window's work process runs a
+//! long call, that a work call answers while the window's job process runs a
+//! long job, that a cancel reaches the process holding the request, that one
+//! process's death fails only its own calls, that a destroyed window's
+//! processes are stopped for good, that work and job processes are given the
+//! window's credentials read-only, and that run calls wait for a slot and end
+//! with their answer.
 //!
 //! The processes run `tests/fixtures/engine_worker_harness.py`: the real
 //! engine from `src/engine` plus a cancellable `test_sleep`, a `test_pid`, and
-//! a gated handler in place of `distill` (a job method) and
-//! `create_pdf_folders` (a run method). An unprovisioned checkout (no
-//! interpreter under `resources/python`) skips, and
+//! a gated handler in place of `audit_space_usage` (a work method), `distill`
+//! (a job method) and `create_pdf_folders` (a run method). An unprovisioned
+//! checkout (no interpreter under `resources/python`) skips, and
 //! `SPECTRAPDF_REQUIRE_LIVE_CLI=1` turns that skip into a failure.
 
 use std::collections::HashMap;
@@ -551,8 +553,9 @@ impl<'a> Inbox<'a> {
     }
 }
 
-/// A call to the harness's gated handler: `distill` reaches the window's job
-/// process, `create_pdf_folders` a run process.
+/// A call to the harness's gated handler: `audit_space_usage` reaches the
+/// window's work process, `distill` its job process, `create_pdf_folders` a
+/// run process.
 fn gated(id: u64, method: &str, gate: &Path) -> serde_json::Value {
     request(id, method, serde_json::json!({ "gate": gate.to_string_lossy() }))
 }
@@ -601,6 +604,82 @@ fn a_cheap_call_answers_while_its_windows_job_runs() {
 }
 
 #[test]
+fn a_cheap_call_and_a_commit_transplant_answer_while_a_work_call_runs() {
+    let Some(python) = provisioned_python() else { return };
+    let live = live_app(&python);
+    let handle = live.app.handle().clone();
+    let scratch = tempfile::tempdir().unwrap();
+    let gate = scratch.path().join("gate");
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tests").join("fixtures").join("sample.pdf");
+    let original = scratch.path().join("original.pdf");
+    let modified = scratch.path().join("modified.pdf");
+    std::fs::copy(&sample, &original).unwrap();
+    std::fs::copy(&sample, &modified).unwrap();
+    let pid_a = pid_of(&live, A, 100);
+    let mut inbox = Inbox::new(&live.a);
+
+    send(&live, A, gated(1, "audit_space_usage", &gate));
+    send(&live, A, request(2, "ping", serde_json::json!({})));
+    assert_eq!(inbox.take(2, Duration::from_secs(60))["result"]["status"], "ok");
+    send(&live, A, request(3, "get_page_count", serde_json::json!({ "file": sample.to_string_lossy() })));
+    let pages = inbox.take(3, Duration::from_secs(60));
+    assert!(pages["result"]["pages"].as_u64().is_some_and(|n| n > 0), "{pages}");
+    send(&live, A, request(4, "transplant_incremental", serde_json::json!({
+        "original": original.to_string_lossy(),
+        "modified": modified.to_string_lossy(),
+        "output": scratch.path().join("out.pdf").to_string_lossy(),
+    })));
+    let transplant = inbox.take(4, Duration::from_secs(60));
+    assert_eq!(transplant["result"]["reason"], "not-signed", "{transplant}");
+    assert!(!gate.exists());
+    assert!(!inbox.answered(1), "the work call answered before its gate existed");
+
+    std::fs::write(&gate, b"").unwrap();
+    let (pid_work, cancelled, log) = gated_result(&inbox.take(1, Duration::from_secs(60)));
+    assert!(!cancelled);
+    assert_ne!(pid_work, pid_a, "the work call ran in the window process");
+    assert!(log.is_empty(), "the window's calls reached the work process: {log:?}");
+    assert_eq!(pid_of(&live, A, 5), pid_a);
+    engine::retire_window(&handle, A);
+    engine::retire_window(&handle, B);
+}
+
+#[test]
+fn a_work_call_answers_while_its_windows_job_runs() {
+    let Some(python) = provisioned_python() else { return };
+    let live = live_app(&python);
+    let handle = live.app.handle().clone();
+    let scratch = tempfile::tempdir().unwrap();
+    let gate = scratch.path().join("gate");
+    let open = scratch.path().join("open");
+    std::fs::write(&open, b"").unwrap();
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tests").join("fixtures").join("sample.pdf");
+    let pid_a = pid_of(&live, A, 100);
+    let mut inbox = Inbox::new(&live.a);
+
+    send(&live, A, gated(1, "distill", &gate));
+    send(&live, A, request(2, "check_accessibility", serde_json::json!({ "file": sample.to_string_lossy() })));
+    let checked = inbox.take(2, Duration::from_secs(120));
+    assert!(checked.get("error").is_none(), "{checked}");
+    assert!(!gate.exists());
+    assert!(!inbox.answered(1), "the job answered before its gate existed");
+
+    // The check ran in the work process: that process served it.
+    send(&live, A, gated(3, "audit_space_usage", &open));
+    let (pid_work, _, log) = gated_result(&inbox.take(3, Duration::from_secs(120)));
+    assert_eq!(log, vec![("check_accessibility".to_string(), true)]);
+    assert!(!inbox.answered(1), "the job answered before its gate existed");
+
+    std::fs::write(&gate, b"").unwrap();
+    let (pid_job, cancelled, job_log) = gated_result(&inbox.take(1, Duration::from_secs(60)));
+    assert!(!cancelled);
+    assert!(job_log.is_empty(), "a work call reached the job process: {job_log:?}");
+    assert!(pid_job != pid_work && pid_job != pid_a && pid_work != pid_a, "{pid_a} {pid_work} {pid_job}");
+    engine::retire_window(&handle, A);
+    engine::retire_window(&handle, B);
+}
+
+#[test]
 fn a_cancel_reaches_the_job_process_and_the_handler_answers_its_partial_result() {
     let Some(python) = provisioned_python() else { return };
     let live = live_app(&python);
@@ -622,7 +701,7 @@ fn a_cancel_reaches_the_job_process_and_the_handler_answers_its_partial_result()
 }
 
 #[test]
-fn a_destroyed_windows_window_and_job_processes_both_stop() {
+fn a_destroyed_windows_window_work_and_job_processes_all_stop() {
     let Some(python) = provisioned_python() else { return };
     let live = live_app(&python);
     let handle = live.app.handle().clone();
@@ -632,20 +711,27 @@ fn a_destroyed_windows_window_and_job_processes_both_stop() {
     let pid_window = pid_of(&live, A, 100);
     send(&live, A, gated(1, "distill", &gate));
     let (pid_job, _, _) = gated_result(&await_response(&live.a, 1, Duration::from_secs(120)));
-    assert_ne!(pid_window, pid_job);
-    assert!(alive(pid_window) && alive(pid_job));
+    send(&live, A, gated(2, "audit_space_usage", &gate));
+    let (pid_work, _, _) = gated_result(&await_response(&live.a, 2, Duration::from_secs(120)));
+    assert!(pid_window != pid_job && pid_window != pid_work && pid_job != pid_work);
+    assert!(alive(pid_window) && alive(pid_job) && alive(pid_work));
     engine::retire_window(&handle, A);
     wait_dead(pid_window, Duration::from_secs(30));
     wait_dead(pid_job, Duration::from_secs(30));
+    wait_dead(pid_work, Duration::from_secs(30));
     assert!(
-        tauri::async_runtime::block_on(engine::write_request(&handle, A, gated(2, "distill", &gate))).is_err(),
+        tauri::async_runtime::block_on(engine::write_request(&handle, A, gated(3, "distill", &gate))).is_err(),
         "a destroyed window started a job process"
+    );
+    assert!(
+        tauri::async_runtime::block_on(engine::write_request(&handle, A, gated(4, "audit_space_usage", &gate))).is_err(),
+        "a destroyed window started a work process"
     );
     engine::retire_window(&handle, B);
 }
 
 #[test]
-fn a_closed_windows_job_write_drains_before_its_processes_stop() {
+fn a_closed_windows_job_and_work_writes_drain_before_its_processes_stop() {
     let _guard = DRAIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var(engine::ENGINE_DRAIN_ENV);
     let Some(python) = provisioned_python() else { return };
@@ -661,22 +747,28 @@ fn a_closed_windows_job_write_drains_before_its_processes_stop() {
     let root = claim_output(&live, B, &out);
     send(&live, B, gated(1, "distill", &open));
     let (pid_job, _, _) = gated_result(&await_response(&live.b, 1, Duration::from_secs(120)));
+    send(&live, B, gated(2, "audit_space_usage", &open));
+    let (pid_work, _, _) = gated_result(&await_response(&live.b, 2, Duration::from_secs(120)));
+    assert_ne!(pid_job, pid_work);
 
-    send(&live, B, gated(2, "distill", &gate));
+    send(&live, B, gated(3, "distill", &gate));
+    send(&live, B, gated(4, "audit_space_usage", &gate));
+    assert_eq!(handle.state::<EngineRouter>().writes_in_flight(None), 2);
     engine::retire_window(&handle, B);
     live.app.state::<ClaimState>().release_label(B);
     assert!(
         !tauri::async_runtime::block_on(engine::wait_for_writes(&handle, Duration::from_secs(2))),
-        "a closed window's job write was cut off"
+        "a closed window's job and work writes were cut off"
     );
-    assert!(alive(pid_job));
+    assert!(alive(pid_job) && alive(pid_work));
     assert!(
         !live.app.state::<ClaimState>().claim_roots(std::slice::from_ref(&root), A).unwrap().granted,
-        "the write's folder was released while the job was running"
+        "the write's folder was released while the job and work calls were running"
     );
     std::fs::write(&gate, b"").unwrap();
     assert!(tauri::async_runtime::block_on(engine::wait_for_writes(&handle, Duration::from_secs(60))));
     wait_dead(pid_job, Duration::from_secs(30));
+    wait_dead(pid_work, Duration::from_secs(30));
     wait_dead(pid_window, Duration::from_secs(30));
     assert!(
         live.app.state::<ClaimState>().claim_roots(std::slice::from_ref(&root), A).unwrap().granted,
@@ -686,7 +778,7 @@ fn a_closed_windows_job_write_drains_before_its_processes_stop() {
 }
 
 #[test]
-fn an_assent_restart_replaces_an_idle_job_process() {
+fn an_assent_restart_replaces_idle_job_and_work_processes() {
     let _guard = DRAIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var(engine::ENGINE_DRAIN_ENV);
     let Some(python) = provisioned_python() else { return };
@@ -697,11 +789,18 @@ fn an_assent_restart_replaces_an_idle_job_process() {
     std::fs::write(&gate, b"").unwrap();
     send(&live, A, gated(1, "distill", &gate));
     let (before, _, _) = gated_result(&await_response(&live.a, 1, Duration::from_secs(120)));
+    send(&live, A, gated(2, "audit_space_usage", &gate));
+    let (work_before, _, _) = gated_result(&await_response(&live.a, 2, Duration::from_secs(120)));
     tauri::async_runtime::block_on(engine::restart_for_assent(&handle));
     wait_dead(before, Duration::from_secs(10));
-    send(&live, A, gated(2, "distill", &gate));
-    let (after, _, _) = gated_result(&await_response(&live.a, 2, Duration::from_secs(120)));
+    wait_dead(work_before, Duration::from_secs(10));
+    send(&live, A, gated(3, "distill", &gate));
+    let (after, _, _) = gated_result(&await_response(&live.a, 3, Duration::from_secs(120)));
     assert_ne!(before, after);
+    send(&live, A, gated(4, "audit_space_usage", &gate));
+    let (work_after, _, _) = gated_result(&await_response(&live.a, 4, Duration::from_secs(120)));
+    assert_ne!(work_before, work_after);
+    assert_ne!(work_after, after);
     engine::retire_window(&handle, A);
     engine::retire_window(&handle, B);
 }
@@ -790,6 +889,76 @@ fn a_job_process_is_given_the_windows_credentials_read_only() {
     engine::retire_window(&handle, B);
 }
 
+#[test]
+fn a_work_process_is_given_the_windows_credentials_read_only() {
+    let Some(python) = provisioned_python() else { return };
+    let live = live_app(&python);
+    let handle = live.app.handle().clone();
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    let path = |name: &str| root.join(name.replace('/', std::path::MAIN_SEPARATOR_STR)).to_string_lossy().into_owned();
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("tests").join("fixtures").join("sample.pdf");
+    let sample = sample.to_string_lossy().into_owned();
+    for folder in ["pw", "cert", "owner"] {
+        std::fs::create_dir(root.join(folder)).unwrap();
+    }
+    let identity = call_ok(&live, B, 1, "test_identity", serde_json::json!({ "folder": path("") }));
+    let pfx = identity["pfx"].as_str().unwrap().to_string();
+    call_ok(&live, B, 2, "encrypt", serde_json::json!({
+        "file": sample, "output": path("pw/doc.pdf"), "user_password": "u", "owner_password": "o",
+    }));
+    call_ok(&live, B, 3, "encrypt_pubkey", serde_json::json!({
+        "file": sample, "output": path("cert/doc.pdf"), "certs": [identity["cert"]],
+    }));
+    call_ok(&live, B, 4, "encrypt", serde_json::json!({
+        "file": sample, "output": path("owner/doc.pdf"), "user_password": "u2", "owner_password": "o2",
+    }));
+    std::fs::copy(path("pw/doc.pdf"), path("pw/stage.pdf")).unwrap();
+
+    assert_eq!(call_ok(&live, B, 5, "open_document", serde_json::json!({ "path": path("pw/doc.pdf"), "password": "u" }))["opener"], "user");
+    assert_eq!(call_ok(&live, B, 6, "share_document", serde_json::json!({ "path": path("pw/doc.pdf"), "alias": path("pw/stage.pdf") }))["shared"], true);
+    assert_eq!(call_ok(&live, B, 7, "open_pubkey_document", serde_json::json!({
+        "path": path("cert/doc.pdf"), "pfx": pfx, "password": "test-pass",
+    }))["opener"], "recipient");
+    let owner = call_ok(&live, B, 8, "open_document_attempt", serde_json::json!({ "path": path("owner/doc.pdf"), "password": "o2" }));
+    assert_eq!(owner["document"]["opener"], "owner");
+
+    // Every document reads in the work process, including the user-password
+    // copy and its stage, which open only with the credential.
+    for (id, file) in [(9, "pw/doc.pdf"), (10, "pw/stage.pdf"), (11, "cert/doc.pdf"), (12, "owner/doc.pdf")] {
+        call_ok(&live, B, id, "extract_text", serde_json::json!({ "file": path(file) }));
+    }
+
+    let gate = root.join("gate");
+    std::fs::write(&gate, b"").unwrap();
+    send(&live, B, gated(13, "audit_space_usage", &gate));
+    let (pid_work, _, log) = gated_result(&await_response(&live.b, 13, Duration::from_secs(120)));
+    assert_ne!(pid_work, pid_of(&live, B, 14));
+    let ran = |method: &str| log.iter().filter(|(m, _)| m == method).count();
+    assert_eq!(ran("open_document"), 2, "the user and the certificate credential: {log:?}");
+    assert_eq!(ran("share_document"), 1, "{log:?}");
+    assert_eq!(ran("extract_text"), 4, "{log:?}");
+    for in_place in ["open_document_attempt", "open_pubkey_document", "pubkey_reattach", "unlock"] {
+        assert_eq!(ran(in_place), 0, "the work process ran {in_place}: {log:?}");
+    }
+    assert!(log.iter().all(|(_, ok)| *ok), "a credential frame or a read was refused: {log:?}");
+
+    // A document closed in the window leaves the work process at once: the
+    // work process receives the close while its only request is still running.
+    let waiting = root.join("waiting");
+    send(&live, B, gated(15, "audit_space_usage", &waiting));
+    call_ok(&live, B, 16, "close_document", serde_json::json!({ "path": path("pw/doc.pdf") }));
+    std::fs::write(&waiting, b"close_document").unwrap();
+    let reply = await_response(&live.b, 15, Duration::from_secs(120));
+    let received = gated_received(&reply);
+    assert_eq!(received.iter().filter(|m| *m == "close_document").count(), 1, "{received:?}");
+    send(&live, B, request(17, "extract_text", serde_json::json!({ "file": path("pw/stage.pdf") })));
+    let closed = await_response(&live.b, 17, Duration::from_secs(120));
+    assert!(closed.get("error").is_some(), "a closed document's alias still opened: {closed}");
+    engine::retire_window(&handle, A);
+    engine::retire_window(&handle, B);
+}
+
 /// The bytes and modification time of `path`.
 fn file_state(path: &Path) -> (Vec<u8>, std::time::SystemTime) {
     (std::fs::read(path).unwrap(), std::fs::metadata(path).unwrap().modified().unwrap())
@@ -825,8 +994,8 @@ fn a_job_process_given_credentials_never_opens_or_writes_the_documents_files() {
     call_ok(&live, A, 3, "encrypt_pubkey", serde_json::json!({
         "file": sample, "output": cert.to_string_lossy(), "certs": [identity["cert"]],
     }));
-    call_ok(&live, A, 4, "open_document", serde_json::json!({ "path": pw.to_string_lossy(), "password": "u" }));
-    call_ok(&live, A, 5, "open_pubkey_document", serde_json::json!({
+    let user = call_ok(&live, A, 4, "open_document", serde_json::json!({ "path": pw.to_string_lossy(), "password": "u" }));
+    let recipient = call_ok(&live, A, 5, "open_pubkey_document", serde_json::json!({
         "path": cert.to_string_lossy(), "pfx": identity["pfx"], "password": "test-pass",
     }));
     // Every file the window's opens read or wrote: the working copies, the
@@ -846,7 +1015,13 @@ fn a_job_process_given_credentials_never_opens_or_writes_the_documents_files() {
     let gate = root.join("gate");
     std::fs::write(&gate, b"").unwrap();
     send(&live, A, gated(6, "distill", &gate));
-    let (_, _, log) = gated_result(&await_response(&live.a, 6, Duration::from_secs(120)));
+    let reply = await_response(&live.a, 6, Duration::from_secs(120));
+    let (_, _, log) = gated_result(&reply);
+    // Each held frame carried the first trailer /ID the window's open read.
+    let mut opened_ids: Vec<String> =
+        [&user, &recipient].iter().map(|open| open["id"].as_str().expect("an open answers its /ID").to_string()).collect();
+    opened_ids.sort();
+    assert_eq!(reply["result"]["document_ids"], serde_json::json!(opened_ids), "{reply}");
     let found = call_ok(&live, A, 7, "search_in_files", serde_json::json!({ "paths": [other.to_string_lossy()], "query": "a" }));
     assert_eq!(found["errors"], serde_json::json!([]), "{found}");
     #[cfg(windows)]

@@ -38,6 +38,7 @@ mod snapshot;
 mod snapshot_save;
 mod page_commit;
 mod file_publication;
+mod reader_copy;
 mod folder_claims;
 #[cfg(windows)]
 mod process_job;
@@ -299,6 +300,7 @@ pub fn run() {
         .manage(session::QuitAcks::new())
         .manage(prompt_turn::PromptTurns::new())
         .manage(page_commit::PageCommitState::default())
+        .manage(reader_copy::ReaderCopies::default())
         .manage(scanner::ScannerSessions::new())
         .manage(commands::StartupEntryNotice::new())
         .manage(shell_menu::RepairNotice::new())
@@ -388,6 +390,8 @@ pub fn run() {
 
             commands::create_working_copy,
             commands::snapshot,
+            reader_copy::create_reader_copy,
+            reader_copy::remove_reader_copy,
             page_commit::publish_page_commit,
             page_commit::abort_page_commit,
             page_commit::acknowledge_page_commit,
@@ -768,6 +772,8 @@ mod tests {
             "commands::take_unreadable_records,",
             "app_windows::claim_output_roots,",
             "app_windows::release_output_roots,",
+            "reader_copy::create_reader_copy,",
+            "reader_copy::remove_reader_copy,",
         ] {
             assert!(handlers.contains(command), "{command} is not registered");
         }
@@ -777,6 +783,7 @@ mod tests {
         let length = source[start..].find(".plugin(").expect("the first plugin");
         let builder = &source[start..start + length];
         assert!(builder.contains(".manage(commands::UnreadableRecords::new())"));
+        assert!(builder.contains(".manage(reader_copy::ReaderCopies::default())"));
     }
 
     #[test]

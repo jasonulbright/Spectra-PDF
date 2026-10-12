@@ -25,7 +25,7 @@
  * refusal path is exercised in their place.
  */
 import { resolve } from 'node:path';
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
@@ -36,6 +36,27 @@ import {
   invokeAppCommand,
   closeAllFiles,
 } from '../support/harness.js';
+
+/** The bar's placeholder while the page is being read, as every shipped
+ * catalog spells it: the first read of a window starts its work process, and
+ * until it answers the bar shows this instead of a position. */
+function preparingTexts(): Set<string> {
+  const locales = resolve(__dirname, '..', '..', 'src', 'renderer', 'locales');
+  const texts = new Set<string>();
+  // The locales folder also holds files that are not catalogs
+  // (engine-messages.tsv); a catalog is a folder with a chrome.json.
+  const catalogs = readdirSync(locales, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(resolve(locales, entry.name, 'chrome.json')))
+    .map((entry) => entry.name);
+  if (catalogs.length === 0) throw new Error(`no locale catalog under ${locales}`);
+  for (const locale of catalogs) {
+    const catalog = JSON.parse(readFileSync(resolve(locales, locale, 'chrome.json'), 'utf8')) as Record<string, string>;
+    const text = catalog['canvas.readAloud.preparing'];
+    if (text === undefined) throw new Error(`${locale} has no canvas.readAloud.preparing`);
+    texts.add(text.trim());
+  }
+  return texts;
+}
 
 const LINES = [
   'The first sentence of the document sits here. A second sentence follows it.',
@@ -181,10 +202,14 @@ describe('read out loud', () => {
     await invokeAppCommand('view.readAloud.page');
     const status = await $('[data-testid="read-aloud-status"]');
     await status.waitForExist({ timeout: 15_000 });
-    await browser.waitUntil(async () => (await status.getText()).trim().length > 0, {
-      timeout: 20_000,
-      timeoutMsg: 'the bar never reported a position',
-    });
+    const preparing = preparingTexts();
+    await browser.waitUntil(
+      async () => {
+        const shown = (await status.getText()).trim();
+        return shown.length > 0 && !preparing.has(shown);
+      },
+      { timeout: 20_000, timeoutMsg: 'the bar never reported a position' },
+    );
     // The fixture is untagged, so the page reads in the extraction's order and
     // the bar says only which page — never the tagged-order wording.
     const text = await status.getText();
