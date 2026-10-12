@@ -502,7 +502,7 @@ describe('dictionary keys written with hex escapes (7.3.5)', () => {
 });
 
 describe('the decoded-key scan', () => {
-  it('decodes no key in a dictionary whose keys carry no escape', async () => {
+  it('decodes no key in a dictionary whose keys carry no escape, and every key once one does', async () => {
     const doc = await PDFDocument.create();
     const dict = doc.context.obj({ Type: 'Annot', Subtype: 'Ink', Rect: [0, 0, 1, 1], C: [0, 0, 1] });
     const decode = vi.spyOn(PDFName.prototype, 'asBytes');
@@ -511,8 +511,10 @@ describe('the decoded-key scan', () => {
       expect(entryOf(dict, 'Border')).toBeUndefined();
       expect(decode).not.toHaveBeenCalled();
       dict.set(PDFName.of('B#6frder'), doc.context.obj([0, 0, 3]));
+      // With an escaped key present every key is read by decoded spelling, so
+      // the later of two spellings can win.
       expect(entryOf(dict, 'Border')).toBeInstanceOf(PDFArray);
-      expect(decode).toHaveBeenCalledTimes(1);
+      expect(decode).toHaveBeenCalledTimes(dict.entries().length);
     } finally {
       decode.mockRestore();
     }
@@ -529,5 +531,114 @@ describe('an annotation whose /OC is null', () => {
     const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
     expect(annots.size()).toBe(1);
     expect(annots.lookup(0, PDFDict).get(PDFName.of('OC'), true)).toBeUndefined();
+  });
+});
+
+describe('a key whose `#` the file wrote as #23 (7.3.5)', () => {
+  const ink = (extra: (ctx: PDFContext) => Record<string, unknown>) => (ctx: PDFContext) => ctx.obj({
+    Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...extra(ctx),
+  });
+  const cases: [string, (ctx: PDFContext) => Record<string, unknown>, [string, string]][] = [
+    ['/B#2353 is not /BS', () => ({ BZZZZZ: { W: 3 } }), ['/BZZZZZ', '/B#2353']],
+    ['/A#2350 is not /AP', (ctx) => ({ AZZZZZ: appearance(ctx) }), ['/AZZZZZ', '/A#2350']],
+    ['/S#2375btype is not /Subtype', () => ({ SZZZZZbtype: 'Highlight' }), ['/SZZZZZbtype', '/S#2375btype']],
+  ];
+  for (const [label, extra, key] of cases) {
+    it(`${label}: the Ink matches pdf.js and stays one annotation`, async () => {
+      const source = withKeys(await pageWith(ink(extra)), [key]);
+      const { pdfjs: theirs, ours } = await bothRects(source);
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual([98, 98, 152, 152]);
+      expect(await importAll(source)).toHaveLength(1);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual(['Ink']);
+      expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+    });
+  }
+
+  it('/O#2343 is not /OC: the replacement carries no layer', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Square', Rect: [20, 300, 80, 320], C: [1, 0, 0], AP: appearance(ctx),
+      OZZZZZ: ctx.register(ctx.obj({ Type: 'OCG', Name: PDFString.of('Layer') })),
+    })), [['/OZZZZZ', '/O#2343']]);
+    expect(await importAll(source)).toHaveLength(1);
+    const out = await PDFDocument.load(await commitCycle(source));
+    const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    expect(annots.size()).toBe(1);
+    expect(entryOf(annots.lookup(0, PDFDict), 'OC')).toBeUndefined();
+  });
+});
+
+describe('one key spelt two ways: the later one counts, as in pdf.js', () => {
+  const cases: [string, Record<string, unknown>, number][] = [
+    ['plain then escaped', { Border: [0, 0, 1], BZZZrder: [0, 0, 3] }, 3],
+    ['escaped then plain', { BZZZrder: [0, 0, 3], Border: [0, 0, 1] }, 1],
+  ];
+  for (const [label, borders, width] of cases) {
+    it(`${label}: width ${width}`, async () => {
+      const source = withKeys(await pageWith((ctx) => ctx.obj({
+        Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...borders,
+      })), [['/BZZZrder', '/B#6frder']]);
+      const { pdfjs: theirs, ours } = await bothRects(source);
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual([100 - 2 * width, 100 - 2 * width, 150 + 2 * width, 150 + 2 * width]);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual(['Ink']);
+      expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+    });
+  }
+});
+
+describe('a dimension line whose /Measure key is escaped', () => {
+  const line = (key: string) => (ctx: PDFContext) => ctx.obj({
+    Type: 'Annot', Subtype: 'Line', Rect: [50, 50, 200, 60], L: [60, 55, 190, 55], C: [0, 0, 0], AP: appearance(ctx),
+    [key]: ctx.obj({ Type: 'Measure', R: PDFString.of('1 in = 1 ft') }),
+  });
+  const cases: [string, () => Promise<Uint8Array>][] = [
+    ['/Measure', () => pageWith(line('Measure'))],
+    ['/#4deasure', async () => withKeys(await pageWith(line('ZZZeasure')), [['/ZZZeasure', '/#4deasure']])],
+  ];
+  for (const [label, build] of cases) {
+    it(`${label}: is refused by the measure gate and keeps its measure dictionary`, async () => {
+      const source = await build();
+      expect(await importAll(source)).toHaveLength(0);
+      const out = await PDFDocument.load(await commitCycle(source));
+      const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+      expect(annots.size()).toBe(1);
+      expect(entryOf(annots.lookup(0, PDFDict), 'Measure')).toBeInstanceOf(PDFDict);
+    });
+  }
+});
+
+describe('an appearance state spelt two ways', () => {
+  it('takes the later one, as pdf.js does: a non-stream there is no appearance', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], AS: 'On',
+      AP: ctx.obj({ N: ctx.obj({
+        On: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })),
+        OZZZ: PDFString.of('x'),
+      }) }),
+    })), [['/OZZZ', '/O#6e']]);
+    const { pdfjs: theirs, ours } = await bothRects(source);
+    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([98, 98, 152, 152]);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+});
+
+describe('a decoded name holding a `#` pair', () => {
+  it('/AS /A#2341 names state A#41, not AA: there is no appearance, as in pdf.js', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], AS: 'AZZZZZ',
+      AP: ctx.obj({ N: ctx.obj({ AA: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })) }) }),
+    })), [['/AZZZZZ', '/A#2341']]);
+    const { pdfjs: theirs, ours } = await bothRects(source);
+    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([98, 98, 152, 152]);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
   });
 });
