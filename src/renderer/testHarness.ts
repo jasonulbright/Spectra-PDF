@@ -13,8 +13,10 @@ import { app, dialog, file, engine, pinStoreCertificates, scanner as scannerBrid
 import { emit } from '@tauri-apps/api/event';
 import { gatesWaitingFor, runCommitGate } from './lib/commit-gate';
 import { holdRewriteEngineSteps } from './lib/workspace-rewrite';
+import { holdReaderCopies } from './lib/reader-copy';
 
 let rewriteHold: ReturnType<typeof holdRewriteEngineSteps> | null = null;
+let readerHold: ReturnType<typeof holdReaderCopies> | null = null;
 const handOffHolds = new Map<HandOffStage, ReturnType<typeof holdHandOff>>();
 import { windowLabel } from './lib/window-label';
 import {
@@ -24,6 +26,7 @@ import {
   type PlatformFeature,
 } from './lib/platform-capabilities';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
+import { rebuildTextLayers } from './lib/text-layer-rebuild';
 import {
   invokeCommand as invokeRegisteredCommand,
   isCommandEnabled,
@@ -1562,6 +1565,16 @@ export interface TestHarness {
   holdRewriteEngineSteps: () => void;
   releaseRewriteEngineSteps: () => void;
   rewriteEngineStepsWaiting: () => number;
+  /** Holds every engine call that runs on a reader copy, after its copies
+   * exist and before its engine step, until `releaseReaderCopies`;
+   * `readerCopiesWaiting` counts the calls held there. */
+  holdReaderCopies: () => void;
+  releaseReaderCopies: () => void;
+  readerCopiesWaiting: () => number;
+  /** Rebuilds every mounted text layer over the same page geometry, as a new
+   * pdf.js proxy for the same bytes does. Each layer's `data-text-build`
+   * advances when its rebuild has been swapped in. */
+  rebuildTextLayers: () => void;
   /** Holds every hand-off of a document to another window at `stage` until
    * `releaseHandOff(stage)`. `committed`: after the page tier came to rest
    * and its revision was noted, before the reservation. `sealed`: after the
@@ -2729,6 +2742,16 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       rewriteHold = null;
     },
     rewriteEngineStepsWaiting: () => rewriteHold?.waiting() ?? 0,
+    holdReaderCopies: () => {
+      readerHold?.release();
+      readerHold = holdReaderCopies();
+    },
+    releaseReaderCopies: () => {
+      readerHold?.release();
+      readerHold = null;
+    },
+    readerCopiesWaiting: () => readerHold?.waiting() ?? 0,
+    rebuildTextLayers: () => rebuildTextLayers(),
     holdHandOff: (stage) => {
       handOffHolds.get(stage)?.release();
       handOffHolds.set(stage, holdHandOff(stage));

@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Dokument- og sidemetadata",
   "panel.sanitize.category.prior_revisions": "Tidligere revisjoner av denne filen",
   "panel.sanitize.category.signatures": "Digitale signaturer",
+  "panel.sanitize.identifierKept": "beholdes fordi dokumentet forblir kryptert",
   "panel.sanitize.category.thumbnails": "Sideminiatyrer",
   "panel.sanitize.category.unreferenced_objects": "Objekter ingenting peker på",
   "panel.sanitize.certified": "Dette dokumentet er sertifisert, noe som fastsetter hva som kan endres i det. En opprydding endrer mer enn det tillater.",

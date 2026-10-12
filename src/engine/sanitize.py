@@ -216,7 +216,10 @@ def _detect_metadata(pdf, page_numbers):
         # go away; a full save mints a fresh pair and the identifier the file
         # arrived with stops being in it. Reported, never counted — a count
         # that can never reach zero would make the after-report unreadable.
-        detail.append({"where": "document identifier", "keys": ["ID"], "replaced": True})
+        # A document rewritten under its own encryption keeps its identifier
+        # (`_remove_metadata`); every other write replaces it.
+        kept = getattr(pdf, "_spectra_preserve_encryption", False)
+        detail.append({"where": "document identifier", "keys": ["ID"], "replaced": not kept})
     return count, detail, {}
 
 
@@ -872,9 +875,14 @@ def _remove_metadata(pdf) -> int:
 
     The document identifier is deliberately DELETED rather than cleared: a
     writer mints a fresh pair when the trailer carries none, so the identifier
-    the file arrived with stops being in it. Clearing the XMP packet instead of
-    deleting it leaves a packet behind, which is what makes a second audit
-    still report the surface.
+    the file arrived with stops being in it. A document written back under
+    its own encryption (opened with the user password) keeps it: ISO 32000-2
+    7.5.5 (Table 15, ID) requires the identifier whenever the trailer has
+    /Encrypt, and for revision 4 and earlier the file encryption key is
+    computed from its first element (7.6.4.3.2, Algorithm 2, step e), so a
+    new identifier would stop the password from opening the file.
+    Clearing the XMP packet instead of deleting it leaves a packet behind,
+    which is what makes a second audit still report the surface.
     """
     removed = 0
     info = pdf.trailer.get("/Info")
@@ -891,7 +899,7 @@ def _remove_metadata(pdf) -> int:
             if key in page.obj:
                 del page.obj[key]
                 removed += 1
-    if "/ID" in pdf.trailer:
+    if "/ID" in pdf.trailer and not getattr(pdf, "_spectra_preserve_encryption", False):
         del pdf.trailer["/ID"]
     return removed
 

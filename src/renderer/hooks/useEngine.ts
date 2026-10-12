@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { engine, dialog, batch, file as fileIO } from '../lib/tauri-bridge';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { engine, dialog, batch, file as fileIO, readerCopy } from '../lib/tauri-bridge';
 import { EngineError } from '../lib/engine-messages';
 import { runCommitGate } from '../lib/commit-gate';
 import { exclusiveKeys, lockKeysFor, withFileLock, withWriteChain } from '../lib/engine-lock';
@@ -9,6 +9,9 @@ import { beginInteractive, submitIdle, trackInteractive } from '../lib/engine-id
 import { isHealthMethod, runHealthSweep, type EngineHealthReply } from '../lib/doc-health-engine';
 import { withHealthInput } from '../lib/doc-health-input';
 import { restoreLostCredentials } from '../lib/credential-recovery';
+import { withReaderCopies, type ReaderCopyIo } from '../lib/reader-copy';
+import { releaseStageCredential, shareReaderCredential } from '../lib/stage-credentials';
+import { useReadAppState } from '../state/AppStateProvider';
 import type { PdfBuffer } from '../state/types';
 import type { EngineCallOptions } from '../lib/engine-call';
 
@@ -215,6 +218,19 @@ export function bindCancel(
 export function useEngine() {
   const [ready, setReady] = useState(false);
   const { track } = useOperationQueue();
+  const readState = useReadAppState();
+  const readerCopies = useMemo((): ReaderCopyIo => ({
+    fileAt: (workingPath) => {
+      for (const file of readState().files.values()) {
+        if (file.workingPath === workingPath && !file.importOnly) return file;
+      }
+      return undefined;
+    },
+    create: readerCopy.create,
+    remove: readerCopy.remove,
+    lend: shareReaderCredential,
+    giveBack: releaseStageCredential,
+  }), [readState]);
 
   useEffect(() => {
     let mounted = true;
@@ -246,15 +262,18 @@ export function useEngine() {
   // entry, no credential recovery. Background reads and the credential
   // prompts themselves use it. Recovery here would open a password prompt
   // from a background read, and again after each cancel, with no user action.
+  // A long reader (`READER_COPY_METHODS`) reads a private copy instead of the
+  // working copy, so it holds no lock of the working path while it runs.
   const callLocked = useCallback((
     method: string,
     params: Record<string, unknown> = {},
     options?: EngineCallOptions,
   ): Promise<EngineResult> =>
-    withFileLock(lockKeysFor(method, params), () => {
-      options?.assertCurrent?.();
-      return rawCall(method, params);
-    }), [rawCall]);
+    withReaderCopies(method, params, lockKeysFor(method, params), readerCopies, (readParams, readClaims, dispatchRead) =>
+      withFileLock(readClaims, () => {
+        options?.assertCurrent?.();
+        return dispatchRead(() => rawCall(method, readParams));
+      })), [rawCall, readerCopies]);
 
   const call = useCallback(async (method: string, params: Record<string, unknown> = {}, options?: EngineCallOptions): Promise<EngineResult> => {
     options?.assertCurrent?.();
@@ -291,13 +310,18 @@ export function useEngine() {
         // rename silently wins and the earlier work is lost. A staged rewrite
         // reads its path under a shared lock while its engine step runs;
         // the chain makes this write wait for that rewrite's publication.
-        return (await withWriteChain(exclusiveKeys(claims), () => withFileLock(claims, () => {
-          options?.assertCurrent?.();
-          return track(method, params, async () => {
+        // A long reader copies its working copies first, under one shared
+        // claim of those paths and nothing else, and then claims the copies
+        // instead: no copy is claimed while the call's own claims are held. The queue
+        // entry reads the caller's parameters, never the copy.
+        return (await withReaderCopies(method, params, claims, readerCopies, (readParams, readClaims, dispatchRead) =>
+          withWriteChain(exclusiveKeys(claims), () => withFileLock(readClaims, () => {
             options?.assertCurrent?.();
-            return rawCall(method, params, options);
-          });
-        }))) as EngineResult;
+            return track(method, params, async () => {
+              options?.assertCurrent?.();
+              return dispatchRead(() => rawCall(method, readParams, options));
+            });
+          })))) as EngineResult;
       } finally {
         release();
         written();
@@ -309,7 +333,7 @@ export function useEngine() {
     // Undo/Save/publication, without running the commit gate or creating an
     // operation-queue entry.
     return callLocked(method, params, options);
-  }, [callLocked, rawCall, track]);
+  }, [callLocked, rawCall, track, readerCopies]);
 
   // Background work nobody asked for: a passive, read-only sweep driven by a
   // document changing rather than by a user. It runs in the health worker, one

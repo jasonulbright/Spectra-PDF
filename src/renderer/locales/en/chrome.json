@@ -5557,6 +5557,7 @@
   "panel.sanitize.fieldMode": "Form fields",
   "panel.sanitize.fieldModeFlatten": "Flatten (keep the look, lose the fields)",
   "panel.sanitize.fieldModeRemove": "Remove the fields",
+  "panel.sanitize.identifierKept": "kept because the document stays encrypted",
   "panel.sanitize.includeOcr_one": "Also remove {{count}} recognized-text run",
   "panel.sanitize.includeOcr_other": "Also remove {{count}} recognized-text runs",
   "panel.sanitize.moreRows": "Only the first findings are listed.",

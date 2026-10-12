@@ -7,12 +7,14 @@ requested seconds unless cancelled; `test_pid` answers the process id;
 (password "test-pass") into a folder. Nothing in the shipped engine
 registers any of them.
 
-`distill` (a job method) and `create_pdf_folders` (a run method) are
-replaced by one gated handler: it waits until the file named by `gate`
-exists, or returns early when its request is cancelled, and answers its
-process id, whether it was cancelled, the log of every request this
-process served before it as `[method, succeeded]` pairs, and the methods of
-every line its input reader has received so far. A gate file whose content
+`audit_space_usage` (a work method), `distill` (a job method) and
+`create_pdf_folders` (a run method) are replaced by one gated handler: it
+waits until the file named by `gate` exists, or returns early when its
+request is cancelled, and answers its process id, whether it was cancelled,
+the log of every request this process served before it as
+`[method, succeeded]` pairs, the methods of every line its input reader
+has received so far, and the first trailer /ID (hex) each credential this
+process holds was registered with. A gate file whose content
 names a method also waits until a line of that method has been received.
 `linger` starts a thread that never ends, so the process does not exit
 when its input closes. The harness registers last, so these replace the
@@ -26,7 +28,7 @@ import time
 sys.dont_write_bytecode = True
 sys.path.insert(0, sys.argv[1])
 
-from engine import ipc  # noqa: E402
+from engine import credentials, ipc  # noqa: E402
 
 _run = ipc.JsonRpcServer.run
 _handle = ipc.JsonRpcServer._handle
@@ -68,6 +70,9 @@ def _gated(gate: str, linger: bool = False, **_ignored) -> dict:
         "cancelled": cancelled,
         "log": list(_served),
         "received": list(_received),
+        "document_ids": sorted(
+            credential.document_id or "" for credential in credentials._documents.values()
+        ),
     }
 
 
@@ -128,6 +133,7 @@ def _run_with_test_methods(self, *args, **kwargs):
     self.register("test_sleep", _sleep)
     self.register("test_pid", os.getpid)
     self.register("test_identity", _identity)
+    self.register("audit_space_usage", _gated)
     self.register("distill", _gated)
     self.register("create_pdf_folders", _gated)
     return _run(self, *args, **kwargs)

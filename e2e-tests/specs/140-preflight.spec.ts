@@ -39,6 +39,10 @@ import {
   preflightFixAll,
   preflightAuthoredFix,
   a11yFindingsOnPage,
+  holdReaderCopies,
+  releaseReaderCopies,
+  readerCopiesWaiting,
+  readerFolders,
 } from '../support/harness.js';
 
 /**
@@ -174,6 +178,51 @@ describe('Print preflight', () => {
     expect(by.trim_box.status).toBe('warn');
     expect(by.hairlines_absent.status).toBe('warn');
     expect(by.printing_annotations.status).toBe('warn');
+  });
+
+  it('checks a private copy of the working copy, and reports the same', async () => {
+    const working = (await getState()).activeFile!.workingPath;
+    const profile = (await preflightSnapshot())!.profile;
+    // The same check of the working copy itself, with no copy made.
+    const direct = await browser.executeAsync((file: string, id: string, done: (r: unknown) => void) => {
+      const w = window as any;
+      Promise.all([w.__TAURI_INTERNALS__.invoke('get_gs_path'), w.__TAURI_INTERNALS__.invoke('get_edit_font_path')])
+        .then(([gs, fonts]: [string, string]) => w.__SPECTRA_TEST__.engineRequestWithId(
+          'preflight', { file, profile: id, gs_path: gs, font_dir: fonts }, 1404001))
+        .then(done).catch((e: unknown) => done(`ERROR:${String(e)}`));
+    }, working, profile) as {
+      file: string;
+      profile: { id: string };
+      summary: Record<string, number>;
+      checks: { id: string; status: string; params: unknown }[];
+    } | string;
+    expect(String(direct)).not.toMatch(/^ERROR:/);
+    const before = direct as Exclude<typeof direct, string>;
+    expect(before.file).toBe(working);
+    expect(before.profile.id).toBe(profile);
+    expect(readerFolders(working)).toEqual([]);
+    await holdReaderCopies();
+    try {
+      await browser.execute(() => {
+        const w = window as any;
+        w.__preflightRecheck = { done: false };
+        void w.__SPECTRA_TEST__.preflightRecheck().finally(() => { w.__preflightRecheck.done = true; });
+      });
+      await browser.waitUntil(async () => (await readerCopiesWaiting()) === 1,
+        { timeoutMsg: 'the re-check never reached its engine step on a copy' });
+      expect(readerFolders(working)).toHaveLength(1);
+    } finally {
+      await releaseReaderCopies();
+    }
+    await browser.waitUntil(async () => (await browser.execute(() => (window as any).__preflightRecheck)).done === true,
+      { timeout: 30000, timeoutMsg: 'the re-check never settled' });
+    const after = (await preflightSnapshot())!;
+    expect(after.profile).toBe(profile);
+    expect(after.summary).toEqual(before.summary);
+    const rows = (checks: { id: string; status: string; params: unknown }[]) =>
+      checks.map((c) => [c.id, c.status, c.params] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    expect(rows(after.checks)).toEqual(rows(before.checks));
+    expect(readerFolders(working)).toEqual([]);
   });
 
   it('gives the SAME document two answers under two profiles', async () => {

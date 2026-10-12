@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Belge ve sayfa üst verileri",
   "panel.sanitize.category.prior_revisions": "Bu dosyanın önceki düzeltmeleri",
   "panel.sanitize.category.signatures": "Dijital imzalar",
+  "panel.sanitize.identifierKept": "korunur, çünkü belge şifreli kalır",
   "panel.sanitize.category.thumbnails": "Sayfa küçük resimleri",
   "panel.sanitize.category.unreferenced_objects": "Hiçbir şeyin işaret etmediği nesneler",
   "panel.sanitize.certified": "Bu belge sertifikalı; içinde nelerin değişebileceğini bildirir. Bir temizlik bunun izin verdiğinden fazlasını değiştirir.",

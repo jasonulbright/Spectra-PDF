@@ -49,6 +49,11 @@ class _Credential:
     #: (ISO 32000-2 7.6.5): it holds the recipients' seed, which reseals the
     #: plaintext working copy under the document's own recipient lists.
     handler: object = field(default=None, repr=False, compare=False)
+    #: The first element of the opened file's trailer /ID, hex (ISO 32000-2
+    #: 14.4): it identifies the document across its revisions, so bytes
+    #: offered as this document's are matched against it without opening the
+    #: working copy.
+    document_id: str | None = None
 
 
 _documents: dict[str, _Credential] = {}
@@ -573,6 +578,33 @@ def _decoded_permissions(pdf) -> dict:
     return {name: bool(getattr(pdf.allow, attr)) for name, attr in _PERMISSION_KEYS}
 
 
+def first_document_id(trailer) -> str | None:
+    """The first element of a trailer's /ID, hex, or None when it has none."""
+    try:
+        ids = trailer.get("/ID")
+        first = ids[0]
+        return bytes(first).hex() if len(bytes(first)) else None
+    except Exception:
+        return None
+
+
+def registered_document_id(path) -> bytes | None:
+    """The first trailer /ID recorded when the document at `path` was opened."""
+    credential = _credential_for(path)
+    if credential is None or credential.document_id is None:
+        return None
+    return bytes.fromhex(credential.document_id)
+
+
+def _held_document_id(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return bytes.fromhex(value).hex() or None
+    except ValueError:
+        return None
+
+
 def _open_document(path: str, password: str, *, report_wrong_password: bool) -> dict | None:
     import pikepdf
     from engine.inspect import _decrypt_in_place
@@ -597,6 +629,7 @@ def _open_document(path: str, password: str, *, report_wrong_password: bool) -> 
         permissions = _decoded_permissions(pdf)
         revision = int(pdf.encryption.R) if encrypted else None
         p = int(pdf.encryption.P) if encrypted else None
+        document_id = first_document_id(pdf.trailer)
     finally:
         pdf.close()
     if not encrypted:
@@ -609,9 +642,13 @@ def _open_document(path: str, password: str, *, report_wrong_password: bool) -> 
             if previous is not None:
                 _documents[_key(path)] = previous
             raise
-        _documents[_key(path)] = _Credential("owner", None, permissions, revision, p, _key(path))
+        _documents[_key(path)] = _Credential(
+            "owner", None, permissions, revision, p, _key(path), document_id=document_id
+        )
         return {"encrypted": True, "opener": "owner", "encryption_kept": False}
-    _documents[_key(path)] = _Credential("user", password, permissions, revision, p, _key(path))
+    _documents[_key(path)] = _Credential(
+        "user", password, permissions, revision, p, _key(path), document_id=document_id
+    )
     return {
         "encrypted": True,
         "opener": "user",
@@ -619,6 +656,7 @@ def _open_document(path: str, password: str, *, report_wrong_password: bool) -> 
         "permissions": dict(permissions),
         "revision": revision,
         "p": p,
+        "id": document_id,
     }
 
 
@@ -631,7 +669,7 @@ def open_document(path: str, password: str = "", held: dict | None = None) -> di
 
     `held` is a credential another engine process of the same window has
     already opened: `{"opener": "user" | "recipient", "permissions",
-    "revision", "p"}` as that open answered. It is recorded without opening,
+    "revision", "p", "id"}` as that open answered. It is recorded without opening,
     reading or writing any file, so a process that is given it never holds
     the working copy open and never decrypts it."""
     if held is not None:
@@ -658,6 +696,7 @@ def _register_held(path: str, password: str, held: dict) -> dict:
         int(revision) if isinstance(revision, int) else None,
         int(flags) if isinstance(flags, int) else None,
         _key(path),
+        document_id=_held_document_id(held.get("id")),
     )
     return {"encrypted": True, "opener": opener, "registered": True}
 
@@ -803,15 +842,18 @@ def restrict_to_owner(folder: str) -> None:
         kernel32.LocalFree(descriptor)
 
 
-def register_recipient(path: str, permissions: dict, flags: int, handler) -> None:
+def register_recipient(
+    path: str, permissions: dict, flags: int, handler, document_id: str | None = None
+) -> None:
     """Record a certificate open of the working copy at `path`: the
-    recipient's Table 24 grants, and the handler that reseals it on save.
-    The grants are also written beside it (`RECIPIENT_MARKER`)."""
+    recipient's Table 24 grants, the handler that reseals it on save, and the
+    first trailer /ID of the encrypted original. The grants are also written
+    beside it (`RECIPIENT_MARKER`)."""
     folder = os.path.dirname(_key(path))
     with open(os.path.join(folder, RECIPIENT_MARKER), "w", encoding="utf-8") as f:
         json.dump({"permissions": dict(permissions), "p": int(flags)}, f)
     _documents[_key(path)] = _Credential(
-        "recipient", None, dict(permissions), None, flags, _key(path), handler
+        "recipient", None, dict(permissions), None, flags, _key(path), handler, document_id
     )
 
 

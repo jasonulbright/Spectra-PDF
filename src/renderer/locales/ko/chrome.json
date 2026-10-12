@@ -5333,6 +5333,7 @@
   "panel.sanitize.category.metadata": "문서 및 페이지 메타데이터",
   "panel.sanitize.category.prior_revisions": "이 파일의 이전 개정판",
   "panel.sanitize.category.signatures": "전자 서명",
+  "panel.sanitize.identifierKept": "문서가 암호화된 상태로 유지되므로 보존됨",
   "panel.sanitize.category.thumbnails": "페이지 축소판",
   "panel.sanitize.category.unreferenced_objects": "아무것도 가리키지 않는 개체",
   "panel.sanitize.certified": "이 문서는 인증되어 변경 가능한 범위가 지정되어 있습니다. 정리는 그 범위를 넘어 변경합니다.",

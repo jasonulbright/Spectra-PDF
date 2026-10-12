@@ -10,15 +10,15 @@
 // mode. The same fixture built without the variable must drop the marker, or
 // the variable is not what decides it.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { build } from 'vite';
 import { describe, it, expect } from 'vitest';
+import { testPython } from './support/python';
 
 const root = resolve(__dirname, '..');
 const gate = resolve(root, 'scripts', 'check-release-bundle.py');
-const venvPython = resolve(root, '.venv', 'Scripts', 'python.exe');
-const python = existsSync(venvPython) ? venvPython : 'python';
+const python = testPython();
 const MARKER = '__SPECTRA_TEST__';
 
 function runGate(tree: string) {

@@ -17,6 +17,11 @@ import {
   invokeAppCommand,
   closeAllFiles,
   placeNewField,
+  commandEnabled,
+  holdReaderCopies,
+  releaseReaderCopies,
+  readerCopiesWaiting,
+  readerFolders,
 } from '../support/harness.js';
 import { VENV_PYTHON } from '../support/app-data.js';
 
@@ -90,13 +95,14 @@ async function openWithCertificate(path: string): Promise<void> {
 describe('a certificate-encrypted document saved during a rewrite', () => {
   let tmp: string;
   let source: string;
+  let plain: string;
 
   before(async () => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-certificate-save-'));
     signerCert = resolve(tmp, 'recipient.cer');
     signerPfx = resolve(tmp, 'recipient.pfx');
     execFileSync(VENV_PYTHON, ['-c', MAKE_RECIPIENT, signerCert, signerPfx]);
-    const plain = resolve(tmp, 'plain.pdf');
+    plain = resolve(tmp, 'plain.pdf');
     source = resolve(tmp, 'sealed.pdf');
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -114,6 +120,7 @@ describe('a certificate-encrypted document saved during a rewrite', () => {
   });
   after(async () => {
     await release();
+    await releaseReaderCopies();
     await closeAllFiles();
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
@@ -164,5 +171,54 @@ describe('a certificate-encrypted document saved during a rewrite', () => {
     const text = await pageText(working);
     expect(text).not.toContain('SECRET TOP LINE');
     expect(text).toContain('KEEP ME BOTTOM');
+  });
+
+  // A long reader reads a private copy of the plaintext working copy. The copy
+  // is lent the recipient credential, so what the document withholds stays
+  // withheld from a reader of the copy. The engine names the recipient lists
+  // only when the copy holds that credential; the recipient marker alone
+  // reads as an owner-password restriction.
+  it('a certificate-opened document that withholds printing has Print disabled, and its export from a copy is refused by the recipient grants', async () => {
+    const restricted = resolve(tmp, 'restricted.pdf');
+    const sealed = await browser.executeAsync((file: string, output: string, cert: string, done: (r: unknown) => void) => {
+      (window as any).__SPECTRA_TEST__.engineRequestWithId('encrypt_pubkey',
+        { file, output, certs: [cert], permissions: { print: false, copy: false } }, 4343002)
+        .then(done).catch((e: unknown) => done(`ERROR:${String(e)}`));
+    }, plain, restricted, signerCert);
+    expect(String(sealed)).not.toMatch(/^ERROR:/);
+    await closeAllFiles();
+    await openWithCertificate(restricted);
+    const working = (await getState()).activeFile!.workingPath;
+
+    expect(await commandEnabled('file.print')).toBe(false);
+
+    const exported = resolve(tmp, 'restricted.txt');
+    await holdReaderCopies();
+    try {
+      // The outcome is kept as a string: an object with an `error` key read
+      // back through WebDriver is taken for a protocol error.
+      await browser.execute((dest: string) => {
+        const w = window as any;
+        w.__restrictedExport = null as string | null;
+        w.__SPECTRA_TEST__.exportActiveAs(dest, 'txt')
+          .then(() => { w.__restrictedExport = 'exported'; })
+          .catch((e: unknown) => { w.__restrictedExport = `refused: ${e instanceof Error ? e.message : String(e)}`; });
+      }, exported);
+      await browser.waitUntil(async () => (await readerCopiesWaiting()) === 1,
+        { timeoutMsg: 'the export never reached its engine step on a copy' });
+      expect(readerFolders(working)).toHaveLength(1);
+    } finally {
+      await releaseReaderCopies();
+    }
+    let outcome: string | null = null;
+    await browser.waitUntil(async () => {
+      outcome = await browser.execute(() => (window as any).__restrictedExport as string | null);
+      return outcome !== null;
+    }, { timeoutMsg: 'the export never settled' });
+    expect(outcome).toMatch(/^refused: /);
+    expect(outcome).toContain('permissions are set by its certificate recipient lists');
+    expect(outcome).not.toMatch(/[\\/]r\d+-[0-9a-f]+[\\/]/i);
+    expect(existsSync(exported)).toBe(false);
+    expect(readerFolders(working)).toEqual([]);
   });
 });

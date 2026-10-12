@@ -5645,6 +5645,7 @@
   "panel.sanitize.category.metadata": "Metapodatki dokumenta in strani",
   "panel.sanitize.category.prior_revisions": "Prejšnje revizije te datoteke",
   "panel.sanitize.category.signatures": "Digitalni podpisi",
+  "panel.sanitize.identifierKept": "ohranjen, ker dokument ostane šifriran",
   "panel.sanitize.category.thumbnails": "Sličice strani",
   "panel.sanitize.category.unreferenced_objects": "Predmeti, na katere ne kaže nič",
   "panel.sanitize.certified": "Ta dokument je potrjen, kar določa, kaj se v njem sme spremeniti. Čiščenje spremeni več, kot to dovoljuje.",

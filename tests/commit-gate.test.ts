@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { commitPendingPageEdits, setCommitGate, runCommitGate } from '../src/renderer/lib/commit-gate';
 import { commitLockKeys, runPageCommit, PAGE_COMMIT_ATTEMPTS } from '../src/renderer/lib/page-commit-run';
-import { withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
+import { lockKeysFor, withFileLock, __lockedCount } from '../src/renderer/lib/engine-lock';
+import { withReaderCopies, type ReaderCopyIo } from '../src/renderer/lib/reader-copy';
 import { announceWorkspacePublication, hasWorkspacePublication, serializeWorkspacePublication } from '../src/renderer/lib/workspace-publication';
 import { initialState } from '../src/renderer/state/reducer';
 import type { AppState, OpenFile } from '../src/renderer/state/types';
@@ -200,6 +201,33 @@ describe('page commit locks', () => {
     await expect(commit).resolves.toEqual({ value: 'committed' });
     expect(events).toEqual(['publish B', 'recover', 'commit A locked=1']);
     await reader;
+  });
+
+  it('does not wait for a long reader of a dirty document, which holds only its copy', async () => {
+    const io: ReaderCopyIo = {
+      fileAt: path => (path === 'work-A' ? { workingPath: path } : undefined),
+      create: async path => `${path}-reader`,
+      remove: async () => true,
+      lend: async () => false,
+      giveBack: async () => {},
+    };
+    const step = deferred();
+    const dispatched = deferred();
+    const params = { file: 'work-A', output: 'out-A' };
+    const reader = withReaderCopies('export_document', params, lockKeysFor('export_document', params), io,
+      (readParams, readClaims, dispatch) => withFileLock(readClaims, () => dispatch(async () => {
+        expect(readParams.file).toBe('work-A-reader');
+        dispatched.resolve();
+        await step.promise;
+      })));
+    await dispatched.promise;
+    const events: string[] = [];
+    await expect(commitRun({ state: stateOf(['A', 'B'], ['A']) }, events)).resolves.toEqual({ value: 'committed' });
+    // The commit's own key, and the reader's copy and output.
+    expect(events).toEqual(['recover', 'commit A locked=3']);
+    step.resolve();
+    await reader;
+    expect(__lockedCount()).toBe(0);
   });
 
   it('a dirty set that grows while settling is locked again before it commits', async () => {

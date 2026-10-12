@@ -5333,6 +5333,7 @@
   "panel.sanitize.category.metadata": "文件與頁面中繼資料",
   "panel.sanitize.category.prior_revisions": "本檔案的較早修訂版",
   "panel.sanitize.category.signatures": "數位簽章",
+  "panel.sanitize.identifierKept": "保留，因為文件仍維持加密",
   "panel.sanitize.category.thumbnails": "頁面縮圖",
   "panel.sanitize.category.unreferenced_objects": "沒有任何東西指向的物件",
   "panel.sanitize.certified": "本文件已認證，認證聲明了其中可以變更的範圍。清理的變更超出該範圍所允許的程度。",

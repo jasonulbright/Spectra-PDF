@@ -5645,6 +5645,7 @@
   "panel.sanitize.category.metadata": "Metadata dokumentu a stránek",
   "panel.sanitize.category.prior_revisions": "Dřívější verze tohoto souboru",
   "panel.sanitize.category.signatures": "Digitální podpisy",
+  "panel.sanitize.identifierKept": "zachován, protože dokument zůstává zašifrovaný",
   "panel.sanitize.category.thumbnails": "Náhledy stránek",
   "panel.sanitize.category.unreferenced_objects": "Objekty, na které nic neukazuje",
   "panel.sanitize.certified": "Tento dokument je certifikovaný a certifikace určuje, co se v něm smí měnit. Čištění mění více, než to dovoluje.",

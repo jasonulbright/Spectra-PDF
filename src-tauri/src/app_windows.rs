@@ -1883,6 +1883,9 @@ pub fn on_window_focused(app: &AppHandle, label: &str) {
 /// document handed to this window and never opened is still owned by it until
 /// the claims below are released, and released first it is unrecoverable.
 /// Calling the sweep here leaves no separate call order to get wrong.
+///
+/// The reader copies go after the engine retirement: a copy the window's job
+/// process still reads cannot be removed until that process stops.
 pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     crate::tabdrag::on_window_destroyed(app, label);
     if !is_app_window(label) {
@@ -1896,6 +1899,7 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     app.state::<ComposeGate>().forget(label);
     app.state::<WindowRegistry>().forget(label);
     crate::engine::retire_window(app, label);
+    crate::reader_copy::on_window_destroyed(app, label);
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────

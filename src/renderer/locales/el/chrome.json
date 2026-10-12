@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Μεταδεδομένα εγγράφου και σελίδων",
   "panel.sanitize.category.prior_revisions": "Προγενέστερες αναθεωρήσεις αυτού του αρχείου",
   "panel.sanitize.category.signatures": "Ψηφιακές υπογραφές",
+  "panel.sanitize.identifierKept": "διατηρείται, επειδή το έγγραφο παραμένει κρυπτογραφημένο",
   "panel.sanitize.category.thumbnails": "Μικρογραφίες σελίδων",
   "panel.sanitize.category.unreferenced_objects": "Αντικείμενα στα οποία δεν δείχνει τίποτα",
   "panel.sanitize.certified": "Αυτό το έγγραφο είναι πιστοποιημένο, γεγονός που ορίζει τι επιτρέπεται να αλλάξει σε αυτό. Μια εκκαθάριση αλλάζει περισσότερα από όσα επιτρέπονται.",

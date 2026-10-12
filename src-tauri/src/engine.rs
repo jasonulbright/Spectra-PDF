@@ -20,6 +20,8 @@ pub(crate) const MAX_ENGINE_RPC_LINE_BYTES: usize = 256 * 1024 * 1024;
 pub enum ProcessClass {
     /// The window's own persistent process.
     Window,
+    /// The window's persistent work process, started on its first work call.
+    Work,
     /// The window's persistent job process, started on its first job call.
     Job,
     /// A process started for one call and ended after its answer.
@@ -30,127 +32,137 @@ pub enum ProcessClass {
 
 /// Every registered engine method and the process that serves it.
 ///
-/// Rule for a new method: `Job` when the renderer issues it per page, per
-/// document, per preview or per query and one call runs an external program
-/// (Ghostscript, Tesseract, LibreOffice) or reads a list of files; `Run`
-/// when one call covers a folder or one
-/// indivisible external run the user starts as a separate action; `Window`
-/// otherwise. Methods that share process state take one class:
+/// Rule for a new method:
+/// - `Job`: an external program (Ghostscript, Tesseract, LibreOffice)
+///   dominates the call's cost, or the call reads a list of files.
+/// - `Run`: one call covers a folder or one indivisible external run the user
+///   starts as a separate action.
+/// - `Work`: the call parses or decodes the whole document's content, walks
+///   every object or the structure tree, reads the whole file's bytes, or
+///   writes the whole file.
+/// - `Window`: everything else, plus the credential session and the page
+///   commit's engine steps.
+///
+/// A method that runs an external program only for some inputs is classified
+/// by its in-process cost. Methods that share process state take one class:
 /// `split_plan`/`split`, `list_csc_credentials`/`sign_pdf`,
-/// `print_preview`/`print_preview_cleanup`, and
-/// `render_separations`/`composite_separations`/`inspect_point`.
+/// `print_preview`/`print_preview_cleanup`,
+/// `render_separations`/`composite_separations`/`inspect_point`, and
+/// `sealed_plaintext`/`sealed_reseal`/`transplant_incremental` (the reseal
+/// lends its stage the credential the transplant then opens).
 /// `open_document`, `open_document_attempt`, `open_pubkey_document` and
-/// `unlock` rewrite the working copy in place, so they run only in the window
-/// process. `tests/test_engine_route_table.py` fails when a registered method
-/// has no row here or a row names no registered method.
+/// `unlock` rewrite the working copy in place, and `pubkey_reseal` needs the
+/// certificate handler only the window process holds, so they run only in
+/// the window process. `tests/test_engine_route_table.py` fails when a
+/// registered method has no row here or a row names no registered method.
 pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("ping", ProcessClass::Window),
-    ("merge", ProcessClass::Window),
-    ("split", ProcessClass::Window),
-    ("split_plan", ProcessClass::Window),
-    ("rotate", ProcessClass::Window),
-    ("delete", ProcessClass::Window),
+    ("merge", ProcessClass::Job),
+    ("split", ProcessClass::Work),
+    ("split_plan", ProcessClass::Work),
+    ("rotate", ProcessClass::Work),
+    ("delete", ProcessClass::Work),
     ("compress", ProcessClass::Job),
     ("grayscale", ProcessClass::Job),
     ("convert_cmyk", ProcessClass::Job),
     ("convert_pdfx", ProcessClass::Job),
-    ("optimize", ProcessClass::Window),
+    ("optimize", ProcessClass::Work),
     ("convert_pdfa", ProcessClass::Job),
-    ("encrypt", ProcessClass::Window),
-    ("grant_accessibility_permission", ProcessClass::Window),
-    ("decrypt", ProcessClass::Window),
-    ("encrypt_pubkey", ProcessClass::Window),
-    ("decrypt_pubkey", ProcessClass::Window),
+    ("encrypt", ProcessClass::Work),
+    ("grant_accessibility_permission", ProcessClass::Work),
+    ("decrypt", ProcessClass::Work),
+    ("encrypt_pubkey", ProcessClass::Work),
+    ("decrypt_pubkey", ProcessClass::Work),
     ("open_pubkey_document", ProcessClass::Window),
     ("pubkey_reseal", ProcessClass::Window),
     ("pubkey_reattach", ProcessClass::Window),
-    ("extract_text", ProcessClass::Window),
+    ("extract_text", ProcessClass::Work),
     ("search_in_files", ProcessClass::Job),
-    ("search_text_regions", ProcessClass::Window),
-    ("add_header_footer", ProcessClass::Window),
-    ("set_page_boxes", ProcessClass::Window),
-    ("content_crop", ProcessClass::Job),
+    ("search_text_regions", ProcessClass::Work),
+    ("add_header_footer", ProcessClass::Work),
+    ("set_page_boxes", ProcessClass::Work),
+    ("content_crop", ProcessClass::Work),
     ("get_page_labels", ProcessClass::Window),
-    ("set_page_labels", ProcessClass::Window),
+    ("set_page_labels", ProcessClass::Work),
     ("export_xfdf", ProcessClass::Window),
-    ("import_xfdf", ProcessClass::Window),
+    ("import_xfdf", ProcessClass::Work),
     ("export_count_summary", ProcessClass::Window),
     ("list_attachments", ProcessClass::Window),
-    ("add_attachment", ProcessClass::Window),
+    ("add_attachment", ProcessClass::Work),
     ("extract_attachment", ProcessClass::Window),
-    ("remove_attachment", ProcessClass::Window),
+    ("remove_attachment", ProcessClass::Work),
     ("get_portfolio", ProcessClass::Window),
-    ("create_portfolio", ProcessClass::Window),
-    ("make_portfolio", ProcessClass::Window),
-    ("update_portfolio_member", ProcessClass::Window),
+    ("create_portfolio", ProcessClass::Job),
+    ("make_portfolio", ProcessClass::Work),
+    ("update_portfolio_member", ProcessClass::Work),
     ("extract_member_to_dir", ProcessClass::Window),
     ("list_layers", ProcessClass::Window),
-    ("set_layer_visibility", ProcessClass::Window),
-    ("check_accessibility", ProcessClass::Window),
-    ("apply_accessibility_fixes", ProcessClass::Window),
+    ("set_layer_visibility", ProcessClass::Work),
+    ("check_accessibility", ProcessClass::Work),
+    ("apply_accessibility_fixes", ProcessClass::Work),
     ("list_annotations", ProcessClass::Window),
     ("list_comments", ProcessClass::Window),
-    ("summarize_comments", ProcessClass::Window),
-    ("delete_all_annotations", ProcessClass::Window),
+    ("summarize_comments", ProcessClass::Work),
+    ("delete_all_annotations", ProcessClass::Work),
     ("preflight", ProcessClass::Job),
     ("list_preflight_profiles", ProcessClass::Window),
     ("validate_preflight_profile", ProcessClass::Window),
     ("apply_preflight_fixups", ProcessClass::Job),
     ("run_preflight_sweep", ProcessClass::Run),
-    ("list_inks", ProcessClass::Window),
+    ("list_inks", ProcessClass::Work),
     ("render_separations", ProcessClass::Job),
     ("composite_separations", ProcessClass::Job),
     ("list_simulation_profiles", ProcessClass::Window),
     ("inspect_point", ProcessClass::Job),
-    ("alias_ink", ProcessClass::Window),
+    ("alias_ink", ProcessClass::Work),
     ("compare_ink_transforms", ProcessClass::Window),
-    ("spot_to_process", ProcessClass::Window),
-    ("ink_settings_defaults", ProcessClass::Window),
-    ("add_printer_marks", ProcessClass::Window),
-    ("remove_printer_marks", ProcessClass::Window),
+    ("spot_to_process", ProcessClass::Work),
+    ("ink_settings_defaults", ProcessClass::Work),
+    ("add_printer_marks", ProcessClass::Work),
+    ("remove_printer_marks", ProcessClass::Work),
     ("list_printer_marks", ProcessClass::Window),
-    ("list_hairlines", ProcessClass::Window),
-    ("fix_hairlines", ProcessClass::Window),
-    ("list_transparency", ProcessClass::Window),
+    ("list_hairlines", ProcessClass::Work),
+    ("fix_hairlines", ProcessClass::Work),
+    ("list_transparency", ProcessClass::Work),
     ("flatten_transparency", ProcessClass::Job),
-    ("list_outlines", ProcessClass::Window),
+    ("list_outlines", ProcessClass::Work),
     ("trap_preset_defaults", ProcessClass::Window),
     ("validate_trap_preset", ProcessClass::Window),
-    ("assign_trap_presets", ProcessClass::Window),
-    ("list_trap_presets", ProcessClass::Window),
-    ("emit_trapping_setup", ProcessClass::Window),
+    ("assign_trap_presets", ProcessClass::Work),
+    ("list_trap_presets", ProcessClass::Work),
+    ("emit_trapping_setup", ProcessClass::Work),
     ("export_postscript", ProcessClass::Job),
-    ("get_struct_tree", ProcessClass::Window),
-    ("set_struct_props", ProcessClass::Window),
-    ("set_table_headers", ProcessClass::Window),
-    ("tag_page_content", ProcessClass::Window),
-    ("move_struct_node", ProcessClass::Window),
-    ("delete_struct_node", ProcessClass::Window),
-    ("add_struct_node", ProcessClass::Window),
+    ("get_struct_tree", ProcessClass::Work),
+    ("set_struct_props", ProcessClass::Work),
+    ("set_table_headers", ProcessClass::Work),
+    ("tag_page_content", ProcessClass::Work),
+    ("move_struct_node", ProcessClass::Work),
+    ("delete_struct_node", ProcessClass::Work),
+    ("add_struct_node", ProcessClass::Work),
     ("list_links", ProcessClass::Window),
-    ("set_link_url", ProcessClass::Window),
-    ("set_link_target", ProcessClass::Window),
-    ("set_link_appearance", ProcessClass::Window),
-    ("set_link_rect", ProcessClass::Window),
+    ("set_link_url", ProcessClass::Work),
+    ("set_link_target", ProcessClass::Work),
+    ("set_link_appearance", ProcessClass::Work),
+    ("set_link_rect", ProcessClass::Work),
     ("list_named_destinations", ProcessClass::Window),
-    ("delete_link", ProcessClass::Window),
-    ("add_links", ProcessClass::Window),
+    ("delete_link", ProcessClass::Work),
+    ("add_links", ProcessClass::Work),
     ("export_document", ProcessClass::Job),
     ("supported_export_formats", ProcessClass::Window),
-    ("detect_tables", ProcessClass::Window),
+    ("detect_tables", ProcessClass::Work),
     ("export_images", ProcessClass::Job),
     ("get_metadata", ProcessClass::Window),
-    ("set_metadata", ProcessClass::Window),
-    ("strip_metadata", ProcessClass::Window),
+    ("set_metadata", ProcessClass::Work),
+    ("strip_metadata", ProcessClass::Work),
     ("get_pdf_version", ProcessClass::Window),
-    ("set_pdf_version", ProcessClass::Window),
+    ("set_pdf_version", ProcessClass::Work),
     ("get_initial_view", ProcessClass::Window),
-    ("set_initial_view", ProcessClass::Window),
+    ("set_initial_view", ProcessClass::Work),
     ("get_advanced_properties", ProcessClass::Window),
-    ("set_advanced_properties", ProcessClass::Window),
-    ("set_document_language", ProcessClass::Window),
-    ("set_document_title", ProcessClass::Window),
-    ("set_page_tab_order", ProcessClass::Window),
+    ("set_advanced_properties", ProcessClass::Work),
+    ("set_document_language", ProcessClass::Work),
+    ("set_document_title", ProcessClass::Work),
+    ("set_page_tab_order", ProcessClass::Work),
     ("list_document_fonts", ProcessClass::Window),
     ("get_page_count", ProcessClass::Window),
     ("get_page_info", ProcessClass::Window),
@@ -163,88 +175,88 @@ pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("share_document", ProcessClass::Window),
     ("sealed_plaintext", ProcessClass::Window),
     ("sealed_reseal", ProcessClass::Window),
-    ("repair", ProcessClass::Window),
+    ("repair", ProcessClass::Work),
     ("rebuild", ProcessClass::Job),
-    ("recover", ProcessClass::Window),
+    ("recover", ProcessClass::Work),
     ("check", ProcessClass::Window),
     ("document_health", ProcessClass::Health),
     ("document_health_begin", ProcessClass::Health),
     ("document_health_step", ProcessClass::Health),
     ("document_health_end", ProcessClass::Health),
     ("get_outline", ProcessClass::Window),
-    ("set_outline", ProcessClass::Window),
-    ("preview_structure_outline", ProcessClass::Window),
-    ("outline_from_structure", ProcessClass::Window),
-    ("read_aloud_page", ProcessClass::Window),
-    ("find_url_links", ProcessClass::Window),
-    ("create_links_from_urls", ProcessClass::Window),
+    ("set_outline", ProcessClass::Work),
+    ("preview_structure_outline", ProcessClass::Work),
+    ("outline_from_structure", ProcessClass::Work),
+    ("read_aloud_page", ProcessClass::Work),
+    ("find_url_links", ProcessClass::Work),
+    ("create_links_from_urls", ProcessClass::Work),
     ("list_threads", ProcessClass::Window),
-    ("set_threads", ProcessClass::Window),
+    ("set_threads", ProcessClass::Work),
     ("list_document_js", ProcessClass::Window),
-    ("set_document_js", ProcessClass::Window),
-    ("redact", ProcessClass::Window),
-    ("remove_redaction_residue", ProcessClass::Window),
-    ("search_and_redact", ProcessClass::Window),
-    ("audit_hidden_information", ProcessClass::Window),
-    ("sanitize_pdf", ProcessClass::Window),
-    ("audit_space_usage", ProcessClass::Window),
-    ("watermark", ProcessClass::Window),
-    ("compare_text", ProcessClass::Window),
+    ("set_document_js", ProcessClass::Work),
+    ("redact", ProcessClass::Work),
+    ("remove_redaction_residue", ProcessClass::Work),
+    ("search_and_redact", ProcessClass::Work),
+    ("audit_hidden_information", ProcessClass::Work),
+    ("sanitize_pdf", ProcessClass::Work),
+    ("audit_space_usage", ProcessClass::Work),
+    ("watermark", ProcessClass::Work),
+    ("compare_text", ProcessClass::Work),
     ("compare_visual", ProcessClass::Job),
     ("read_form_fields", ProcessClass::Window),
-    ("fill_form_fields", ProcessClass::Window),
-    ("reset_form_fields", ProcessClass::Window),
+    ("fill_form_fields", ProcessClass::Work),
+    ("reset_form_fields", ProcessClass::Work),
     ("export_form_data", ProcessClass::Window),
-    ("import_form_data", ProcessClass::Window),
-    ("set_widget_visibility", ProcessClass::Window),
+    ("import_form_data", ProcessClass::Work),
+    ("set_widget_visibility", ProcessClass::Work),
     ("detect_form_fields", ProcessClass::Job),
-    ("create_detected_fields", ProcessClass::Window),
+    ("create_detected_fields", ProcessClass::Work),
     ("prepare_form_fields", ProcessClass::Job),
-    ("set_field_lock", ProcessClass::Window),
-    ("author_vertical_field_font", ProcessClass::Window),
-    ("author_choice_appearance", ProcessClass::Window),
-    ("set_field_actions", ProcessClass::Window),
-    ("set_field_description", ProcessClass::Window),
-    ("apply_ocr_layer", ProcessClass::Window),
+    ("set_field_lock", ProcessClass::Work),
+    ("author_vertical_field_font", ProcessClass::Work),
+    ("author_choice_appearance", ProcessClass::Work),
+    ("set_field_actions", ProcessClass::Work),
+    ("set_field_description", ProcessClass::Work),
+    ("apply_ocr_layer", ProcessClass::Work),
     ("recognize", ProcessClass::Job),
     ("recognize_raster", ProcessClass::Job),
     ("analyze_scan", ProcessClass::Job),
     ("enhance_scan", ProcessClass::Job),
     ("batch_ocr", ProcessClass::Run),
     ("ocr_file", ProcessClass::Job),
-    ("recognize_music_prepare", ProcessClass::Window),
+    ("recognize_music_prepare", ProcessClass::Work),
     ("recognize_music_run", ProcessClass::Run),
     ("recognize_music_publish", ProcessClass::Window),
-    ("recognize_music_attach", ProcessClass::Window),
+    ("recognize_music_attach", ProcessClass::Work),
     ("recognize_music_discard", ProcessClass::Window),
-    ("remove_empty_folders", ProcessClass::Window),
+    ("remove_empty_folders", ProcessClass::Job),
     ("run_action", ProcessClass::Run),
-    ("autotag", ProcessClass::Window),
+    ("autotag", ProcessClass::Work),
     ("list_page_images", ProcessClass::Window),
-    ("summarize_image_resolution", ProcessClass::Window),
-    ("delete_page_image", ProcessClass::Window),
-    ("replace_page_image", ProcessClass::Window),
+    ("summarize_image_resolution", ProcessClass::Work),
+    ("delete_page_image", ProcessClass::Work),
+    ("replace_page_image", ProcessClass::Work),
     ("extract_page_image", ProcessClass::Window),
-    ("transform_page_image", ProcessClass::Window),
-    ("transform_page_images", ProcessClass::Window),
-    ("delete_page_images", ProcessClass::Window),
-    ("add_page_image", ProcessClass::Window),
-    ("add_page_vector_graphic", ProcessClass::Window),
-    ("crop_page_image", ProcessClass::Window),
+    ("transform_page_image", ProcessClass::Work),
+    ("transform_page_images", ProcessClass::Work),
+    ("delete_page_images", ProcessClass::Work),
+    ("add_page_image", ProcessClass::Work),
+    ("add_page_vector_graphic", ProcessClass::Work),
+    ("crop_page_image", ProcessClass::Work),
     ("list_page_vectors", ProcessClass::Window),
     ("list_page_geometry", ProcessClass::Window),
-    ("delete_page_vector", ProcessClass::Window),
-    ("transform_page_vector", ProcessClass::Window),
-    ("restyle_page_vector", ProcessClass::Window),
-    ("set_image_opacity", ProcessClass::Window),
-    ("replace_text_run", ProcessClass::Window),
-    ("restyle_text_run", ProcessClass::Window),
-    ("convert_text_run", ProcessClass::Window),
+    ("delete_page_vector", ProcessClass::Work),
+    ("transform_page_vector", ProcessClass::Work),
+    ("restyle_page_vector", ProcessClass::Work),
+    ("set_image_opacity", ProcessClass::Work),
+    ("replace_text_run", ProcessClass::Work),
+    ("restyle_text_run", ProcessClass::Work),
+    ("convert_text_run", ProcessClass::Work),
     ("list_text_paragraphs", ProcessClass::Window),
-    ("replace_paragraph_text", ProcessClass::Window),
-    ("merge_paragraph_with_previous", ProcessClass::Window),
+    ("replace_paragraph_text", ProcessClass::Work),
+    ("merge_paragraph_with_previous", ProcessClass::Work),
     ("list_dictionaries", ProcessClass::Window),
-    ("check_spelling", ProcessClass::Window),
+    ("check_spelling", ProcessClass::Work),
     ("check_text", ProcessClass::Window),
     ("document_language", ProcessClass::Window),
     ("spelling_suggestions", ProcessClass::Window),
@@ -254,13 +266,13 @@ pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("list_source_folders", ProcessClass::Job),
     ("create_pdf_folders", ProcessClass::Run),
     ("list_system_fonts", ProcessClass::Window),
-    ("add_text_box", ProcessClass::Window),
+    ("add_text_box", ProcessClass::Work),
     ("measure_text_box", ProcessClass::Window),
     ("print", ProcessClass::Job),
     ("print_preview", ProcessClass::Job),
     ("print_preview_cleanup", ProcessClass::Job),
     ("printed_job", ProcessClass::Job),
-    ("verify_signatures", ProcessClass::Window),
+    ("verify_signatures", ProcessClass::Work),
     ("sign_pdf", ProcessClass::Job),
     ("generate_signer", ProcessClass::Window),
     ("list_pkcs11_certificates", ProcessClass::Window),
@@ -268,7 +280,7 @@ pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("preview_stamp_appearance", ProcessClass::Window),
     ("transplant_incremental", ProcessClass::Window),
     ("signature_policy", ProcessClass::Window),
-    ("save_redaction_marks", ProcessClass::Window),
+    ("save_redaction_marks", ProcessClass::Work),
     ("list_redact_annotations", ProcessClass::Window),
 ];
 
@@ -300,6 +312,7 @@ pub fn process_class(method: &str) -> ProcessClass {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     Window,
+    Work,
     Job,
     Run,
 }
@@ -308,6 +321,7 @@ impl Role {
     fn name(self) -> &'static str {
         match self {
             Role::Window => "window",
+            Role::Work => "work",
             Role::Job => "job",
             Role::Run => "run",
         }
@@ -326,7 +340,8 @@ pub(crate) fn role_args(role: &str, window: Option<&str>) -> Vec<String> {
 }
 
 /// The interactive Python engine: per window, one persistent window process,
-/// one persistent job process started on the window's first job call, and a
+/// one persistent work process started on the window's first work call, one
+/// persistent job process started on the window's first job call, and a
 /// process per run call.
 ///
 /// Each process answers one request at a time, so a long call delays only the
@@ -346,8 +361,9 @@ pub(crate) fn role_args(role: &str, window: Option<&str>) -> Vec<String> {
 /// those modules are written against. That state dies with its process; a
 /// window process that replaces one (a crash, an assent restart) is given the
 /// window's credentials again before its first request (`CredentialLedger`).
-/// A job or run process never receives the window's opens: before each of its
-/// requests it is given, read-only, the held credentials it lacks (`Given`).
+/// A work, job or run process never receives the window's opens: before each
+/// of its requests it is given, read-only, the held credentials it lacks
+/// (`Given`).
 pub struct EngineState {
     workers: std::sync::Mutex<Workers>,
     runs: std::sync::Mutex<RunPool>,
@@ -358,6 +374,8 @@ pub struct EngineState {
 #[derive(Default)]
 struct Workers {
     live: HashMap<String, Arc<EngineWorker>>,
+    /// Each window's work process slot.
+    works: HashMap<String, Arc<EngineWorker>>,
     /// Each window's job process slot.
     jobs: HashMap<String, Arc<EngineWorker>>,
     /// Run processes that have been started and have not exited, with the
@@ -439,9 +457,10 @@ enum Launcher {
     Command { program: String, args: Vec<String> },
 }
 
-/// One engine slot of a window: its window process, its job process, or one
-/// run process. A window or job slot survives its process: a process that
-/// exits is respawned into the same slot by the next send.
+/// One engine slot of a window: its window process, its work process, its job
+/// process, or one run process. A window, work or job slot survives its
+/// process: a process that exits is respawned into the same slot by the next
+/// send.
 pub struct EngineWorker {
     pub child: Mutex<Option<EngineChild>>,
     generation: AtomicU64,
@@ -450,7 +469,8 @@ pub struct EngineWorker {
     role: Role,
     /// The window's own registrations; used in the window slot only.
     credentials: std::sync::Mutex<CredentialLedger>,
-    /// What this slot's current process was given; job and run slots only.
+    /// What this slot's current process was given; work, job and run slots
+    /// only.
     given: std::sync::Mutex<Given>,
     /// The lifetime binding of a run process whose input was closed after its
     /// answer, held until the process exits so its descendants stay bound.
@@ -554,8 +574,10 @@ type Secret = zeroize::Zeroizing<String>;
 #[derive(Clone, PartialEq, Eq)]
 enum Registration {
     /// `open_document` with the user password of a still-encrypted copy.
-    /// `grants` is what the open answered (`permissions`, `revision`, `p`),
-    /// which another process is given without opening the file.
+    /// `grants` is what the open answered (`permissions`, `revision`, `p`,
+    /// and `id`, the first trailer /ID in hex), which another process is
+    /// given without opening the file. A replacement window process opens the
+    /// file again and reads the same /ID from it.
     Password { path: String, password: Secret, grants: Option<serde_json::Value> },
     /// `open_pubkey_document` or `pubkey_reattach`: the certificate that
     /// authenticates to the recipient lists again.
@@ -587,8 +609,8 @@ impl std::fmt::Debug for Registration {
 #[derive(Default)]
 pub(crate) struct CredentialLedger {
     /// Each held record with a serial no other record of this window ever
-    /// gets: a record closed and opened again is a new record to a job or run
-    /// process, even when its fields are equal.
+    /// gets: a record closed and opened again is a new record to a work, job
+    /// or run process, even when its fields are equal.
     held: Vec<(u64, Registration)>,
     next_serial: u64,
     /// Registrations written and not yet answered, by outer id.
@@ -621,6 +643,7 @@ fn grants_of(result: Option<&serde_json::Value>) -> Option<serde_json::Value> {
         "permissions": permissions,
         "revision": result.get("revision").cloned().unwrap_or(serde_json::Value::Null),
         "p": result.get("p").cloned().unwrap_or(serde_json::Value::Null),
+        "id": result.get("id").cloned().unwrap_or(serde_json::Value::Null),
     }))
 }
 
@@ -700,7 +723,7 @@ impl CredentialLedger {
         self.held.push((self.next_serial, registration));
     }
 
-    /// The held records, for a job or run process's delta.
+    /// The held records, for a work, job or run process's delta.
     fn held(&self) -> Vec<(u64, Registration)> {
         self.held.clone()
     }
@@ -802,8 +825,8 @@ impl Registration {
         })
     }
 
-    /// The frame that gives a job or run process this record. An opener is
-    /// registered from the grants the window's open answered (`open_document`
+    /// The frame that gives a work, job or run process this record. An opener
+    /// is registered from the grants the window's open answered (`open_document`
     /// with `held`), so the process neither opens nor writes the working copy,
     /// its sealed original or its folder marker: another request of the
     /// window may be replacing those files under renderer locks this frame
@@ -842,7 +865,7 @@ impl Registration {
     }
 }
 
-/// The credentials one job or run process generation was given.
+/// The credentials one work, job or run process generation was given.
 ///
 /// Before each request, the slot writes `held − given` (and a close for each
 /// record in `given − held`) as frames in this order: closes, then openers,
@@ -1043,6 +1066,20 @@ impl EngineState {
             .clone())
     }
 
+    /// The slot of `label`'s work process, created on first use. Refused for
+    /// a window that has been destroyed.
+    fn work_worker(&self, label: &str) -> Result<Arc<EngineWorker>, String> {
+        let mut workers = self.lock_workers();
+        if workers.retired.contains(label) {
+            return Err(WINDOW_CLOSED.to_string());
+        }
+        Ok(workers
+            .works
+            .entry(label.to_string())
+            .or_insert_with(|| Arc::new(EngineWorker::new(Role::Work)))
+            .clone())
+    }
+
     /// The slot of `label`'s job process, created on first use. Refused for a
     /// window that has been destroyed.
     fn job_worker(&self, label: &str) -> Result<Arc<EngineWorker>, String> {
@@ -1078,6 +1115,10 @@ impl EngineState {
         self.lock_workers().live.get(label).cloned()
     }
 
+    fn existing_work_worker(&self, label: &str) -> Option<Arc<EngineWorker>> {
+        self.lock_workers().works.get(label).cloned()
+    }
+
     fn existing_job_worker(&self, label: &str) -> Option<Arc<EngineWorker>> {
         self.lock_workers().jobs.get(label).cloned()
     }
@@ -1089,6 +1130,7 @@ impl EngineState {
             .live
             .get(label)
             .into_iter()
+            .chain(workers.works.get(label))
             .chain(workers.jobs.get(label))
             .chain(workers.runs.iter().filter(|(owner, _)| owner == label).map(|(_, worker)| worker))
             .chain(workers.draining.iter())
@@ -1104,6 +1146,7 @@ impl EngineState {
         let slots = workers
             .live
             .values()
+            .chain(workers.works.values())
             .chain(workers.jobs.values())
             .chain(workers.runs.iter().map(|(_, worker)| worker))
             .chain(workers.draining.iter());
@@ -1124,12 +1167,13 @@ impl EngineState {
     }
 
     /// Remove every slot of `label` for good and return them: the window
-    /// slot, the job slot and its started run processes.
+    /// slot, the work slot, the job slot and its started run processes.
     fn retire(&self, label: &str) -> Vec<Arc<EngineWorker>> {
         let mut workers = self.lock_workers();
         workers.retired.insert(label.to_string());
         let mut retired: Vec<Arc<EngineWorker>> = Vec::new();
         retired.extend(workers.live.remove(label));
+        retired.extend(workers.works.remove(label));
         retired.extend(workers.jobs.remove(label));
         retired.extend(workers.runs.iter().filter(|(owner, _)| owner == label).map(|(_, worker)| worker.clone()));
         for worker in &retired {
@@ -1547,7 +1591,7 @@ pub async fn write_request<R: Runtime>(
 
 /// `write_request` for a request whose output path is already claimed; the
 /// reservation is held by the route until the response retires it. The
-/// method's `process_class` picks the window, job or run process.
+/// method's `process_class` picks the window, work, job or run process.
 pub(crate) async fn write_reserved_request<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
@@ -1556,7 +1600,12 @@ pub(crate) async fn write_reserved_request<R: Runtime>(
 ) -> Result<(), String> {
     let method = request.get("method").and_then(|m| m.as_str()).unwrap_or_default();
     match process_class(method) {
-        ProcessClass::Job => write_job_request(app, label, request, output_reservation).await,
+        ProcessClass::Work => {
+            write_slot_request(app, label, EngineState::work_worker, request, output_reservation).await
+        }
+        ProcessClass::Job => {
+            write_slot_request(app, label, EngineState::job_worker, request, output_reservation).await
+        }
         ProcessClass::Run => write_run_request(app, label, request, output_reservation).await,
         ProcessClass::Window | ProcessClass::Health => {
             write_window_request(app, label, request, output_reservation).await
@@ -1581,26 +1630,28 @@ async fn write_window_request<R: Runtime>(
     write_routed(app, label, child, request, output_reservation, Some(&worker))
 }
 
-/// A job request: the job process is first given, read-only, every credential
-/// the window holds that this process generation lacks (`Given::delta`).
-async fn write_job_request<R: Runtime>(
+/// A work or job request, written to the slot `slot` names: its process is
+/// first given, read-only, every credential the window holds that this
+/// process generation lacks (`Given::delta`).
+async fn write_slot_request<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
+    slot: fn(&EngineState, &str) -> Result<Arc<EngineWorker>, String>,
     request: serde_json::Value,
     output_reservation: Option<crate::app_windows::EngineOutputReservation>,
 ) -> Result<(), String> {
     let state = app.state::<EngineState>();
     let window = state.worker(label)?;
-    let job = state.job_worker(label)?;
-    let mut guard = lock_started(&job.child, || start_process(app, label, &job)).await?;
-    if job.is_closed() {
+    let worker = slot(&state, label)?;
+    let mut guard = lock_started(&worker.child, || start_process(app, label, &worker)).await?;
+    if worker.is_closed() {
         return Err(WINDOW_CLOSED.to_string());
     }
     let Some(child) = guard.as_mut() else {
         return Err("Engine not running".to_string());
     };
     let held = window.credentials().held();
-    let frames = job.given().delta(child.generation, &held);
+    let frames = worker.given().delta(child.generation, &held);
     write_frames(child, &frames)?;
     write_routed(app, label, child, request, output_reservation, None)
 }
@@ -1838,7 +1889,7 @@ fn route_response<R: Runtime>(
                     let _ = app.emit_to(label, CREDENTIAL_LOST_EVENT, serde_json::json!({ "path": path }));
                 }
             }
-            Role::Job | Role::Run => {
+            Role::Work | Role::Job | Role::Run => {
                 if worker.given().answered(id, &json).is_some() {
                     eprintln!(
                         "[engine {label} {}] refused a credential the window holds; its requests that need it fail there",
@@ -1876,20 +1927,23 @@ fn route_response<R: Runtime>(
     let _ = app.emit_to(route.label.as_str(), "engine:response", json);
 }
 
-/// Write the closes the window's job process is owed now, so a closed
-/// document's credential does not wait for the window's next job request.
+/// Write the closes the window's work and job processes are owed now, so a
+/// closed document's credential does not wait for the window's next request
+/// to either process.
 async fn forward_closes<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let state = app.state::<EngineState>();
-    let (Some(window), Some(job)) = (state.existing_worker(label), state.existing_job_worker(label)) else {
+    let Some(window) = state.existing_worker(label) else {
         return;
     };
-    let mut guard = job.child.lock().await;
-    let Some(child) = guard.as_mut() else {
-        return;
-    };
-    let held = window.credentials().held();
-    let frames = job.given().close_stale(child.generation, &held);
-    let _ = write_frames(child, &frames);
+    for slot in [state.existing_work_worker(label), state.existing_job_worker(label)].into_iter().flatten() {
+        let mut guard = slot.child.lock().await;
+        let Some(child) = guard.as_mut() else {
+            continue;
+        };
+        let held = window.credentials().held();
+        let frames = slot.given().close_stale(child.generation, &held);
+        let _ = write_frames(child, &frames);
+    }
 }
 
 /// A run process has answered its one call: close its input so it ends at end
@@ -2296,7 +2350,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
 
     // Starting a window process imports the whole engine before the first
     // request is read; the window says so until the process reports ready. A
-    // job or run start shows as the operation that is already running.
+    // work, job or run start shows as the operation that is already running.
     let signals_start = worker.role == Role::Window;
     if signals_start {
         let _ = app.emit_to(label, "engine:starting", true);
@@ -2513,8 +2567,8 @@ pub async fn cancel_writes<R: Runtime>(app: &AppHandle<R>, within: Duration) {
     wait_until(Instant::now() + within, || router.writes_in_flight(None) == 0).await;
 }
 
-/// Stop the processes of a destroyed window: its window process, its job
-/// process and its run processes.
+/// Stop the processes of a destroyed window: its window process, its work
+/// process, its job process and its run processes.
 ///
 /// The window's own routes are dropped; routes that hold write protection (an
 /// output reservation, a folder lease) are kept, unaddressed, until the
@@ -3416,12 +3470,15 @@ mod concurrency_tests {
         ledger.written(outer, &call("open_document", serde_json::json!({ "path": path, "password": password })));
         ledger.answered(outer, &answer(serde_json::json!({
             "encrypted": true, "opener": "user", "permissions": permissions(), "revision": 6, "p": -1852,
+            "id": "0a1b2c",
         })));
     }
 
     fn open_recipient(ledger: &mut CredentialLedger, outer: u64, path: &str) {
         ledger.written(outer, &call("open_pubkey_document", serde_json::json!({ "path": path, "pfx": "k", "password": "p" })));
-        ledger.answered(outer, &answer(serde_json::json!({ "opener": "recipient", "permissions": permissions(), "p": -4 })));
+        ledger.answered(outer, &answer(serde_json::json!({
+            "opener": "recipient", "permissions": permissions(), "p": -4, "id": "3d4e5f",
+        })));
     }
 
     fn share(ledger: &mut CredentialLedger, outer: u64, path: &str, alias: &str) {
@@ -3471,8 +3528,9 @@ mod concurrency_tests {
             assert!(seen.insert(*method), "{method} is classified twice");
         }
         let count = |class: ProcessClass| METHOD_CLASSES.iter().filter(|(_, c)| *c == class).count();
-        assert_eq!(count(ProcessClass::Window), 183);
-        assert_eq!(count(ProcessClass::Job), 34);
+        assert_eq!(count(ProcessClass::Window), 66);
+        assert_eq!(count(ProcessClass::Work), 115);
+        assert_eq!(count(ProcessClass::Job), 36);
         assert_eq!(count(ProcessClass::Run), 5);
         assert_eq!(count(ProcessClass::Health), 4);
         for (method, class) in METHOD_CLASSES {
@@ -3480,7 +3538,18 @@ mod concurrency_tests {
         }
         assert_eq!(process_class("distill"), ProcessClass::Job);
         assert_eq!(process_class("recognize_music_run"), ProcessClass::Run, "a whole-score Audiveris run");
-        assert_eq!(process_class("recognize_music_prepare"), ProcessClass::Window);
+        assert_eq!(process_class("recognize_music_prepare"), ProcessClass::Work, "classified by its in-process cost");
+        assert_eq!(process_class("recognize_music_publish"), ProcessClass::Window);
+        assert_eq!(process_class("redact"), ProcessClass::Work, "Ghostscript runs only for JBIG2 images");
+        assert_eq!(process_class("check_accessibility"), ProcessClass::Work);
+        assert_eq!(process_class("audit_space_usage"), ProcessClass::Work);
+        assert_eq!(process_class("content_crop"), ProcessClass::Work, "Ghostscript runs only for a scan that does not decode");
+        assert_eq!(process_class("ink_settings_defaults"), ProcessClass::Work, "it lists the inks of every page");
+        assert_eq!(process_class("read_aloud_page"), ProcessClass::Work, "a tagged page reads in structure order");
+        assert_eq!(process_class("export_count_summary"), ProcessClass::Window);
+        for method in ["merge", "create_portfolio", "remove_empty_folders"] {
+            assert_eq!(process_class(method), ProcessClass::Job, "{method} reads a list of files or a folder");
+        }
         assert_eq!(process_class("preflight"), ProcessClass::Job, "its coverage check renders with Ghostscript");
         assert_eq!(process_class("batch_ocr"), ProcessClass::Run);
         assert_eq!(process_class("get_page_count"), ProcessClass::Window);
@@ -3488,7 +3557,14 @@ mod concurrency_tests {
         for method in ["open_document", "open_document_attempt", "open_pubkey_document", "unlock"] {
             assert_eq!(process_class(method), ProcessClass::Window, "{method} rewrites in place");
         }
+        for method in ["pubkey_reseal", "pubkey_reattach", "share_document", "close_document", "document_permissions"] {
+            assert_eq!(process_class(method), ProcessClass::Window, "{method} needs the window's session");
+        }
+        for method in ["sealed_plaintext", "sealed_reseal", "transplant_incremental"] {
+            assert_eq!(process_class(method), ProcessClass::Window, "{method} is a page commit step");
+        }
         for group in [
+            &["sealed_plaintext", "sealed_reseal", "transplant_incremental"][..],
             &["split_plan", "split"][..],
             &["list_csc_credentials", "sign_pdf"][..],
             &["print_preview", "print_preview_cleanup"][..],
@@ -3507,6 +3583,7 @@ mod concurrency_tests {
             vec!["-s", "-P", script, "--spectra-role=job", "--spectra-window=doc-2"]
         );
         assert_eq!(spawn_args(launcher.clone(), Role::Window, "main")[3..], ["--spectra-role=window", "--spectra-window=main"]);
+        assert_eq!(spawn_args(launcher.clone(), Role::Work, "doc-2")[3..], ["--spectra-role=work", "--spectra-window=doc-2"]);
         assert_eq!(spawn_args(launcher, Role::Run, "main")[3], "--spectra-role=run");
         assert_eq!(role_args("health", None), vec!["--spectra-role=health"]);
     }
@@ -3542,29 +3619,45 @@ mod concurrency_tests {
         let job = state.job_worker("main").unwrap();
         let run = state.run_worker("main").unwrap();
         let other = state.job_worker("doc-1").unwrap();
-        for (worker, generation) in [(&window, 5), (&job, 6), (&run, 7), (&other, 8)] {
+        let work = state.work_worker("main").unwrap();
+        let other_work = state.work_worker("doc-1").unwrap();
+        for (worker, generation) in [(&window, 5), (&job, 6), (&run, 7), (&other, 8), (&work, 9), (&other_work, 10)] {
             worker.generation.store(generation, Ordering::SeqCst);
         }
         assert!(Arc::ptr_eq(&state.worker_of_generation("main", 5).unwrap(), &window));
         assert!(Arc::ptr_eq(&state.worker_of_generation("main", 6).unwrap(), &job));
         assert!(Arc::ptr_eq(&state.worker_of_generation("main", 7).unwrap(), &run));
+        assert!(Arc::ptr_eq(&state.worker_of_generation("main", 9).unwrap(), &work));
         assert!(state.worker_of_generation("main", 8).is_none(), "another window's process");
+        assert!(state.worker_of_generation("main", 10).is_none(), "another window's work process");
         assert!(state.worker_of_generation("doc-1", 6).is_none());
+        assert!(Arc::ptr_eq(&state.worker_of_generation("doc-1", 10).unwrap(), &other_work));
+        assert!(Arc::ptr_eq(&state.work_worker("main").unwrap(), &work), "a second work call made a second slot");
+        assert!(Arc::ptr_eq(&state.existing_work_worker("main").unwrap(), &work));
+        assert!(state.existing_work_worker("doc-2").is_none());
     }
 
     #[test]
     fn retire_takes_every_slot_of_the_window_and_every_class_is_a_worker() {
         let state = EngineState::new();
         state.worker("main").unwrap();
+        state.work_worker("main").unwrap();
         state.job_worker("main").unwrap();
         state.run_worker("main").unwrap();
         state.worker("doc-1").unwrap();
-        assert_eq!(state.all_workers().len(), 4);
+        state.work_worker("doc-1").unwrap();
+        assert_eq!(state.all_workers().len(), 6);
         let retired = state.retire("main");
-        assert_eq!(retired.len(), 3);
+        assert_eq!(retired.len(), 4);
         assert!(retired.iter().all(|worker| worker.is_closed()));
-        let roles: Vec<Role> = retired.iter().map(|worker| worker.role).collect();
-        assert!(roles.contains(&Role::Window) && roles.contains(&Role::Job) && roles.contains(&Role::Run));
+        let mut roles: Vec<&str> = retired.iter().map(|worker| worker.role.name()).collect();
+        roles.sort_unstable();
+        assert_eq!(roles, ["job", "run", "window", "work"]);
+        let open: Vec<&str> = state.all_workers().iter().filter(|w| !w.is_closed()).map(|w| w.role.name()).collect();
+        assert_eq!(open, ["window", "work"], "another window's slots were retired");
+        assert!(state.existing_work_worker("main").is_none());
+        assert!(!state.existing_work_worker("doc-1").unwrap().is_closed());
+        assert!(state.work_worker("main").is_err(), "a destroyed window started a work process");
         assert!(state.job_worker("main").is_err());
         assert!(state.run_worker("main").is_err(), "a queued call started after its window closed");
     }
@@ -3624,8 +3717,14 @@ mod concurrency_tests {
         assert_eq!(methods(&frames), vec![pair("open_document", "W"), pair("open_document", "R")]);
         let (user, recipient) = (&frames[0].2, &frames[1].2);
         assert_eq!(user["password"], "u");
-        assert_eq!(user["held"], serde_json::json!({ "opener": "user", "permissions": permissions(), "revision": 6, "p": -1852 }));
-        assert_eq!(recipient["held"], serde_json::json!({ "opener": "recipient", "permissions": permissions(), "revision": null, "p": -4 }));
+        assert_eq!(
+            user["held"],
+            serde_json::json!({ "opener": "user", "permissions": permissions(), "revision": 6, "p": -1852, "id": "0a1b2c" })
+        );
+        assert_eq!(
+            recipient["held"],
+            serde_json::json!({ "opener": "recipient", "permissions": permissions(), "revision": null, "p": -4, "id": "3d4e5f" })
+        );
         assert!(recipient.get("pfx").is_none() && recipient["password"] == "", "a certificate frame carries its key");
         // The window's own replacement still opens the document again.
         let replay = ledger.replay_frames(4);
@@ -3634,6 +3733,22 @@ mod concurrency_tests {
         assert_eq!(replayed[0]["method"], "open_document");
         assert!(replayed[0]["params"].get("held").is_none());
         assert_eq!(replayed[1]["method"], "pubkey_reattach");
+    }
+
+    #[test]
+    fn a_held_opener_carries_the_id_its_open_answered_and_null_when_it_answered_none() {
+        let mut ledger = CredentialLedger::default();
+        ledger.written(1, &call("open_document_attempt", serde_json::json!({ "path": "W", "password": "u" })));
+        ledger.answered(1, &answer(serde_json::json!({
+            "status": "opened",
+            "document": { "opener": "user", "permissions": permissions(), "revision": 6, "p": -4, "id": "77aa" },
+        })));
+        ledger.written(2, &call("open_document", serde_json::json!({ "path": "N", "password": "u" })));
+        ledger.answered(2, &answer(serde_json::json!({ "opener": "user", "permissions": permissions(), "revision": 6, "p": -4 })));
+        let frames = read(Given::default().delta(3, &ledger.held()));
+        assert_eq!(methods(&frames), vec![pair("open_document", "W"), pair("open_document", "N")]);
+        assert_eq!(frames[0].2["held"]["id"], "77aa");
+        assert_eq!(frames[1].2["held"]["id"], serde_json::Value::Null);
     }
 
     #[test]
@@ -3695,6 +3810,43 @@ mod concurrency_tests {
             .map(|line| serde_json::from_str::<serde_json::Value>(line.as_str()).unwrap()["id"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(replay_generation(&window_ids[0]), Some(7));
+    }
+
+    #[test]
+    fn a_work_generation_is_given_the_window_credentials_apart_from_its_job_generation() {
+        let mut ledger = CredentialLedger::default();
+        open_user(&mut ledger, 1, "W", "u");
+        share(&mut ledger, 2, "W", "S");
+        let work = EngineWorker::new(Role::Work);
+        let job = EngineWorker::new(Role::Job);
+        work.given().reset(5);
+        job.given().reset(6);
+        let to_work = read(work.given().delta(5, &ledger.held()));
+        assert_eq!(methods(&to_work), vec![pair("open_document", "W"), pair("share_document", "S")]);
+        assert_eq!(to_work[0].2["held"]["opener"], "user", "a work process is given an opener, never an open");
+        assert!(to_work.iter().all(|(id, _, _)| replay_generation(id) == Some(5)));
+        let to_job = read(job.given().delta(6, &ledger.held()));
+        assert_eq!(methods(&to_job), methods(&to_work), "the job slot was given less because the work slot was given it");
+        assert!(read(work.given().delta(5, &ledger.held())).is_empty());
+
+        // An answer of the work generation settles nothing of the job generation.
+        let refused = serde_json::json!({ "id": to_work[0].0, "error": { "message": "invalid password" } });
+        assert_eq!(job.given().answered(&to_work[0].0, &refused), None);
+        assert_eq!(work.given().answered(&to_work[0].0, &refused), Some("W".to_string()));
+        assert_eq!(job.given().awaiting.len(), 2);
+        assert_eq!(ledger.held().len(), 2, "a work-only refusal changed the window's records");
+
+        // A close reaches the work generation as a close, before any new opener.
+        close(&mut ledger, 3, "S");
+        open_user(&mut ledger, 4, "X", "x");
+        assert_eq!(methods(&read(work.given().close_stale(5, &ledger.held()))), vec![pair("close_document", "S")]);
+        assert_eq!(methods(&read(work.given().delta(5, &ledger.held()))), vec![pair("open_document", "X")]);
+        // A replacement work process is given everything again.
+        work.given().reset(7);
+        assert_eq!(
+            methods(&read(work.given().delta(7, &ledger.held()))),
+            vec![pair("open_document", "W"), pair("open_document", "X")]
+        );
     }
 
     #[test]

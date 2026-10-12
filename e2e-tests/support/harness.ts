@@ -3,6 +3,8 @@
  * `window.__SPECTRA_TEST__` (only present when the renderer is built with
  * VITE_E2E=1).
  */
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export type FocusedTab = 'home' | 'tools' | { doc: string };
 
@@ -259,6 +261,45 @@ export async function handOffsWaiting(stage: HandOffStage): Promise<number> {
   return await browser.execute(function (s) {
     return (window as any).__SPECTRA_TEST__.handOffsWaiting(s) as number;
   }, stage);
+}
+
+/** Hold every engine call of this window that runs on a reader copy, after
+ * its copy exists and before its engine step, until `releaseReaderCopies`. */
+export async function holdReaderCopies(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.holdReaderCopies();
+  });
+}
+
+export async function releaseReaderCopies(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.releaseReaderCopies();
+  });
+}
+
+/** How many calls of this window are held on a reader copy now. */
+export async function readerCopiesWaiting(): Promise<number> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.readerCopiesWaiting() as number;
+  });
+}
+
+/** Rebuild every mounted text layer over the same page geometry, as a new
+ * pdf.js proxy for the same bytes does. */
+export async function rebuildTextLayers(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.rebuildTextLayers();
+  });
+}
+
+/** The reader folders (`r<pid>-<hex>`) in the working folder of
+ * `workingPath`. A working folder that is gone holds none. */
+export function readerFolders(workingPath: string): string[] {
+  const folder = dirname(workingPath);
+  if (!existsSync(folder)) return [];
+  return readdirSync(folder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^r\d+-[0-9a-f]+$/i.test(entry.name))
+    .map((entry) => entry.name);
 }
 
 /** The last error a harness call recorded in the app, or null. */

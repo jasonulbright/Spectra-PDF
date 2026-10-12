@@ -501,6 +501,28 @@ def _refuse_recipient_escape(pdf, encryption_source, target) -> None:
     refuse_recipient_escape(target, folders)
 
 
+def _keep_document_id(pdf) -> None:
+    """Write a user-opened document under the first trailer /ID its credential
+    recorded at open.
+
+    qpdf copies the document's own /Encrypt, /O, /U and /P, and for revision
+    4 and earlier those were computed from the first /ID element (ISO
+    32000-2 7.6.4.3.2, Algorithm 2, step e): a rewrite that dropped or
+    changed it leaves a file the user password no longer opens. The recorded
+    /ID is also the identity `sealed_edit.sealed_plaintext` matches offered
+    bytes against, so every engine rewrite of the working copy keeps it."""
+    credential = getattr(pdf, "_spectra_credential", None)
+    recorded = getattr(credential, "document_id", None)
+    if not recorded:
+        return
+    first = pikepdf.String(bytes.fromhex(recorded))
+    ids = pdf.trailer.get("/ID")
+    if isinstance(ids, pikepdf.Array) and len(ids) >= 1 and bytes(ids[0]) == bytes(first):
+        return
+    second = ids[1] if isinstance(ids, pikepdf.Array) and len(ids) >= 2 else first
+    pdf.trailer.ID = pikepdf.Array([first, second])
+
+
 def save_pdf(
     pdf,
     target,
@@ -562,6 +584,8 @@ def save_pdf(
         # qpdf rewrites /ADBE /BaseVersion from the output header. A catalog
         # /Version alone therefore cannot carry a copied extension faithfully.
         kwargs["min_version"] = (max(required, base), max(pdf.extension_level, level))
+    if kept_user_encryption:
+        _keep_document_id(pdf)
     if "/Size" not in pdf.trailer:
         # qpdf updates an existing Size to the written xref count, but leaves
         # it absent after recovering an input that omitted this required key.

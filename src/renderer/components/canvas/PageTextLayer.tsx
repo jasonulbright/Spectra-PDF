@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { OPS, TextLayer } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { logRenderError } from './raster';
@@ -8,6 +8,8 @@ import { recognizeRaster } from '../../lib/ocr-recognize';
 import type { EngineCall } from '../../lib/engine-call';
 import { textLayerScaleVars } from '../../lib/text-layer-scale';
 import { applyReadingOrder } from '../../lib/text-layer-order';
+import { clearTextLayer, swapTextLayer } from '../../lib/text-layer-selection';
+import { subscribeTextLayerRebuild, textLayerRebuildRevision } from '../../lib/text-layer-rebuild';
 import {
   peekSelectionCache,
   rasterScaleFor,
@@ -126,6 +128,11 @@ export function PageTextLayer({
   // "did pdf.js find text" has to be remembered rather than re-observed.
   const [native, setNative] = useState<{ version: number; hasText: boolean } | null>(null);
   const nativeVersionRef = useRef(0);
+  // The page, rotation and size the spans in the container were laid out for.
+  // Spans of an older proxy stand only while the build for the new one runs:
+  // its swap replaces them, and its failure removes them.
+  const builtRef = useRef<{ pageNumber: number; rotation: number; w: number; h: number } | null>(null);
+  const revision = useSyncExternalStore(subscribeTextLayerRebuild, textLayerRebuildRevision, textLayerRebuildRevision);
   // Has a selection gesture actually begun on THIS page? See the OCR arm below
   // — this is the trigger, not the armed tool.
   const [gestured, setGestured] = useState(false);
@@ -148,7 +155,21 @@ export function PageTextLayer({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!pdf || !container || layoutW <= 0 || layoutH <= 0) return;
+    if (!container) return;
+    // A new proxy over the same page geometry keeps the spans it finds until
+    // the new ones are built, and the swap carries the selection across. Spans
+    // laid out for another page, rotation or size select the wrong glyphs and
+    // go at once, as do recognised word boxes, which the OCR arm reinstalls.
+    const built = builtRef.current;
+    const sameGeometry = built !== null && built.pageNumber === pageNumber && built.rotation === rotation
+      && built.w === layoutW && built.h === layoutH && container.dataset.ocrLayer !== 'true';
+    const usable = pdf !== null && layoutW > 0 && layoutH > 0;
+    if (!usable || !sameGeometry) {
+      clearTextLayer(container);
+      delete container.dataset.ocrLayer;
+      builtRef.current = null;
+    }
+    if (!pdf || !usable) return;
     let cancelled = false;
     let layer: TextLayer | null = null;
 
@@ -174,18 +195,21 @@ export function PageTextLayer({
         // the same factor. Height is the one the reading view drives.
         const scale = layoutH / base.height;
         const viewport = page.getViewport({ scale, rotation: spin });
+        // The layer is built detached and swapped in whole, so the container
+        // never shows a half-built layer and never stands empty between two
+        // builds. pdf.js measures glyphs on its own canvas, not in the page.
+        const staged = document.createElement('div');
         // pdf.js's span CSS is expressed in terms of --scale-factor; nothing
         // sets it for us because we construct TextLayer directly instead of
         // going through its viewer's setLayerDimensions.
         for (const [name, value] of Object.entries(textLayerScaleVars(viewport))) {
-          container.style.setProperty(name, value);
+          staged.style.setProperty(name, value);
         }
         const content = await page.getTextContent();
         if (cancelled) return;
-        container.replaceChildren();
         layer = new TextLayer({
           textContentSource: content,
-          container,
+          container: staged,
           viewport,
         });
         await layer.render();
@@ -193,30 +217,31 @@ export function PageTextLayer({
         // Selection and copy follow DOM order; this puts rotated and
         // mixed-orientation text in the order search reads it.
         const items = content.items.flatMap((it) => ('str' in it ? [it] : []));
-        applyReadingOrder(container, layer.textDivs, items, page.rotate, () => {
+        applyReadingOrder(staged, layer.textDivs, items, page.rotate, () => {
           const br = document.createElement('br');
           br.setAttribute('role', 'presentation');
           return br;
         });
+        swapTextLayer(container, staged);
+        builtRef.current = { pageNumber, rotation, w: layoutW, h: layoutH };
         setNative({
           version: ++nativeVersionRef.current,
           hasText: (container.textContent ?? '').trim().length > 0,
         });
       } catch (e) {
-        if (!cancelled) logRenderError(`Failed to render text layer for page ${pageNumber}`)(e);
+        if (cancelled) return;
+        // Kept spans may spell bytes the page no longer holds.
+        clearTextLayer(container);
+        builtRef.current = null;
+        logRenderError(`Failed to render text layer for page ${pageNumber}`)(e);
       }
     })();
 
     return () => {
       cancelled = true;
       layer?.cancel();
-      // Drop the spans: a cancelled render can otherwise leave a half-built
-      // layer behind, and a stale one would put selectable text at the wrong
-      // place for the new zoom/rotation.
-      container.replaceChildren();
-      delete container.dataset.ocrLayer;
     };
-  }, [pdf, pageNumber, rotation, layoutW, layoutH]);
+  }, [pdf, pageNumber, rotation, layoutW, layoutH, revision]);
 
   // -- The OCR arm ---------------------------------------------------------
   // Only where pdf.js found nothing: a page with real text (including one our
@@ -324,6 +349,7 @@ export function PageTextLayer({
         ref={containerRef}
         className="textLayer"
         data-testid="text-layer"
+        data-text-build={native?.version}
         data-ocr-status={ocrStatus ?? undefined}
         // The selection gesture's own first event, and the OCR arm's trigger.
         // The layer is inert unless `active`, so this can only fire while the

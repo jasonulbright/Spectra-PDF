@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Asiakirjan ja sivujen metatiedot",
   "panel.sanitize.category.prior_revisions": "Tämän tiedoston aiemmat versiot",
   "panel.sanitize.category.signatures": "Digitaaliset allekirjoitukset",
+  "panel.sanitize.identifierKept": "säilyy, koska asiakirja pysyy salattuna",
   "panel.sanitize.category.thumbnails": "Sivujen pienoiskuvat",
   "panel.sanitize.category.unreferenced_objects": "Objektit, joihin mikään ei viittaa",
   "panel.sanitize.certified": "Tämä asiakirja on sertifioitu, mikä määrittää, mitä siinä saa muuttaa. Siivous muuttaa enemmän kuin se sallii.",

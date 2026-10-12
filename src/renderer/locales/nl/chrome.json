@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Document- en paginametagegevens",
   "panel.sanitize.category.prior_revisions": "Eerdere revisies van dit bestand",
   "panel.sanitize.category.signatures": "Digitale handtekeningen",
+  "panel.sanitize.identifierKept": "behouden omdat het document versleuteld blijft",
   "panel.sanitize.category.thumbnails": "Paginaminiaturen",
   "panel.sanitize.category.unreferenced_objects": "Objecten waar niets naar verwijst",
   "panel.sanitize.certified": "Dit document is gecertificeerd, wat vastlegt wat erin mag veranderen. Een opschoning verandert meer dan dat toestaat.",

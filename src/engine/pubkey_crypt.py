@@ -275,6 +275,20 @@ def _sealed_original(path: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(path)), RECIPIENT_SEALED)
 
 
+def _first_id(reader: PdfFileReader) -> str | None:
+    """The first element of the trailer /ID, hex, or None when it has none.
+    Read from the trailer itself: `reader.document_id` also reads the second
+    element and raises on a one-element /ID. pyHanko parses a string whose
+    bytes happen to decode as text into a `str`, so its original bytes are
+    taken back from the object."""
+    try:
+        first = reader.trailer["/ID"][0]
+        raw = first.original_bytes if isinstance(first, str) else bytes(first)
+    except Exception:
+        return None
+    return raw.hex() or None
+
+
 def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
     """Open the certificate-encrypted working copy at `path`.
 
@@ -293,7 +307,8 @@ def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
     with staged_write(Path(_sealed_original(path))) as staged:
         shutil.copyfile(path, staged)
     p = flags.as_sint32() if flags is not None else -1
-    register_recipient(path, permissions, p, handler)
+    document_id = _first_id(reader)
+    register_recipient(path, permissions, p, handler, document_id)
     writer = copy_into_new_writer(reader)
     _staged_write(writer, Path(path))
     return {
@@ -301,6 +316,7 @@ def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
         "opener": "recipient",
         "permissions": permissions,
         "p": p,
+        "id": document_id,
         "recipient": _recipient_identity(credential),
     }
 
@@ -318,12 +334,14 @@ def pubkey_reattach(path: str, source: str = "", pfx: str = "", password: str = 
     flags = result.permission_flags
     permissions = recipient_permissions(flags)
     p = flags.as_sint32() if flags is not None else -1
-    register_recipient(path, permissions, p, reader.security_handler)
+    document_id = _first_id(reader)
+    register_recipient(path, permissions, p, reader.security_handler, document_id)
     return {
         "encrypted": True,
         "opener": "recipient",
         "permissions": permissions,
         "p": p,
+        "id": document_id,
         "recipient": _recipient_identity(credential),
     }
 

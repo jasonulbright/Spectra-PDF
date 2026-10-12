@@ -5541,6 +5541,7 @@
   "panel.sanitize.category.metadata": "Metadate de document și de pagină",
   "panel.sanitize.category.prior_revisions": "Revizii anterioare ale acestui fișier",
   "panel.sanitize.category.signatures": "Semnături digitale",
+  "panel.sanitize.identifierKept": "păstrat, deoarece documentul rămâne criptat",
   "panel.sanitize.category.thumbnails": "Miniaturi de pagină",
   "panel.sanitize.category.unreferenced_objects": "Obiecte către care nu indică nimic",
   "panel.sanitize.certified": "Acest document este certificat, ceea ce stabilește ce poate fi modificat în el. O curățare modifică mai mult decât permite asta.",

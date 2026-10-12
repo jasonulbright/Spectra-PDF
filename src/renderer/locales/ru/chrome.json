@@ -5645,6 +5645,7 @@
   "panel.sanitize.category.metadata": "Метаданные документа и страниц",
   "panel.sanitize.category.prior_revisions": "Более ранние версии этого файла",
   "panel.sanitize.category.signatures": "Цифровые подписи",
+  "panel.sanitize.identifierKept": "сохраняется, так как документ остаётся зашифрованным",
   "panel.sanitize.category.thumbnails": "Эскизы страниц",
   "panel.sanitize.category.unreferenced_objects": "Объекты, на которые ничто не ссылается",
   "panel.sanitize.certified": "Этот документ сертифицирован, и сертификация определяет, что в нём разрешено менять. Очистка меняет больше, чем это допускает.",

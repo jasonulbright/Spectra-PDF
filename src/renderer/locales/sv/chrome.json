@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Dokument- och sidmetadata",
   "panel.sanitize.category.prior_revisions": "Tidigare revisioner av den här filen",
   "panel.sanitize.category.signatures": "Digitala signaturer",
+  "panel.sanitize.identifierKept": "behålls eftersom dokumentet förblir krypterat",
   "panel.sanitize.category.thumbnails": "Sidminiatyrer",
   "panel.sanitize.category.unreferenced_objects": "Objekt som ingenting pekar på",
   "panel.sanitize.certified": "Det här dokumentet är certifierat, vilket anger vad som får ändras i det. En rensning ändrar mer än så.",

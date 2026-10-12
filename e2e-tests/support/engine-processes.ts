@@ -3,7 +3,7 @@ import { APP_BINARY } from './app-data.js';
 
 export interface EngineProcess {
   pid: number;
-  /** `window`, `job`, `run` or `health`, from `--spectra-role=`. */
+  /** `window`, `work`, `job`, `run` or `health`, from `--spectra-role=`. */
   role: string;
   /** The window label from `--spectra-window=`; null for the health worker. */
   window: string | null;

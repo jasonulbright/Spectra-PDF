@@ -16,7 +16,9 @@ import {
   closeAllFiles,
   getWorkspacePageIds,
   selectCanvasPages,
+  getSelectedCanvasPageIds,
   rotateSelectedCanvasPages,
+  commandEnabled,
   commitPendingEdits,
   setCanvasFormValue,
   pendingFormValueCount,
@@ -250,7 +252,13 @@ describe('on-canvas form filling', () => {
     // (a gate-commit could rename fields out from under a name-only target).
     const ids = await getWorkspacePageIds();
     await selectCanvasPages([ids[0]]);
+    await browser.waitUntil(async () => JSON.stringify(await getSelectedCanvasPageIds()) === JSON.stringify([ids[0]]),
+      { timeoutMsg: 'the page was never selected' });
+    // The rotate lands only after the document's signature policy is read, so
+    // the sign waits until the edit is pending.
     await rotateSelectedCanvasPages(90);
+    await browser.waitUntil(async () => await commandEnabled('document.applyPageEdits'),
+      { timeoutMsg: 'the rotation never became a pending page edit' });
     let message = '';
     try {
       await signCanvasField({

@@ -5437,6 +5437,7 @@
   "panel.sanitize.category.metadata": "Dokument- und Seitenmetadaten",
   "panel.sanitize.category.prior_revisions": "Frühere Überarbeitungen dieser Datei",
   "panel.sanitize.category.signatures": "Digitale Signaturen",
+  "panel.sanitize.identifierKept": "bleibt erhalten, da das Dokument verschlüsselt bleibt",
   "panel.sanitize.category.thumbnails": "Seitenminiaturen",
   "panel.sanitize.category.unreferenced_objects": "Objekte, auf die nichts verweist",
   "panel.sanitize.certified": "Dieses Dokument ist zertifiziert, was festlegt, was sich daran ändern darf. Eine Bereinigung ändert mehr, als das erlaubt.",
