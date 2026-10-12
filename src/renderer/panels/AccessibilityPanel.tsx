@@ -15,6 +15,7 @@ import { latestRun } from '../lib/latest-run';
 import { liveOrRefuse } from '../lib/live-report';
 import { readerRevisionIn, recordReadRevision } from '../lib/reader-copy';
 import { mergeUntouched } from '../lib/late-read';
+import type { PdfBuffer } from '../state/types';
 import { TEST_HARNESS_ENABLED, registerAccessibility } from '../testHarness';
 import { LOCALE_NATIVE_NAMES, SHIPPED_LOCALES, tChrome } from '../i18n';
 import { writeFailureText } from '../lib/save-failure';
@@ -25,7 +26,9 @@ import {
   draftKey,
   fixFor,
   namesReportAddress,
+  sendPageCalls,
   suggestionFor,
+  type PageCallsOutcome,
   type AuthoredFix,
   type FixOffer,
 } from '../lib/a11y-fixes';
@@ -208,11 +211,6 @@ function placeable(check: Check): PlaceableFinding[] {
   });
   return out;
 }
-
-/** How "declare the rest decoration" ended: written, refused because the
- * report no longer addresses the live pages, or stopped (declined, failed,
- * or nothing to declare). */
-type RestOutcome = 'fixed' | 'refused' | 'stopped';
 
 /** Every draft editor on screen, keyed by `draftKey`. */
 type Drafts = Record<string, string>;
@@ -399,7 +397,7 @@ export function AccessibilityPanel(): React.ReactElement {
    * per line. Marked-content ids are page-scoped, so each page is its own
    * call and its own undoable step. */
   const declareRestDecoration = useCallback(
-    async (check: Check): Promise<RestOutcome> => {
+    async (check: Check): Promise<PageCallsOutcome> => {
       if (!activeFile) return 'stopped';
       const calls = artifactCalls(check, true);
       if (calls.length === 0) {
@@ -413,18 +411,24 @@ export function AccessibilityPanel(): React.ReactElement {
       try {
         if (!(await reportStillAddresses())) return 'refused';
         setStatus(tChrome('panel.a11y.fixing'));
+        const path = activeFile.path;
+        const readAt = readState().files.get(path)?.buffer;
+        if (!readAt) return 'stopped';
+        const isCurrent = (buffer: PdfBuffer): boolean => {
+          const state = readState();
+          return state.files.get(path)?.buffer === buffer && !state.pageDirtyPaths.includes(path);
+        };
         // One call per page, each its own undoable step. The first declined
         // one stops the run: the gate remembers a Continue per file, so a
         // decline is a decline for the whole set rather than for one page.
-        for (const call of calls) {
-          const r = await performOperation(activeFile.path, call.method, call.params);
-          if (r === EDIT_DECLINED) {
-            setStatus('');
-            return 'stopped';
-          }
-        }
-        setStatus(tChrome('panel.a11y.fixed'));
-        return 'fixed';
+        const outcome = await sendPageCalls(calls, readAt, async (call, expectedBuffer) => {
+          const r = await performOperation(path, call.method, call.params, { expectedBuffer });
+          if (r === EDIT_DECLINED) return 'declined';
+          return r?.publication.buffer ?? null;
+        }, isCurrent);
+        if (outcome === 'refused') setStatus(tChrome('panel.common.documentChanged'));
+        else setStatus(outcome === 'fixed' ? tChrome('panel.a11y.fixed') : '');
+        return outcome;
       } catch (e: unknown) {
         setStatus(
           tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
@@ -434,7 +438,7 @@ export function AccessibilityPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, performOperation, reportStillAddresses],
+    [activeFile, performOperation, readState, reportStillAddresses],
   );
 
   /** Write one authored value at one finding. */

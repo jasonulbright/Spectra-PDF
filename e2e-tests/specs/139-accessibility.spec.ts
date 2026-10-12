@@ -38,6 +38,8 @@ import {
   commandEnabled,
   waitForActiveCanvasPageIds,
   getSelectedCanvasPageIds,
+  commitPendingEdits,
+  a11yRecheck,
 } from '../support/harness.js';
 
 const UNTAGGED_TEXT = 'This paragraph is tagged by nothing at all.';
@@ -599,5 +601,92 @@ describe('an accessibility fix over a pending page edit', () => {
     // pending and the file is unchanged.
     expect(await commandEnabled('document.applyPageEdits')).toBe(true);
     expect((await getState()).activeFile?.dirty).toBe(false);
+  });
+});
+
+describe('declaring the rest over pages renumbered between its calls', () => {
+  let tmp: string;
+  let source: string;
+  const held = () => browser.execute(() => (window as any).__SPECTRA_TEST__.rewriteEngineStepsWaiting() as number);
+  // An undefined value comes back over WebDriver as null, so a run still in
+  // flight reads as a sentinel string instead.
+  const outcome = () => browser.execute(() => ((window as any).__restOutcome ?? 'pending') as string);
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-a11y-rest-'));
+    source = resolve(tmp, 'three-pages.pdf');
+    // The failing page, then two pages whose only text is untagged: one
+    // declare-rest call per page, three in all.
+    await buildFailingPdf(source);
+    const doc = await PDFDocument.load(readFileSync(source));
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    for (const text of ['Untagged text on page two.', 'Untagged text on page three.']) {
+      doc.addPage([612, 792]).drawText(text, { x: 72, y: 700, size: 11, font });
+    }
+    writeFileSync(source, await doc.save());
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([source]);
+    await setView('canvas');
+    await focusTab({ doc: source });
+    expect(await invokeAppCommand('tools.panel.accessibility')).toBe(true);
+    await browser.waitUntil(
+      async () => ((await a11ySnapshot())?.checks.find((c) => c.id === 'tagged_content')?.findings ?? 0) >= 3,
+      { timeout: 30_000, interval: 200, timeoutMsg: 'the report never named an untagged run on all three pages' },
+    );
+  });
+
+  after(async () => {
+    await browser.execute(() => { (window as any).__SPECTRA_TEST__.releaseRewriteEngineSteps(); });
+    await closeAllFiles();
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('stops at the page a deletion renumbered, and keeps the page already declared', async () => {
+    await browser.execute(() => {
+      const w = window as any;
+      w.__restOutcome = undefined;
+      w.__SPECTRA_TEST__.holdRewriteEngineSteps();
+      w.__SPECTRA_TEST__.a11yArtifactRest('tagged_content').then(
+        () => { w.__restOutcome = 'fixed'; },
+        (e: unknown) => { w.__restOutcome = String(e); },
+      );
+    });
+    await browser.waitUntil(async () => (await held()) === 1,
+      { timeout: 30_000, timeoutMsg: "page 1's call never reached its engine step" });
+    // A new hold lets page 1's call publish and catches page 2's call.
+    await browser.execute(() => { (window as any).__SPECTRA_TEST__.holdRewriteEngineSteps(); });
+    await browser.waitUntil(async () => (await held()) === 1,
+      { timeout: 30_000, timeoutMsg: "page 2's call never reached its engine step" });
+    expect((await getState()).activeFile?.dirty).toBe(true);
+    expect(await outcome()).toBe('pending');
+
+    // Page 2 is deleted while its call waits: the old page 3 is now page 2,
+    // which is the page that call names.
+    const ids = await waitForActiveCanvasPageIds();
+    expect(ids).toHaveLength(3);
+    await selectCanvasPages([ids[1]]);
+    await browser.waitUntil(
+      async () => JSON.stringify(await getSelectedCanvasPageIds()) === JSON.stringify([ids[1]]),
+      { timeoutMsg: 'page 2 was never selected' },
+    );
+    await deleteCanvasPagesAndWait([ids[1]]);
+    await browser.execute(() => { (window as any).__SPECTRA_TEST__.releaseRewriteEngineSteps(); });
+    await browser.waitUntil(async () => (await outcome()) !== 'pending',
+      { timeout: 30_000, timeoutMsg: 'declare-rest never finished' });
+    expect(await outcome()).toContain('a11yArtifactRest: the report no longer addresses the live pages');
+
+    // With the deletion committed and the document checked again, page 1's
+    // run stays declared and the old page 3's run is still untagged: the one
+    // finding left.
+    await commitPendingEdits();
+    await a11yRecheck();
+    await browser.waitUntil(
+      async () => {
+        const tagged = (await a11ySnapshot())?.checks.find((c) => c.id === 'tagged_content');
+        return tagged?.status === 'fail' && tagged.findings === 1;
+      },
+      { timeout: 30_000, interval: 300, timeoutMsg: 'the report never settled on the one untagged run left' },
+    );
   });
 });

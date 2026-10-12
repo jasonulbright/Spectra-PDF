@@ -17,7 +17,7 @@ import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
 import { decodePdfTextString, pdfNameKey, pdfNameText, pdfStringCodes } from './pdf-text-string';
-import { importedRect } from './annotation-fingerprint';
+import { contentsHolder, importedRect } from './annotation-fingerprint';
 import {
   LEGEND_FONT_SIZE,
   LEGEND_PAD,
@@ -299,7 +299,8 @@ function stripImportedOriginals(
     // fingerprint names it; markups and ink import from their own geometry
     // and do match at that rectangle.
     const rect = importedRect(dict, subtype);
-    const contentsObj = dict.lookup(PDFName.of('Contents'));
+    const holder = contentsHolder(dict);
+    const contentsObj = holder.lookup(PDFName.of('Contents'));
     const contents = contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
       ? decodePdfTextString(pdfStringCodes(contentsObj)) : undefined;
     const matchIndex = fingerprints.findIndex(
@@ -319,7 +320,9 @@ function stripImportedOriginals(
     // Its reference is already in the output context and configured by the
     // optional-content carry, so the replacement uses that exact identity.
     if (annotation && layer !== undefined) layerGates.set(annotation, layer);
-    if (annotation && contentsObj instanceof PDFName) nameContents.set(annotation, pdfNameText(contentsObj));
+    // Only the annotation's own name-typed /Contents is carried: a group
+    // reply's parent keeps its own value.
+    if (annotation && holder === dict && contentsObj instanceof PDFName) nameContents.set(annotation, pdfNameText(contentsObj));
     annots.remove(i);
   }
   return stripped;

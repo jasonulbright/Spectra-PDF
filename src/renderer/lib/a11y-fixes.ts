@@ -242,3 +242,41 @@ export function artifactCalls(check: Check, allowSigned: boolean): AuthoredCall[
       },
     }));
 }
+
+/** How a run of page calls ended: every call published, the document changed
+ * before a call could be sent at the revision it was bound to, or a call
+ * stopped the run (declined, or nothing was published). */
+export type PageCallsOutcome = 'fixed' | 'refused' | 'stopped';
+
+/**
+ * Sends one call per page, each bound to the revision the call before it
+ * published; the first is bound to the revision the report was read at. A
+ * page edit between two calls renumbers the pages the later calls name, so
+ * the run stops there, and the pages already published stay as they are: each
+ * was right for the document it was written to.
+ *
+ * `isCurrent` answers whether the document is still exactly at a revision.
+ * `send` hands the revision to the write, which refuses a gate rebuild of it;
+ * a write that fails once the document has moved is that refusal.
+ */
+export async function sendPageCalls<R>(
+  calls: readonly AuthoredCall[],
+  readAt: R,
+  send: (call: AuthoredCall, expected: R) => Promise<R | 'declined' | null>,
+  isCurrent: (revision: R) => boolean,
+): Promise<PageCallsOutcome> {
+  let expected = readAt;
+  for (const call of calls) {
+    if (!isCurrent(expected)) return 'refused';
+    let published: R | 'declined' | null;
+    try {
+      published = await send(call, expected);
+    } catch (e: unknown) {
+      if (!isCurrent(expected)) return 'refused';
+      throw e;
+    }
+    if (published === 'declined' || published === null) return 'stopped';
+    expected = published;
+  }
+  return 'fixed';
+}
