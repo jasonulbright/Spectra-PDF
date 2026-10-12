@@ -17,7 +17,7 @@ import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
 import { decodePdfTextString, pdfNameKey, pdfNameText, pdfStringCodes } from './pdf-text-string';
-import { contentsHolder, importedRect } from './annotation-fingerprint';
+import { contentsHolder, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import {
   LEGEND_FONT_SIZE,
   LEGEND_PAD,
@@ -284,7 +284,7 @@ function stripImportedOriginals(
     // which is how the importer's pdf.js reading sees it too, so both sides
     // fingerprint alike. A strict read fails the whole commit over one
     // malformed annotation.
-    const subtypeObj = dict.lookup(PDFName.of('Subtype'));
+    const subtypeObj = entryOf(dict, 'Subtype');
     const subtype = subtypeObj instanceof PDFName ? pdfNameKey(subtypeObj) : undefined;
     const STRIPPABLE = new Set([
       'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
@@ -300,7 +300,7 @@ function stripImportedOriginals(
     // and do match at that rectangle.
     const rect = importedRect(dict, subtype);
     const holder = contentsHolder(dict);
-    const contentsObj = holder.lookup(PDFName.of('Contents'));
+    const contentsObj = entryOf(holder, 'Contents');
     const contents = contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
       ? decodePdfTextString(pdfStringCodes(contentsObj)) : undefined;
     const matchIndex = fingerprints.findIndex(
@@ -315,11 +315,12 @@ function stripImportedOriginals(
     if (matchIndex === -1) continue; // no positive match — never guess-remove
     consumed.add(matchIndex);
     const annotation = originals[matchIndex].annotation;
-    const layer = dict.get(PDFName.of('OC'));
+    const layer = rawEntry(dict, 'OC');
     // Geometry and appearance are reauthored; layer membership is not.
     // Its reference is already in the output context and configured by the
     // optional-content carry, so the replacement uses that exact identity.
-    if (annotation && layer !== undefined) layerGates.set(annotation, layer);
+    // `/OC null` is no layer: the replacement carries no /OC at all.
+    if (annotation && layer !== undefined && layer !== PDFNull) layerGates.set(annotation, layer);
     // Only the annotation's own name-typed /Contents is carried: a group
     // reply's parent keeps its own value.
     if (annotation && holder === dict && contentsObj instanceof PDFName) nameContents.set(annotation, pdfNameText(contentsObj));
