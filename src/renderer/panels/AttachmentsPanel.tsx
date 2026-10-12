@@ -9,18 +9,14 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { formatBytes } from '../lib/format-bytes';
 
 interface Attachment {
   name: string;
-  size: number;
+  /** Null when the file declares no decoded size and the listing decodes nothing. */
+  size: number | null;
   description: string;
   mime: string;
-}
-
-function human(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function AttachmentsPanel(): React.ReactElement {
@@ -152,7 +148,7 @@ export function AttachmentsPanel(): React.ReactElement {
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-neutral-200 truncate" title={a.name}>{a.name}</div>
                 <div className="text-xs text-neutral-500">
-                  {human(a.size)}{a.mime ? ` · ${a.mime}` : ''}{a.description ? ` · ${a.description}` : ''}
+                  {formatBytes(a.size)}{a.mime ? ` · ${a.mime}` : ''}{a.description ? ` · ${a.description}` : ''}
                 </div>
               </div>
               <button

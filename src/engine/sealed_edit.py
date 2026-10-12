@@ -26,6 +26,7 @@ from engine.credentials import (
     _decoded_permissions,
     open_pdf,
     opened_with_user_password,
+    registered_document_id,
 )
 from engine.inplace import is_same_file
 from engine.pdf_save import save_pdf
@@ -75,22 +76,23 @@ def sealed_plaintext(path: str, capabilities, data: str | None = None) -> dict:
 
     `data` (base64) names other encrypted bytes of the same document, such as
     a staged rewrite not yet published, to decrypt with `path`'s credential
-    instead of the file. Its first trailer /ID must match the working copy so
-    another file encrypted with the same password cannot inherit its /P
-    permissions. Refused unless the document's /P bits allow every one of
-    `capabilities` ("pageTier", "commentTier", "formAuthoring")."""
+    instead of the file. The file at `path` is then never opened: a reader
+    holding it open fails a publication that renames over it. The bytes must
+    be encrypted and their first trailer /ID must equal the one recorded when
+    `path` was opened, so another file encrypted with the same password
+    cannot borrow `path`'s permissions; their own /P bits are checked as well
+    as the registered credential's. Refused unless the /P bits allow every one
+    of `capabilities` ("pageTier", "commentTier", "formAuthoring")."""
     names = _require(path, capabilities)
     if data is None:
-        source = path
-        pdf_context = open_pdf(source)
+        pdf_context = open_pdf(path)
     else:
-        source = io.BytesIO(base64.b64decode(data, validate=True))
-        with open_pdf(path) as working:
-            expected_id = _first_document_id(working)
+        expected_id = registered_document_id(path)
         if expected_id is None:
             raise SealedEditMisuse(
                 "the supplied bytes cannot be matched to a document without a first trailer ID"
             )
+        source = io.BytesIO(base64.b64decode(data, validate=True))
         pdf_context = open_pdf(source, document=path)
     with pdf_context as pdf:
         if data is not None:

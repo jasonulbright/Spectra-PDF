@@ -24,6 +24,18 @@ export async function shareStageCredential(file: Pick<OpenFile, 'workingPath' | 
   return true;
 }
 
+/** Lends `file`'s credential to `copy`, a reader copy of its working copy;
+ * true when the loan is to be returned with `releaseStageCredential`. Every
+ * opener but `none` holds a credential: an owner- or user-opened copy is
+ * encrypted and opens only with it, and a certificate-opened copy is
+ * plaintext that reads as unrestricted without it. */
+export async function shareReaderCredential(file: Pick<OpenFile, 'workingPath' | 'security'>, copy: string): Promise<boolean> {
+  if (file.security?.opener === 'none') return false;
+  if (!caller) throw new Error('stage credentials are not registered');
+  await caller('share_document', { path: file.workingPath, alias: copy });
+  return true;
+}
+
 export async function releaseStageCredential(copy: string): Promise<void> {
   if (!caller) return;
   await caller('close_document', { path: copy }).catch(() => {});

@@ -14,7 +14,8 @@ import os
 import pikepdf
 import pytest
 
-from engine.credentials import PERMISSIONS_HELD, close_document, open_document
+from engine import credentials
+from engine.credentials import PERMISSIONS_HELD, close_document, open_document, registered_document_id
 from engine.sealed_edit import SealedEditMisuse, sealed_plaintext, sealed_reseal
 
 USER = "reader-pw-5e2"
@@ -307,18 +308,13 @@ def test_plaintext_of_given_bytes_uses_the_document_credential(sealed):
 
 
 def test_plaintext_refuses_another_documents_bytes_even_with_the_same_password(sealed, tmp_dir):
-    # The first document grants page edits; the second withholds them. A shared
-    # user password must not let the first document's /P authorize the second.
-    other = _make(
-        tmp_dir,
-        _allow(modify_other=False, modify_assembly=False),
-        "restricted.pdf",
-        page_label="restricted",
-        document_id=b"restricted.pdf",
-    )
-    with pikepdf.open(sealed, password=USER) as allowed:
-        with pikepdf.open(other, password=USER) as restricted:
-            assert bytes(allowed.trailer.ID[0]) != bytes(restricted.trailer.ID[0])
+    # Same user password, same /P, another document: only its identity tells
+    # it apart, and a shared password must not let it pass as this document.
+    other = _make(tmp_dir, _allow(), "other.pdf", page_label="other", document_id=b"other.pdf")
+    with pikepdf.open(sealed, password=USER) as mine:
+        with pikepdf.open(other, password=USER) as theirs:
+            assert bytes(mine.trailer.ID[0]) != bytes(theirs.trailer.ID[0])
+            assert int(mine.encryption.P) == int(theirs.encryption.P)
     raw = base64.b64encode(open(other, "rb").read()).decode("ascii")
 
     with pytest.raises(SealedEditMisuse, match="same document"):
@@ -349,3 +345,32 @@ def test_plaintext_accepts_a_resealed_stage_of_the_same_document(sealed, tmp_dir
     reply = sealed_plaintext(sealed, "pageTier", data=raw)
     with pikepdf.open(io.BytesIO(base64.b64decode(reply["data"]))) as plain:
         assert int(plain.pages[0].Rotate) == 90
+
+
+def test_a_user_open_records_the_documents_first_id(sealed):
+    with pikepdf.open(sealed, password=USER) as pdf:
+        assert registered_document_id(sealed) == bytes(pdf.trailer.ID[0])
+
+
+def test_given_bytes_need_a_recorded_id(sealed, tmp_dir):
+    raw = base64.b64encode(open(sealed, "rb").read()).decode("ascii")
+    opened = credentials.document_permissions(sealed)
+    close_document(sealed)
+    held = {"opener": "user", "permissions": opened["permissions"], "revision": opened["revision"], "p": opened["p"]}
+    open_document(sealed, USER, held=held)
+
+    with pytest.raises(SealedEditMisuse, match="first trailer ID"):
+        sealed_plaintext(sealed, "commentTier", data=raw)
+
+
+def test_plaintext_of_given_bytes_never_opens_the_working_copy(sealed):
+    raw = base64.b64encode(open(sealed, "rb").read()).decode("ascii")
+    os.remove(sealed)
+    assert not os.path.exists(sealed)
+
+    reply = sealed_plaintext(sealed, "commentTier", data=raw)
+    with pikepdf.open(io.BytesIO(base64.b64decode(reply["data"]))) as plain:
+        assert not plain.is_encrypted
+        assert len(plain.pages) == 3
+    with pytest.raises(Exception):
+        sealed_plaintext(sealed, "commentTier")

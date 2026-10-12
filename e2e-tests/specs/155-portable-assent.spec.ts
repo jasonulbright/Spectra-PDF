@@ -72,6 +72,18 @@ async function jobCall(id: number): Promise<string> {
   }, id);
 }
 
+/** A call the work process serves: the structure tree of the open document,
+ * which the untagged sample answers with an empty tree. */
+async function workCall(id: number): Promise<string> {
+  const working = (await getState()).activeFile!.workingPath;
+  return await browser.executeAsync<string, [string, number]>(function (file, requestId, done) {
+    (window as any).__SPECTRA_TEST__
+      .engineRequestWithId('get_struct_tree', { file }, requestId)
+      .then(() => done('ok'))
+      .catch((e: unknown) => done(String(e)));
+  }, working, id);
+}
+
 function roamingListing(): string[] {
   try {
     return readdirSync(ROAMING_APP_DIR).sort();
@@ -195,10 +207,13 @@ describe('the portable container: colour-profile assent and data beside the app'
   });
 
   it('Review re-opens the licence, and accepting lights the surfaces up with no restart', async () => {
-    // The window's job process read the answer at its spawn too: the
-    // recorded answer replaces it, and the next job call starts a new one.
+    // The window's job and work processes read the answer at their spawn too:
+    // the recorded answer replaces them, and the next call of each starts a
+    // new one.
     expect(await jobCall(5151)).toBe('ok');
     const jobBefore = onlyEngineProcess('job', 'main');
+    expect(await workCall(5153)).toBe('ok');
+    const workBefore = onlyEngineProcess('work', 'main');
 
     await openPrepress();
     await waitForDisplayedSelector(REVIEW, { timeout: 20_000 });
@@ -212,8 +227,14 @@ describe('the portable container: colour-profile assent and data beside the app'
       timeout: 30_000,
       timeoutMsg: 'the assent restart left the job process running',
     });
+    await browser.waitUntil(async () => !processAlive(workBefore), {
+      timeout: 30_000,
+      timeoutMsg: 'the assent restart left the work process running',
+    });
     expect(await jobCall(5152)).toBe('ok');
     expect(onlyEngineProcess('job', 'main')).not.toBe(jobBefore);
+    expect(await workCall(5154)).toBe('ok');
+    expect(onlyEngineProcess('work', 'main')).not.toBe(workBefore);
 
     // Same session, same window, nothing reloaded — the claim that makes a
     // recorded decline liveable rather than a launch-time trap.

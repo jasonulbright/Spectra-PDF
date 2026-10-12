@@ -27,7 +27,7 @@ pub(crate) fn equal_files(a: &Path, b: &Path) -> io::Result<bool> {
     }
 }
 
-fn source_guard(path: &Path) -> io::Result<File> {
+pub(crate) fn source_guard(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(windows)]
@@ -73,6 +73,12 @@ fn legacy_stage(entry: &str) -> bool {
         .is_some_and(|random| {
             random.len() == 6 && random.bytes().all(|b| b.is_ascii_alphanumeric())
         })
+}
+
+/// Whether `entry` is the name of a stage, current or legacy: a snapshot or a
+/// Save in progress, never a working copy.
+pub(crate) fn is_stage_name(entry: &str) -> bool {
+    stage_owner(entry).is_some() || legacy_stage(entry)
 }
 
 struct Stage(Option<tempfile::NamedTempFile>);

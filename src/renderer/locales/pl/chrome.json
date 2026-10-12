@@ -5645,6 +5645,7 @@
   "panel.sanitize.category.metadata": "Metadane dokumentu i stron",
   "panel.sanitize.category.prior_revisions": "Wcześniejsze wersje tego pliku",
   "panel.sanitize.category.signatures": "Podpisy cyfrowe",
+  "panel.sanitize.identifierKept": "zachowany, ponieważ dokument pozostaje zaszyfrowany",
   "panel.sanitize.category.thumbnails": "Miniatury stron",
   "panel.sanitize.category.unreferenced_objects": "Obiekty, do których nic nie prowadzi",
   "panel.sanitize.certified": "Ten dokument jest certyfikowany, a certyfikacja określa, co można w nim zmieniać. Oczyszczanie zmienia więcej, niż to dopuszcza.",

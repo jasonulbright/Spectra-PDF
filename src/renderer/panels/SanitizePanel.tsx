@@ -30,11 +30,12 @@ import {
 // told what is in it before anything is removed, and to check what the removal
 // actually achieved afterwards.
 //
-// The audit goes through the UNGATED read — it runs on open and re-runs on
-// every buffer change, and an annotation is a pending page edit, so gating it
-// would flush the user's just-drawn markup to disk merely for looking. The
-// APPLY goes through the App handler, which routes it into the standard
-// snapshot → gated call → reload flow, so one pass is one undo entry.
+// The audit is an ungated read — it runs on open and re-runs on every buffer
+// change, and an annotation is a pending page edit, so gating it would flush
+// the user's just-drawn markup to disk merely for looking. It still takes the
+// working copy's shared file lock, so it never reads bytes a publication is
+// replacing. The APPLY goes through the App handler, which routes it into the
+// standard snapshot → gated call → reload flow, so one pass is one undo entry.
 //
 // Nothing is checked by default, and the automatic re-audit after an apply is
 // what makes a residue visible instead of a success message over a file that
@@ -82,13 +83,14 @@ function detailLine(detail: AuditDetail): string {
   if (detail.contents) parts.push(detail.contents);
   if (detail.keys?.length) parts.push(detail.keys.join(', '));
   if (detail.objects !== undefined) parts.push(`${detail.objects}`);
+  if (detail.replaced === false) parts.push(tChrome('panel.sanitize.identifierKept'));
   return parts.join(' · ');
 }
 
 export function SanitizePanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
-  const { callRaw } = useEngine();
+  const { call } = useEngine();
 
   const [report, setReport] = useState<AuditReport | null>(null);
   const [selection, setSelection] = useState<Selection>(emptySelection);
@@ -106,10 +108,10 @@ export function SanitizePanel(): React.ReactElement {
 
   const audit = useCallback(
     async (target: string): Promise<AuditReport> =>
-      // The read is deliberately ungated: it re-runs on every buffer change,
-      // and gating it would commit pending page edits merely for looking.
-      (await callRaw('audit_hidden_information', { file: target })) as unknown as AuditReport,
-    [callRaw],
+      // An internal method: `call` takes its shared file lock and runs no
+      // commit gate.
+      (await call('audit_hidden_information', { file: target })) as unknown as AuditReport,
+    [call],
   );
 
   // The report an apply was measured against, held until the re-audit that

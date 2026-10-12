@@ -5333,6 +5333,7 @@
   "panel.sanitize.category.metadata": "文档和页面元数据",
   "panel.sanitize.category.prior_revisions": "此文件的早期修订",
   "panel.sanitize.category.signatures": "数字签名",
+  "panel.sanitize.identifierKept": "保留，因为文档仍处于加密状态",
   "panel.sanitize.category.thumbnails": "页面缩略图",
   "panel.sanitize.category.unreferenced_objects": "无任何引用的对象",
   "panel.sanitize.certified": "此文档已认证，认证规定了可更改的内容。清理操作的改动超出该范围。",

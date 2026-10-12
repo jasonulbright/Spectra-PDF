@@ -5541,6 +5541,7 @@
   "panel.sanitize.category.metadata": "מטא-נתונים של המסמך ושל העמודים",
   "panel.sanitize.category.prior_revisions": "מהדורות קודמות של קובץ זה",
   "panel.sanitize.category.signatures": "חתימות דיגיטליות",
+  "panel.sanitize.identifierKept": "נשמר, כי המסמך נשאר מוצפן",
   "panel.sanitize.category.thumbnails": "תמונות ממוזערות של עמודים",
   "panel.sanitize.category.unreferenced_objects": "אובייקטים שדבר אינו מפנה אליהם",
   "panel.sanitize.certified": "מסמך זה נושא הסמכה הקובעת מה מותר לשנות בו. ניקוי משנה יותר ממה שההסמכה מתירה.",

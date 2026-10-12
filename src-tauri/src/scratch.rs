@@ -500,6 +500,16 @@ mod tests {
         folder
     }
 
+    /// A reader copy of a working folder's document, with the recipient
+    /// marker beside it.
+    fn reader_folder(folder: &Path, pid: u32) -> PathBuf {
+        let reader = folder.join(format!("r{pid}-0123abcd"));
+        std::fs::create_dir(&reader).unwrap();
+        std::fs::write(reader.join("document.pdf"), b"%PDF-1.7").unwrap();
+        std::fs::write(reader.join("spectra-recipient.json"), b"{}").unwrap();
+        reader
+    }
+
     fn legacy_folder(root: &Path) -> PathBuf {
         let folder = root.join(uuid());
         std::fs::create_dir(&folder).unwrap();
@@ -687,6 +697,9 @@ mod tests {
         std::fs::set_permissions(&read_only, permissions).unwrap();
         std::fs::create_dir(dead.join("nested")).unwrap();
         std::fs::write(dead.join("nested").join("stage.pdf"), b"%PDF").unwrap();
+        let dead_reader = reader_folder(&dead, DEAD);
+        let own_reader = reader_folder(&own, OWN);
+        let live_reader = reader_folder(&live, LIVE);
         let not_a_folder = root.path().join(format!("{}.{DEAD}", uuid()));
         std::fs::write(&not_a_folder, b"a file under a folder's name").unwrap();
         for other in ["batch-scratch", "e2e-combine-out-0qs6Vp"] {
@@ -724,6 +737,8 @@ mod tests {
         kept.remove(dead.file_name().unwrap().to_str().unwrap());
         assert_eq!(names(root.path()), kept);
         assert!(own.exists() && live.exists() && not_a_folder.exists());
+        assert!(!dead_reader.exists());
+        assert!(own_reader.join("document.pdf").exists() && live_reader.join("document.pdf").exists());
         assert!(web_own.exists() && web_live.exists());
         assert!(!web_dead.exists());
         assert!(net_own.exists() && net_live.exists() && net_other.exists());

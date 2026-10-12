@@ -12,10 +12,12 @@ import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerPortfolioHandlers } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { formatBytes } from '../lib/format-bytes';
 
 interface Member {
   name: string;
-  size: number;
+  /** Null when the file declares no decoded size and the listing decodes nothing. */
+  size: number | null;
   description: string;
   mime: string;
 }
@@ -25,12 +27,6 @@ interface PortfolioInfo {
   view: string;
   members: Member[];
   count: number;
-}
-
-function human(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const isPdfMember = (m: Member): boolean =>
@@ -435,7 +431,7 @@ export function PortfolioPanel(): React.ReactElement {
                       {m.name}
                     </div>
                     <div className="text-xs text-neutral-500">
-                      {human(m.size)}
+                      {formatBytes(m.size)}
                       {m.mime ? ` · ${m.mime}` : ''}
                       {m.description ? ` · ${m.description}` : ''}
                     </div>

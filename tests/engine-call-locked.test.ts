@@ -12,6 +12,7 @@ import {
 import { recognizePage } from '../src/renderer/lib/ocr-recognize';
 import { beginDocumentWrites } from '../src/renderer/lib/document-writes';
 import { UNRESTRICTED } from '../src/renderer/lib/document-permissions';
+import type { ReaderCopyIo } from '../src/renderer/lib/reader-copy';
 
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({ app: { getTesseractPath: async () => 'tesseract.exe' } }));
 vi.mock('../src/renderer/lib/gs-capability', () => ({ requireGsPath: async () => 'gs.exe' }));
@@ -27,14 +28,15 @@ function deferred() {
   return { promise, resolve };
 }
 
-function engine() {
+function engine(readerCopies: ReaderCopyIo | null = null) {
   const sent: string[] = [];
-  const rawCall = vi.fn(async (method: string): Promise<unknown> => { sent.push(method); return { status: 'opened', text: '', words: [] }; });
+  const rawCall = vi.fn<(method: string, params?: Record<string, unknown>) => Promise<unknown>>(async (method) => { sent.push(method); return { status: 'opened', text: '', words: [] }; });
   const runCommitGate = vi.fn(async () => {});
   const track = vi.fn(async (_m: string, _p: unknown, run: () => Promise<unknown>) => run());
   const closures = engineClosures({
     isTrackableMethod: () => false, beginInteractive: () => () => {},
     runCommitGate, restoreLostCredentials, lockKeysFor, exclusiveKeys, withFileLock, withWriteChain, beginDocumentWrites, track, rawCall,
+    readerCopies,
   });
   return { ...closures, rawCall, runCommitGate, track, sent };
 }
@@ -86,6 +88,32 @@ describe('the locked internal call path', () => {
     setCredentialUnlocker(unlocker);
     await e.call('recognize', { file: W, page: 1 });
     expect(unlocker).toHaveBeenCalledWith(W);
+  });
+
+  it('preflight, an internal long reader, reads a copy made under the working copy lock alone, without the gate', async () => {
+    const copy = 'C:\\work\\a\\r7-00000001\\doc.pdf';
+    const profile = 'C:\\profiles\\press.json';
+    const io: ReaderCopyIo = {
+      fileAt: path => (path === W ? { workingPath: W, security: UNRESTRICTED } : undefined),
+      create: vi.fn(async () => { expect(__lockedCount()).toBe(1); return copy; }),
+      remove: vi.fn(async () => true),
+      lend: vi.fn(async () => false),
+      giveBack: vi.fn(async () => {}),
+    };
+    const e = engine(io);
+    const step = deferred();
+    e.rawCall.mockImplementationOnce(async () => { await step.promise; return { file: copy }; });
+    const report = e.call('preflight', { file: W, profile_path: profile });
+    await vi.waitFor(() => expect(e.rawCall).toHaveBeenCalledOnce());
+    expect(e.rawCall.mock.calls[0][1]).toEqual({ file: copy, profile_path: profile });
+    // A writer of the working copy is not kept waiting by the report.
+    await withFileLock([W], async () => {});
+    step.resolve();
+    await expect(report).resolves.toEqual({ file: W });
+    expect(e.runCommitGate).not.toHaveBeenCalled();
+    expect(e.track).not.toHaveBeenCalled();
+    expect(io.remove).toHaveBeenCalledWith(copy);
+    expect(__lockedCount()).toBe(0);
   });
 
   it('the find index recognizes a page with a lost credential without a prompt, once per page', async () => {

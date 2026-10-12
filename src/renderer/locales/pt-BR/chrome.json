@@ -5541,6 +5541,7 @@
   "panel.sanitize.category.metadata": "Metadados do documento e das páginas",
   "panel.sanitize.category.prior_revisions": "Revisões anteriores deste arquivo",
   "panel.sanitize.category.signatures": "Assinaturas digitais",
+  "panel.sanitize.identifierKept": "mantido porque o documento continua criptografado",
   "panel.sanitize.category.thumbnails": "Miniaturas de página",
   "panel.sanitize.category.unreferenced_objects": "Objetos para os quais nada aponta",
   "panel.sanitize.certified": "Este documento está certificado, o que define o que pode mudar nele. Uma limpeza muda mais do que isso permite.",

@@ -11,6 +11,11 @@ import {
   exportActiveAs,
   exportImagesRun,
   invokeAppCommand,
+  getState,
+  holdReaderCopies,
+  releaseReaderCopies,
+  readerCopiesWaiting,
+  readerFolders,
 } from '../support/harness.js';
 
 // Export the active document to editable Office / web formats via the
@@ -96,6 +101,41 @@ describe('export to Office / web formats', () => {
       async () => !(await $('[data-testid="export-images-dialog"]').isExisting()),
       { timeout: 5_000, timeoutMsg: 'the Export Images dialog never closed' },
     );
+  });
+
+  it('exports from a private copy, byte for byte what an export of the working copy writes', async function () {
+    this.timeout(120_000);
+    const working = (await getState()).activeFile!.workingPath;
+    const viaCopy = resolve(tmp, 'via-copy.txt');
+    await holdReaderCopies();
+    try {
+      await browser.execute((dest: string) => {
+        const w = window as any;
+        w.__copyExport = { done: false, failure: null as string | null };
+        w.__SPECTRA_TEST__.exportActiveAs(dest, 'txt')
+          .then(() => { w.__copyExport.done = true; })
+          .catch((e: unknown) => { w.__copyExport = { done: true, failure: String(e) }; });
+      }, viaCopy);
+      await browser.waitUntil(async () => (await readerCopiesWaiting()) === 1,
+        { timeoutMsg: 'the export never reached its engine step on a copy' });
+      expect(readerFolders(working)).toHaveLength(1);
+    } finally {
+      await releaseReaderCopies();
+    }
+    await browser.waitUntil(async () => (await browser.execute(() => (window as any).__copyExport)).done === true,
+      { timeout: 60_000, timeoutMsg: 'the export never settled' });
+    expect((await browser.execute(() => (window as any).__copyExport)).failure).toBeNull();
+    expect(readerFolders(working)).toEqual([]);
+
+    // The same export of the working copy itself, with no copy made.
+    const direct = resolve(tmp, 'direct.txt');
+    const r = await browser.executeAsync((file: string, output: string, done: (r: unknown) => void) => {
+      (window as any).__SPECTRA_TEST__.engineRequestWithId('export_document', { file, output, fmt: 'txt' }, 5656001)
+        .then(done).catch((e: unknown) => done(`ERROR:${String(e)}`));
+    }, working, direct);
+    expect(String(r)).not.toMatch(/^ERROR:/);
+    expect(readFileSync(viaCopy).equals(readFileSync(direct))).toBe(true);
+    expect(readFileSync(viaCopy, 'utf8')).toContain('quick brown fox');
   });
 
   it('exports an HTML file carrying the real text', async function () {
