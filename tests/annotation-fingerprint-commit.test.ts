@@ -1,13 +1,13 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
+import { describe, expect, it, vi } from 'vitest';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
 import type { PDFContext } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
 import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
-import { importedRect } from '../src/renderer/lib/annotation-fingerprint';
+import { entryOf, importedRect } from '../src/renderer/lib/annotation-fingerprint';
 import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef, Workspace } from '../src/renderer/state/types';
 
@@ -399,4 +399,135 @@ describe('a coordinate array larger than a call can take as arguments', () => {
     expect(await subtypes(once)).toEqual(['Ink']);
     expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
   }, 120_000);
+});
+
+/** Border entries pdf.js reads by key presence and by JavaScript falsiness,
+ *  each with the border width pdf.js is left with. */
+const PRESENCE: [string, (ctx: PDFContext) => Record<string, unknown>, number][] = [
+  ['/BS null hides /Border', (ctx) => ({ BS: PDFNull, Border: ctx.obj([0, 0, 3]) }), 1],
+  ['/BS /Type of an empty string is no type', () => ({ BS: { Type: PDFString.of(''), W: 3 } }), 3],
+  ['/BS /Type 0 is no type', () => ({ BS: { Type: 0, W: 3 } }), 3],
+  ['/BS /Type false is no type', () => ({ BS: { Type: false, W: 3 } }), 3],
+];
+
+describe('border entries read by presence and falsiness', () => {
+  for (const [label, extra, width] of PRESENCE) {
+    it(`Ink: ${label}`, async () => {
+      const source = await pageWith((ctx) => ctx.obj({
+        Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...extra(ctx),
+      }));
+      const { pdfjs: theirs, ours } = await bothRects(source);
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual([100 - 2 * width, 100 - 2 * width, 150 + 2 * width, 150 + 2 * width]);
+      expect(await importAll(source)).toHaveLength(1);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual(['Ink']);
+      expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+    });
+    it(`Line: ${label}`, async () => {
+      const { pdfjs: theirs, ours } = await bothRects(await pageWith(lineWith(extra)));
+      ours.forEach((v, k) => expect(v).toBeCloseTo(theirs[k], 3));
+      expect(ours).toEqual([36 - width, 96 - width, 164 + width, 144 + width]);
+    });
+    for (const subtype of ['Polygon', 'PolyLine']) {
+      it(`${subtype}: ${label}`, async () => {
+        const { pdfjs: theirs, ours } = await bothRects(await pageWith((ctx) => ctx.obj({
+          Type: 'Annot', Subtype: subtype, Vertices: [100, 100, 150, 150], Rect: [10, 10, 20, 20], C: [1, 0, 0], ...extra(ctx),
+        })));
+        expect(ours).toEqual(theirs);
+        expect(ours).toEqual([100 - 2 * width, 100 - 2 * width, 150 + 2 * width, 150 + 2 * width]);
+      });
+    }
+  }
+});
+
+/** The saved bytes with each placeholder key replaced by an escaped spelling
+ *  of the same length. pdf-lib writes `#` itself as `#23`, so an escaped key
+ *  reaches the file only this way. */
+function withKeys(bytes: Uint8Array, keys: [string, string][]): Uint8Array {
+  let text = Buffer.from(bytes).toString('latin1');
+  for (const [placeholder, escaped] of keys) {
+    expect(placeholder.length).toBe(escaped.length);
+    expect(text).toContain(placeholder);
+    text = text.split(placeholder).join(escaped);
+  }
+  return new Uint8Array(Buffer.from(text, 'latin1'));
+}
+
+describe('dictionary keys written with hex escapes (7.3.5)', () => {
+  it('an Ink whose /Border key is escaped matches pdf.js and stays one annotation', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1],
+      BZZZrder: [0, 0, 3],
+    })), [['/BZZZrder', '/B#6frder']]);
+    const { pdfjs: theirs, ours } = await bothRects(source);
+    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([94, 94, 156, 156]);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+
+  it('a Highlight whose /Subtype and /Contents keys are escaped is replaced once', async () => {
+    const source = withKeys(await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', SuZZZtype: 'Highlight', QuadPoints: QUAD, Rect: [100, 500, 200, 520], C: [1, 1, 0],
+      AP: appearance(ctx), CoZZZtents: PDFString.of('x'),
+    })), [['/SuZZZtype', '/Su#62type'], ['/CoZZZtents', '/Co#6etents']]);
+    const imported = await importAll(source);
+    expect(imported).toHaveLength(1);
+    expect(imported[0].note).toBe('x');
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Highlight']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Highlight']);
+  });
+
+  it('a group reply whose /IRT key is escaped takes its parent text', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 600]);
+    const ctx = doc.context;
+    const parent = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [10, 370, 30, 390], F: 4 });
+    parent.set(PDFName.of('Contents'), PDFHexString.fromText('Parent note'));
+    const parentRef = ctx.register(parent);
+    const reply = ctx.obj({
+      Type: 'Annot', Subtype: 'Highlight', Rect: [98, 498, 202, 522], QuadPoints: QUAD, C: [1, 1, 0], IZZZT: parentRef, RT: 'Group',
+    });
+    page.node.set(PDFName.of('Annots'), ctx.obj([parentRef, ctx.register(reply)]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/IZZZT', '/I#52T']]);
+    const highlight = (await importAll(source)).find((a) => a.importedOriginal?.subtype === 'Highlight');
+    expect(highlight?.note).toBe('Parent note');
+    const once = await commitCycle(source);
+    expect((await subtypes(once)).sort()).toEqual(['Highlight', 'Text']);
+    expect((await subtypes(await commitCycle(once))).sort()).toEqual(['Highlight', 'Text']);
+  });
+});
+
+describe('the decoded-key scan', () => {
+  it('decodes no key in a dictionary whose keys carry no escape', async () => {
+    const doc = await PDFDocument.create();
+    const dict = doc.context.obj({ Type: 'Annot', Subtype: 'Ink', Rect: [0, 0, 1, 1], C: [0, 0, 1] });
+    const decode = vi.spyOn(PDFName.prototype, 'asBytes');
+    try {
+      expect(entryOf(dict, 'BS')).toBeUndefined();
+      expect(entryOf(dict, 'Border')).toBeUndefined();
+      expect(decode).not.toHaveBeenCalled();
+      dict.set(PDFName.of('B#6frder'), doc.context.obj([0, 0, 3]));
+      expect(entryOf(dict, 'Border')).toBeInstanceOf(PDFArray);
+      expect(decode).toHaveBeenCalledTimes(1);
+    } finally {
+      decode.mockRestore();
+    }
+  });
+});
+
+describe('an annotation whose /OC is null', () => {
+  it('is re-authored without an /OC key', async () => {
+    const source = await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Square', Rect: [20, 300, 80, 320], C: [1, 0, 0], AP: appearance(ctx), OC: null,
+    }));
+    expect(await importAll(source)).toHaveLength(1);
+    const out = await PDFDocument.load(await commitCycle(source));
+    const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    expect(annots.size()).toBe(1);
+    expect(annots.lookup(0, PDFDict).get(PDFName.of('OC'), true)).toBeUndefined();
+  });
 });

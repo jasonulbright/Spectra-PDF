@@ -9,7 +9,7 @@
 // imported blind — faithful-or-untouched.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
-import { importedRect } from './annotation-fingerprint';
+import { entryOf, importedRect } from './annotation-fingerprint';
 import { pdfNameKey } from './pdf-text-string';
 
 export interface RawAnnotStyle {
@@ -143,7 +143,7 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           } catch {
             continue;
           }
-          const subtypeObj = dict.lookup(PDFName.of('Subtype'));
+          const subtypeObj = entryOf(dict, 'Subtype');
           const subtype = subtypeObj instanceof PDFName ? pdfNameKey(subtypeObj) : undefined;
           if (!subtype) continue;
           // Keyed by the rectangle pdf.js reports, which the strip compares too:

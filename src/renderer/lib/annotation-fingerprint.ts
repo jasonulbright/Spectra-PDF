@@ -7,12 +7,46 @@
 // except where it draws an appearance of its own for an annotation that has
 // none: there the rectangle becomes the box of what it draws.
 import { PDFArray, PDFBool, PDFDict, PDFHexString, PDFName, PDFNull, PDFNumber, PDFStream, PDFString } from 'pdf-lib';
+import type { PDFObject } from 'pdf-lib';
 import { charactersOf, pdfNameKey, pdfStringCodes } from './pdf-text-string';
 import { maxOf, minOf } from './coordinate-bounds';
 
 export type Rect = [number, number, number, number];
 
 const N = (name: string): PDFName => PDFName.of(name);
+
+/** The value stored under the key spelt `name`, unresolved, null included.
+ *  pdf.js decodes a key's `#xx` escapes in either case (7.3.5); pdf-lib's
+ *  parser decodes only uppercase ones and keeps a key such as `/B#6frder`
+ *  under that literal spelling, so a key not found as written is looked for
+ *  by its decoded spelling. With two spellings of one key, the one written
+ *  plainly is taken. */
+export function rawEntry(dict: PDFDict, name: string): PDFObject | undefined {
+  const exact = dict.get(N(name), true);
+  if (exact !== undefined) return exact;
+  for (const [key, value] of dict.entries()) {
+    // Only an escaped key can decode to a spelling the exact lookup missed,
+    // and an escaped key always carries `#` in its written form.
+    if (!key.asString().includes('#')) continue;
+    if (pdfNameKey(key) === name) return value;
+  }
+  return undefined;
+}
+
+/** The value under the key spelt `name`, resolved; null reads as absent, as
+ *  pdf-lib's own `lookup` reads it. */
+export function entryOf(dict: PDFDict, name: string): PDFObject | undefined {
+  const raw = rawEntry(dict, name);
+  if (raw === undefined || raw === PDFNull) return undefined;
+  const value = dict.context.lookup(raw);
+  return value === PDFNull ? undefined : value;
+}
+
+/** Whether the key is in the dictionary, as pdf.js asks it: a key whose value
+ *  is null is present. pdf-lib's own `has` reports such a key absent. */
+function hasKey(dict: PDFDict, name: string): boolean {
+  return rawEntry(dict, name) !== undefined;
+}
 
 /** The values of an array of numbers, or null when it is not one (or not of
  *  `length` when a length is given). */
@@ -53,12 +87,12 @@ const empty = (): Rect => [Infinity, Infinity, -Infinity, -Infinity];
 /** Whether pdf.js finds a normal appearance (12.5.5): /AP /N as a stream, or
  *  as a dictionary holding a stream under the name in /AS. */
 export function hasNormalAppearance(dict: PDFDict): boolean {
-  const ap = dict.lookup(N('AP'));
+  const ap = entryOf(dict, 'AP');
   if (!(ap instanceof PDFDict)) return false;
-  const normal = ap.lookup(N('N'));
+  const normal = entryOf(ap, 'N');
   if (normal instanceof PDFStream) return true;
   if (!(normal instanceof PDFDict)) return false;
-  const state = dict.lookup(N('AS'));
+  const state = entryOf(dict, 'AS');
   if (!(state instanceof PDFName)) return false;
   const wanted = pdfNameKey(state);
   for (const [key] of normal.entries()) {
@@ -134,16 +168,18 @@ function dashVoidsWidth(dash: unknown, resolved: boolean): boolean {
  *  a dash pattern pdf.js rejects (/BS /D, or a fourth /Border entry) makes it
  *  0. */
 function borderWidth(dict: PDFDict, rect: Rect): number {
-  if (dict.has(N('BS'))) {
-    const bs = dict.lookup(N('BS'));
+  if (hasKey(dict, 'BS')) {
+    const bs = entryOf(dict, 'BS');
     if (!(bs instanceof PDFDict)) return 1;
-    const type = bs.lookup(N('Type'));
-    const typed = type === undefined || type === PDFNull || (type instanceof PDFName && pdfNameKey(type) === 'Border');
+    // A /Type that is falsy as pdf.js holds it (absent, null, 0, false, an
+    // empty string) counts as no type at all.
+    const type = entryOf(bs, 'Type');
+    const typed = !jsTruthy(type) || (type instanceof PDFName && pdfNameKey(type) === 'Border');
     if (!typed) return 1;
-    return dashVoidsWidth(bs.lookup(N('D')), true) ? 0 : widthOf(bs.lookup(N('W')), rect);
+    return dashVoidsWidth(entryOf(bs, 'D'), true) ? 0 : widthOf(entryOf(bs, 'W'), rect);
   }
-  if (dict.has(N('Border'))) {
-    const border = dict.lookup(N('Border'));
+  if (hasKey(dict, 'Border')) {
+    const border = entryOf(dict, 'Border');
     if (!(border instanceof PDFArray)) return 1;
     if (border.size() >= 3) {
       if (border.size() === 4 && dashVoidsWidth(border.lookup(3), false)) return 0;
@@ -157,7 +193,7 @@ function borderWidth(dict: PDFDict, rect: Rect): number {
 /** Each quadrilateral's box (12.5.6.10), or null when /QuadPoints is not a
  *  non-empty list of whole quadrilaterals. */
 function quadBoxes(dict: PDFDict): Rect[] | null {
-  const raw = numberArray(dict.lookup(N('QuadPoints')), null);
+  const raw = numberArray(entryOf(dict, 'QuadPoints'), null);
   if (!raw || raw.length === 0 || raw.length % 8 > 0) return null;
   const points = raw.map(Math.fround);
   const boxes: Rect[] = [];
@@ -185,16 +221,16 @@ function pathRect(rect: Rect, points: ArrayLike<number>[], width: number): Rect 
 /** The dictionary whose /Contents pdf.js reads for a markup annotation: a
  *  group reply (12.5.6.2, /IRT with /RT /Group) shows its parent's. */
 export function contentsHolder(dict: PDFDict): PDFDict {
-  if (!dict.has(N('IRT'))) return dict;
-  const type = dict.lookup(N('RT'));
+  if (!hasKey(dict, 'IRT')) return dict;
+  const type = entryOf(dict, 'RT');
   if (!(type instanceof PDFName) || pdfNameKey(type) !== 'Group') return dict;
-  const parent = dict.lookup(N('IRT'));
+  const parent = entryOf(dict, 'IRT');
   return parent instanceof PDFDict ? parent : dict;
 }
 
 /** The file's /Rect normalised (7.9.5), or null when it is not four numbers. */
 export function readableRect(dict: PDFDict): Rect | null {
-  const raw = numberArray(dict.lookup(N('Rect')), 4);
+  const raw = numberArray(entryOf(dict, 'Rect'), 4);
   return raw ? normalized(raw) : null;
 }
 
@@ -224,7 +260,7 @@ export function importedRect(dict: PDFDict, subtype: string): Rect {
     }
     case 'Line': {
       const width = borderWidth(dict, rect) || 1;
-      const line = normalized(numberArray(dict.lookup(N('L')), 4) ?? [0, 0, 0, 0]);
+      const line = normalized(numberArray(entryOf(dict, 'L'), 4) ?? [0, 0, 0, 0]);
       const adjust = 2 * width;
       const lineBox: Rect = [line[0] - adjust, line[1] - adjust, line[2] + adjust, line[3] + adjust];
       const kept = intersects(rect, lineBox) ? rect : lineBox;
@@ -232,12 +268,12 @@ export function importedRect(dict: PDFDict, subtype: string): Rect {
     }
     case 'PolyLine':
     case 'Polygon': {
-      const vertices = numberArray(dict.lookup(N('Vertices')), null);
+      const vertices = numberArray(entryOf(dict, 'Vertices'), null);
       if (!vertices) return rect;
       return pathRect(rect, [Float32Array.from(vertices)], borderWidth(dict, rect) || 1);
     }
     case 'Ink': {
-      const lists = dict.lookup(N('InkList'));
+      const lists = entryOf(dict, 'InkList');
       if (!(lists instanceof PDFArray)) return rect;
       const points: Float32Array[] = [];
       for (let i = 0; i < lists.size(); i++) {
