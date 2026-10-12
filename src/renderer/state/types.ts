@@ -653,9 +653,10 @@ export interface AppState {
   // from new bytes, or because the document or page they address is gone or
   // no longer as it was drawn on. Monotonic: each increase is one notice owed.
   pageEditRefusals: number;
-  // Why the latest refusal happened when a document's permissions refused
-  // it; null for every other refusal.
-  pageEditRefusalReason: import('../lib/document-permissions').CapabilityBlock | null;
+  // Why the latest refusal happened: a document's permissions, or `moving`
+  // when the store refused an edit of a document sealed for a hand-over to
+  // another window; null for every other refusal.
+  pageEditRefusalReason: import('../lib/document-permissions').CapabilityBlock | 'moving' | null;
 }
 
 export type AppAction =
@@ -827,6 +828,11 @@ export type AppAction =
   | { type: 'UNDO_PAGE_OP' }
   | { type: 'REDO_PAGE_OP' }
   | { type: 'CLEAR_PAGE_EDITS' }
+  // Handled by the store and never by the reducer. While a path is sealed,
+  // a page-tier action that changes its `editRevision` is refused with the
+  // reason `moving`. The seal lifts on UNSEAL or when the path closes.
+  | { type: 'SEAL_PAGE_TIER'; path: string }
+  | { type: 'UNSEAL_PAGE_TIER'; path: string }
   // ui slice. One dispatch pathway so the whole app state
   // stays snapshot-testable; commands and the keymap read state.ui.
   // Focusing a doc tab syncs activeFileId; entering doc-land is always

@@ -1,26 +1,48 @@
-import { tChrome } from '../i18n';
+import { tChrome, type UiKey } from '../i18n';
 
 // Writes of a working copy that are in progress, recorded from the start of
 // the gesture that asks for them (before its own gate, its consent prompt and
-// its write chain), and documents that are leaving this window. A document
-// leaves only once no write of it is recorded, so the window it moves to
+// its write chain), and documents that are leaving this window: moving to
+// another one or closing. A document leaves only once no write of it is
+// recorded, so the window it moves to, or the save prompt of its close,
 // receives every result. While it leaves, a write that continues a gesture
-// recorded before the move is admitted and waited for; a gesture that starts
-// during the move refuses before its first await and cancels the move, unless
-// the move has already handed the document over.
+// recorded before the leave began is admitted and waited for; a gesture that
+// starts during the leave refuses before its first await and calls the leave
+// off, unless the document has already been handed over.
 const inFlight = new Map<string, Set<Promise<void>>>();
-/** Per leaving path: the moves under way, and whether a gesture refused
- * because of them since they began. */
-const leaving = new Map<string, { moves: number; refused: boolean }>();
+
+/** Why a document is leaving this window. */
+export type LeaveKind = 'move' | 'close';
+
+/** One leave of one or more paths: why it began, and whether a gesture
+ * refused because of it since it began. */
+interface LeaveScope { kind: LeaveKind; refused: boolean }
+/** Per leaving path, its leaves under way in the order they began. Two leaves
+ * of one path (an Exit's close and a move) keep their own records, so a
+ * refusal before a leave began never calls that leave off. */
+const leaving = new Map<string, Set<LeaveScope>>();
+const listeners = new Set<() => void>();
+
+const REFUSAL: Record<LeaveKind, UiKey> = {
+  move: 'app.window.moveRefusedAction',
+  close: 'app.close.refusedAction',
+};
+
+function changed(): void {
+  for (const listener of listeners) {
+    try { listener(); } catch (error) { queueMicrotask(() => { throw error; }); }
+  }
+}
 
 /** Records a write of every path in `paths` until the returned function runs.
- * Throws the move refusal, synchronously and recording nothing, when one of
- * them is leaving and has no write recorded. */
+ * Throws the refusal of the leave, synchronously and recording nothing, when
+ * one of them is leaving and has no write recorded. */
 export function beginDocumentWrites(paths: readonly string[]): () => void {
   const refused = paths.filter(path => leaving.has(path) && !inFlight.get(path)?.size);
   if (refused.length) {
-    for (const path of refused) leaving.get(path)!.refused = true;
-    throw new Error(tChrome('app.window.moveRefusedAction'));
+    for (const path of refused) for (const scope of leaving.get(path)!) scope.refused = true;
+    const [oldest] = leaving.get(refused[0])!;
+    throw new Error(tChrome(REFUSAL[oldest.kind]));
   }
   let finish!: () => void;
   const done = new Promise<void>(resolve => { finish = resolve; });
@@ -33,6 +55,7 @@ export function beginDocumentWrites(paths: readonly string[]): () => void {
     }
     writes.add(done);
   }
+  if (unique.length) changed();
   let ended = false;
   return () => {
     if (ended) return;
@@ -43,6 +66,7 @@ export function beginDocumentWrites(paths: readonly string[]): () => void {
       if (current && !current.size) inFlight.delete(path);
     }
     finish();
+    if (unique.length) changed();
   };
 }
 
@@ -69,28 +93,76 @@ export function withDocumentWrite<T>(paths: readonly string[], run: () => Promis
   return result.finally(ended);
 }
 
+/** How many distinct writes of `paths` are recorded now. */
+export function documentWritesOf(paths: readonly string[]): number {
+  const writes = new Set<Promise<void>>();
+  for (const path of paths) for (const write of inFlight.get(path) ?? []) writes.add(write);
+  return writes.size;
+}
+
+/** Calls `listener` each time a write of any path is recorded or ends. */
+export function onDocumentWritesChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** Resolves once no write of `paths` is recorded, whatever the outcome of
+ * each, including writes recorded while it waits. */
+export async function documentWritesDrained(paths: readonly string[]): Promise<void> {
+  for (;;) {
+    const writes = new Set<Promise<void>>();
+    for (const path of paths) for (const write of inFlight.get(path) ?? []) writes.add(write);
+    if (!writes.size) return;
+    await Promise.all(writes);
+  }
+}
+
+/**
+ * Runs `leave` with `paths` marked as leaving for `kind`. From this call until
+ * `leave` settles, a write that starts a new gesture on a path with no write
+ * recorded refuses at once, with the refusal of the oldest leave of that
+ * path. `leave` reads `cancelled()` before the documents go and stays when a
+ * gesture was refused during this leave. `leave` decides how to wait for the
+ * writes already recorded
+ * (`documentWritesDrained`, or a wait the user can end). Holds no lock: a
+ * write never waits for a document to leave.
+ */
+export async function whileDocumentsLeave<T>(paths: readonly string[], kind: LeaveKind,
+  leave: (cancelled: () => boolean) => Promise<T>): Promise<T> {
+  const unique = Array.from(new Set(paths));
+  const scope: LeaveScope = { kind, refused: false };
+  for (const path of unique) {
+    let scopes = leaving.get(path);
+    if (!scopes) {
+      scopes = new Set();
+      leaving.set(path, scopes);
+    }
+    scopes.add(scope);
+  }
+  try {
+    return await leave(() => scope.refused);
+  } finally {
+    for (const path of unique) {
+      const scopes = leaving.get(path);
+      scopes?.delete(scope);
+      if (scopes && !scopes.size) leaving.delete(path);
+    }
+  }
+}
+
 /**
  * Runs `leave` once no write of `workingPath` is recorded, whatever the
- * outcome of each. From this call until `leave` settles, a write that starts
- * a new gesture on the path refuses at once; `leave` reads `cancelled()`
- * before it hands the document over, and stays when a gesture was refused,
- * and reads it again after the hand-over to report a gesture refused then.
- * Holds no lock: a write never waits for a document to leave.
+ * outcome of each: the move of one document to another window. `leave` reads
+ * `cancelled()` before it hands the document over, and stays when a gesture
+ * was refused, and reads it again after the hand-over to report a gesture
+ * refused then.
  */
-export async function whileDocumentLeaves<T>(workingPath: string,
+export function whileDocumentLeaves<T>(workingPath: string,
   leave: (cancelled: () => boolean) => Promise<T>): Promise<T> {
-  const entry = leaving.get(workingPath) ?? { moves: 0, refused: false };
-  entry.moves++;
-  leaving.set(workingPath, entry);
-  try {
-    for (let writes = inFlight.get(workingPath); writes?.size; writes = inFlight.get(workingPath)) {
-      await Promise.all(Array.from(writes));
-    }
-    return await leave(() => entry.refused);
-  } finally {
-    entry.moves--;
-    if (!entry.moves) leaving.delete(workingPath);
-  }
+  return whileDocumentsLeave([workingPath], 'move', async (cancelled) => {
+    await documentWritesDrained([workingPath]);
+    return leave(cancelled);
+  });
 }
 
 /** Test seam: how many paths have a write in progress. */

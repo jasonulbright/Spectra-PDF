@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  addRedactionMark,
   breakTabOrderPublish,
   deleteSelectedCanvasPages,
   getState,
@@ -92,6 +93,16 @@ async function waitForHandles(count: number): Promise<string[]> {
     { timeout: 30_000, interval: 250, timeoutMsg: `never saw ${count} window handles` },
   );
   return handles;
+}
+
+/** The confirm dialog's text now, or '' while none is shown. */
+async function dialogText(): Promise<string> {
+  try {
+    const message = await $(CONFIRM_MESSAGE);
+    return (await message.isDisplayed()) ? await message.getText() : '';
+  } catch {
+    return '';
+  }
 }
 
 /** Poll the file until it says what the caller expects, reporting what it last
@@ -264,6 +275,63 @@ describe('cancelled exit', () => {
       (w) => someWindowHolds(w, dirtyPdf) && someWindowHolds(w, laterPdf),
       'session writes never resumed after the cancelled exit',
     );
+  });
+
+  it('an Exit during a running operation waits for it, then asks about its result', async () => {
+    // The operation is held at the start of its engine step. The Exit waits
+    // for it in a dialog that closes by itself, and only then asks about
+    // unsaved changes, so the question covers the bytes the operation wrote.
+    await browser.switchToWindow(secondHandle);
+    await openByPaths([laterPdf]);
+    await setView('canvas');
+    await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
+    await browser.execute(() => {
+      const w = window as any;
+      w.__SPECTRA_TEST__.holdRewriteEngineSteps();
+      w.__exitRedact = { done: false, error: null as string | null };
+      w.__SPECTRA_TEST__.applyRedactions()
+        .then(() => { w.__exitRedact.done = true; })
+        .catch((e: unknown) => { w.__exitRedact = { done: true, error: String(e) }; });
+    });
+    try {
+      await browser.waitUntil(
+        async () => (await browser.execute(() => (window as any).__SPECTRA_TEST__.rewriteEngineStepsWaiting() as number)) === 1,
+        { timeout: 30_000, timeoutMsg: 'the redaction never reached its engine step' },
+      );
+
+      expect(await invokeAppCommand('file.exit')).toBe(true);
+      await browser.waitUntil(async () => (await dialogText()).includes('is still running'), {
+        timeout: 30_000,
+        timeoutMsg: 'the Exit never showed the wait for the running operation',
+      });
+      expect(await dialogText()).toContain('later.pdf');
+      expect((await getState()).fileCount).toBe(2);
+    } finally {
+      await browser.execute(() => { (window as any).__SPECTRA_TEST__.releaseRewriteEngineSteps(); });
+    }
+
+    // The wait closes by itself and the unsaved-changes prompt follows.
+    await browser.waitUntil(async () => (await dialogText()).includes('Save before exiting'), {
+      timeout: 30_000,
+      timeoutMsg: 'the Exit never asked about the result of the operation it waited for',
+    });
+    expect(await dialogText()).toContain('later.pdf');
+    const redact = await browser.execute(() => (window as any).__exitRedact) as { done: boolean; error: string | null };
+    expect(redact.done).toBe(true);
+    expect(redact.error).toBeNull();
+
+    await $(CONFIRM_CANCEL).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000, reverse: true });
+    expect(await browser.getWindowHandles()).toHaveLength(1);
+    expect((await getState()).fileCount).toBe(2);
+    expect((await getState()).activeFile?.dirty).toBe(true);
+
+    // Leave the document clean for the case below and the teardown.
+    await pressGlobalKey('z', { ctrl: true });
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === false, {
+      timeout: 30_000,
+      timeoutMsg: 'the redaction could not be undone after the cancelled exit',
+    });
   });
 
   it('an Exit no peer acknowledges is called off BEFORE anything is captured', async () => {

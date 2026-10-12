@@ -25,6 +25,10 @@ import {
   physicalPointFor,
   pinGhost,
   planHandOff,
+  handOffHold,
+  handOffStop,
+  holdHandOff,
+  HAND_OFF_COMMIT_ROUNDS,
   releaseDrag,
   reorderIndexFor,
   reservationHolds,
@@ -304,6 +308,56 @@ describe('hand-off plan', () => {
 
   it('hands over a clean document without writing it', () => {
     expect(planHandOff(true, false)).toEqual({ hand: true, saveFirst: false });
+  });
+});
+
+describe('an edit during a hand-off', () => {
+  const rest = { cancelled: false, noted: 4, revision: 4, pageDirty: false };
+
+  it('goes on while the document is as it was when the page tier came to rest', () => {
+    expect(handOffStop(rest)).toBeNull();
+  });
+
+  it('stops for an edit that landed after the last commit', () => {
+    expect(handOffStop({ ...rest, revision: 5 })).toBe('edited');
+  });
+
+  it('stops for page edits the working copy does not hold, at the same revision', () => {
+    // The commit rounds ran out with the page tier still dirty.
+    expect(HAND_OFF_COMMIT_ROUNDS).toBe(3);
+    expect(handOffStop({ ...rest, pageDirty: true })).toBe('edited');
+  });
+
+  it('stops for a document that is gone', () => {
+    expect(handOffStop({ ...rest, revision: undefined })).toBe('edited');
+    expect(handOffStop({ ...rest, noted: 0, revision: undefined })).toBeNull();
+  });
+
+  it('reports a refused gesture ahead of an edit', () => {
+    expect(handOffStop({ ...rest, cancelled: true, revision: 5 })).toBe('cancelled');
+  });
+});
+
+describe('hand-off holds', () => {
+  it('a stage with no hold never awaits', () => {
+    expect(handOffHold('committed')).toBeNull();
+    expect(handOffHold('sealed')).toBeNull();
+  });
+
+  it('holds only its own stage, counts the waiters, and lets them go on release', async () => {
+    const hold = holdHandOff('sealed');
+    expect(handOffHold('committed')).toBeNull();
+    const waiting = handOffHold('sealed')!;
+    expect(hold.waiting()).toBe(1);
+    let passed = false;
+    void waiting.then(() => { passed = true; });
+    await Promise.resolve();
+    expect(passed).toBe(false);
+    hold.release();
+    await waiting;
+    expect(passed).toBe(true);
+    expect(hold.waiting()).toBe(0);
+    expect(handOffHold('sealed')).toBeNull();
   });
 });
 

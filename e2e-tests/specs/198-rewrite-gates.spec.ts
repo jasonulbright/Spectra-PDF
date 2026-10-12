@@ -17,6 +17,13 @@ import {
   invokeAppCommand,
   placeNewField,
   closeAllFiles,
+  focusTab,
+  waitForActiveCanvasPageIds,
+  selectCanvasPages,
+  getSelectedCanvasPageIds,
+  rotateSelectedCanvasPages,
+  commandEnabled,
+  commitPendingEdits,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -183,5 +190,76 @@ describe('user operations asked for during a rewrite see its result', () => {
     const text = await pageText(working);
     expect(text).not.toContain('SECRET TOP LINE');
     expect(text).toContain('KEEP ME BOTTOM');
+  });
+
+  // Page history of another document does not name the redacted file, so the
+  // redaction neither refuses over it nor clears it when it publishes.
+  it('a page edit of another document undone during a redaction stays redoable after the redaction publishes', async () => {
+    source = resolve(tmp, 'redact-beside-history.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText('SECRET TOP LINE', { x: 50, y: 700, size: 24, font });
+    page.drawText('KEEP ME BOTTOM', { x: 50, y: 100, size: 24, font });
+    writeFileSync(source, await doc.save());
+    const other = resolve(tmp, 'turned-beside-redaction.pdf');
+    const plain = await PDFDocument.create();
+    plain.addPage([612, 792]);
+    writeFileSync(other, await plain.save());
+    await closeAllFiles();
+    await openByPaths([source, other]);
+    await setView('canvas');
+
+    await focusTab({ doc: other });
+    await browser.waitUntil(async () => (await getState()).activeFile?.path === other,
+      { timeoutMsg: 'the second document never became active' });
+    const otherPages = await waitForActiveCanvasPageIds();
+    const otherWorking = (await getState()).activeFile!.workingPath;
+    await focusTab({ doc: source });
+    await browser.waitUntil(async () => (await getState()).activeFile?.path === source,
+      { timeoutMsg: 'the redacted document never became active again' });
+    await waitForActiveCanvasPageIds();
+    const working = (await getState()).activeFile!.workingPath;
+    expect(await commandEnabled('edit.undo')).toBe(false);
+    expect(await commandEnabled('edit.redo')).toBe(false);
+
+    await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
+    await hold();
+    await start('redact', 'applyRedactions');
+    await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the redaction never reached its engine step' });
+
+    // The other document's page is turned and the turn undone while the
+    // redaction is held in its engine step.
+    await selectCanvasPages([otherPages[0]]);
+    await browser.waitUntil(async () => JSON.stringify(await getSelectedCanvasPageIds()) === JSON.stringify([otherPages[0]]),
+      { timeoutMsg: 'the other document page was never selected' });
+    await rotateSelectedCanvasPages(90);
+    await browser.waitUntil(async () => await commandEnabled('edit.undo'),
+      { timeoutMsg: 'the turn of the other document never landed' });
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => !(await commandEnabled('edit.undo')) && await commandEnabled('edit.redo'),
+      { timeoutMsg: 'the undo of the turn never landed' });
+    expect(await waiting()).toBe(1);
+    expect((await settled('redact'))!.done).toBe(false);
+
+    await release();
+    await browser.waitUntil(async () => (await settled('redact'))?.done === true, { timeoutMsg: 'the redaction never settled' });
+    expect((await settled('redact'))!.error).toBeNull();
+    const text = await pageText(working);
+    expect(text).not.toContain('SECRET TOP LINE');
+    expect(text).toContain('KEEP ME BOTTOM');
+
+    // The redo of the other document's turn survives the publication.
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === true,
+      { timeoutMsg: 'the redaction never marked its document changed' });
+    expect(await commandEnabled('edit.redo')).toBe(true);
+    expect(await invokeAppCommand('edit.redo')).toBe(true);
+    await browser.waitUntil(async () => !(await commandEnabled('edit.redo')),
+      { timeoutMsg: 'the redo of the turn never landed' });
+    await commitPendingEdits();
+    expect((await PDFDocument.load(readFileSync(otherWorking))).getPage(0).getRotation().angle).toBe(90);
+    const after = await pageText(working);
+    expect(after).not.toContain('SECRET TOP LINE');
+    expect(after).toContain('KEEP ME BOTTOM');
   });
 });

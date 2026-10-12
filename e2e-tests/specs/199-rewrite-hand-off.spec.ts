@@ -36,6 +36,46 @@ async function pageText(path: string): Promise<string> {
   return content.items.map((it) => it.str ?? '').join(' ');
 }
 
+const CONFIRM_MESSAGE = '[data-testid="confirm-message"]';
+const CONFIRM_AFFIRM = '[data-testid="confirm-affirm"]';
+const CONFIRM_CANCEL = '[data-testid="confirm-cancel"]';
+
+/** The confirm dialog's text now, or '' while none is shown. */
+async function dialogText(): Promise<string> {
+  try {
+    const message = await $(CONFIRM_MESSAGE);
+    return (await message.isDisplayed()) ? await message.getText() : '';
+  } catch {
+    return '';
+  }
+}
+
+async function writeFixture(path: string): Promise<void> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText('SECRET TOP LINE', { x: 50, y: 700, size: 24, font });
+  page.drawText('KEEP ME BOTTOM', { x: 50, y: 100, size: 24, font });
+  writeFileSync(path, await doc.save());
+}
+
+/** Open `path`, mark its top quarter and start the redaction, held at the
+ * start of its engine step. */
+async function startHeldRedaction(path: string): Promise<void> {
+  await openByPaths([path]);
+  await setView('canvas');
+  await addRedactionMark({ x: 0, y: 0, w: 1, h: 0.25 });
+  await hold();
+  await browser.execute(() => {
+    const w = window as any;
+    w.__rewriteRedact = { done: false, error: null as string | null };
+    w.__SPECTRA_TEST__.applyRedactions()
+      .then(() => { w.__rewriteRedact.done = true; })
+      .catch((e: unknown) => { w.__rewriteRedact = { done: true, error: String(e) }; });
+  });
+  await browser.waitUntil(async () => (await waiting()) === 1, { timeoutMsg: 'the redaction never reached its engine step' });
+}
+
 const hold = () => browser.execute(() => { (window as any).__SPECTRA_TEST__.holdRewriteEngineSteps(); });
 const release = () => browser.execute(() => { (window as any).__SPECTRA_TEST__.releaseRewriteEngineSteps(); });
 const waiting = () => browser.execute(() => (window as any).__SPECTRA_TEST__.rewriteEngineStepsWaiting() as number);
@@ -48,12 +88,7 @@ describe('a document moved to a new window during an operation on it', () => {
   before(async () => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-rewrite-hand-off-'));
     source = resolve(tmp, 'moved-during-redaction.pdf');
-    const doc = await PDFDocument.create();
-    const font = await doc.embedFont(StandardFonts.Helvetica);
-    const page = doc.addPage([612, 792]);
-    page.drawText('SECRET TOP LINE', { x: 50, y: 700, size: 24, font });
-    page.drawText('KEEP ME BOTTOM', { x: 50, y: 100, size: 24, font });
-    writeFileSync(source, await doc.save());
+    await writeFixture(source);
     await waitForHarness();
     mainHandle = await browser.getWindowHandle();
   });
@@ -109,5 +144,88 @@ describe('a document moved to a new window during an operation on it', () => {
     await closeAllFiles();
     await browser.closeWindow();
     await browser.switchToWindow(mainHandle);
+  });
+});
+
+// A document closed while an operation on it runs: the close waits for the
+// operation in a dialog that closes by itself, then asks about unsaved changes
+// in the bytes the operation wrote, then closes.
+describe('a document closed during an operation on it', () => {
+  let tmp: string;
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-rewrite-close-'));
+    await waitForHarness();
+  });
+  afterEach(async () => {
+    await release();
+  });
+  after(async () => {
+    await closeAllFiles();
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('waits for the operation, then saves the bytes it wrote', async () => {
+    const source = resolve(tmp, 'closed-during-redaction.pdf');
+    await writeFixture(source);
+    await startHeldRedaction(source);
+
+    expect(await invokeAppCommand('file.close')).toBe(true);
+    await browser.waitUntil(async () => (await dialogText()).includes('is still running'), {
+      timeout: 30_000,
+      timeoutMsg: 'the close never showed the wait for the running operation',
+    });
+    expect(await dialogText()).toContain('closed-during-redaction.pdf');
+    expect((await getState()).fileCount).toBe(1);
+    expect(await pageText(source)).toContain('SECRET TOP LINE');
+
+    await release();
+    // The wait closes by itself and the unsaved-changes prompt follows.
+    await browser.waitUntil(async () => (await dialogText()).includes('Save before closing'), {
+      timeout: 30_000,
+      timeoutMsg: 'the close never asked about the result of the operation it waited for',
+    });
+    const redact = await browser.execute(() => (window as any).__rewriteRedact) as { done: boolean; error: string | null };
+    expect(redact.done).toBe(true);
+    expect(redact.error).toBeNull();
+
+    await $(CONFIRM_AFFIRM).click();
+    await browser.waitUntil(async () => (await getState()).fileCount === 0, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never closed after its save',
+    });
+    const text = await pageText(source);
+    expect(text).not.toContain('SECRET TOP LINE');
+    expect(text).toContain('KEEP ME BOTTOM');
+  });
+
+  it('Cancel in the wait keeps the document, and the operation still lands in it', async () => {
+    const source = resolve(tmp, 'kept-during-redaction.pdf');
+    await writeFixture(source);
+    await startHeldRedaction(source);
+
+    expect(await invokeAppCommand('file.close')).toBe(true);
+    await browser.waitUntil(async () => (await dialogText()).includes('is still running'), {
+      timeout: 30_000,
+      timeoutMsg: 'the close never showed the wait for the running operation',
+    });
+    await $(CONFIRM_CANCEL).click();
+    await browser.waitUntil(async () => (await dialogText()) === '', {
+      timeout: 15_000,
+      timeoutMsg: 'the wait never closed on Cancel',
+    });
+
+    await release();
+    await browser.waitUntil(
+      async () => (await browser.execute(() => (window as any).__rewriteRedact.done as boolean)),
+      { timeout: 30_000, timeoutMsg: 'the redaction never finished' },
+    );
+    const redact = await browser.execute(() => (window as any).__rewriteRedact) as { done: boolean; error: string | null };
+    expect(redact.error).toBeNull();
+    // Nothing closed and nothing was saved: the result is in the open document.
+    expect((await getState()).fileCount).toBe(1);
+    expect((await getState()).activeFile?.dirty).toBe(true);
+    expect(await dialogText()).toBe('');
+    expect(await pageText(source)).toContain('SECRET TOP LINE');
   });
 });

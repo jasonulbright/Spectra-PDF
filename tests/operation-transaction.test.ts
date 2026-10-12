@@ -20,7 +20,7 @@ import { restoreHistory, type HistoryIo } from '../src/renderer/lib/disk-history
 import { withFileSave } from '../src/renderer/lib/file-save-barrier';
 import { runCommitGate, setCommitGate } from '../src/renderer/lib/commit-gate';
 import { engineClosures } from './helpers/engine-closures';
-import { readingWith } from './helpers/published-bytes';
+import { documentsRead, readingWith } from './helpers/published-bytes';
 
 const __chainedCount = () => locks.__chainedCount();
 
@@ -108,7 +108,9 @@ describe('whole-file operation publication', () => {
     const intent = captureOperationIntent(f.store.getState(), f.file);
     if (boundary === 'reopen') f.store.dispatch({ type: 'OPEN_FILE', path: 'source', workingPath: 'new-work', name: 'source', buffer: f.original.slice(), pageCount: 1 });
     if (boundary === 'revision') f.store.dispatch({ type: 'REFRESH_BUFFER', path: 'source', buffer: f.original.slice(), pageCount: 1, documents: [] });
-    const read = () => boundary === 'pending' ? { ...f.store.getState(), pageUndoStack: [] } : f.store.getState();
+    // A page edit recorded since the capture: one more undo entry.
+    const pending = { documents: [], dirtyPaths: ['source'], action: { type: 'NOTE_EDIT_REFUSED' } } as never;
+    const read = () => boundary === 'pending' ? { ...f.store.getState(), pageUndoStack: [pending] } : f.store.getState();
     await expect(executeWorkspaceOperation('source', 'rotate', { pages: 'all', angle: 90 }, read,
       f.store.dispatch, f.io, { intent })).rejects.toThrow();
     expect(f.io.confirm).not.toHaveBeenCalled(); expect(f.io.write).not.toHaveBeenCalled();
@@ -410,6 +412,16 @@ function twoDocuments() {
     setView: (next: ((state: AppState) => AppState) | null) => { view = next; } };
 }
 
+/** A view of the state with a pending edit of B that reads a page of A, a copy
+ * imported from A: the page tier is tangled with A. */
+function tangledEditOfB(w: ReturnType<typeof twoDocuments>): (state: AppState) => AppState {
+  const b = w.store.getState().files.get('B')!;
+  const [doc] = documentsRead(b, b.buffer!, 1);
+  const copy = { ...doc, pages: [{ ...doc.pages[0], sourceDocId: 'A' }] };
+  return state => ({ ...state, pageDirtyPaths: ['B'],
+    workspace: { documents: [...state.workspace.documents.filter(d => d.path !== 'B'), copy] } });
+}
+
 /** One macrotask: every microtask a runnable waiter needs has run. */
 const turn = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 async function until(check: () => boolean): Promise<void> {
@@ -575,19 +587,62 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
     } finally { release(); }
   });
 
-  it('page history of another document recorded during a rewrite refuses its publication', async () => {
+  /** Both documents placed from their bytes, so page edits have pages to act on. */
+  const indexBoth = (w: ReturnType<typeof twoDocuments>) => {
+    for (const path of ['A', 'B']) {
+      const file = w.store.getState().files.get(path)!;
+      w.store.dispatch({ type: 'SET_WORKSPACE_DOCUMENTS', path, documents: documentsRead(file, file.buffer!, 2) });
+    }
+  };
+  const documentOf = (w: ReturnType<typeof twoDocuments>, path: string) =>
+    w.store.getState().workspace.documents.find(d => d.path === path)!;
+
+  it('page history of another document recorded during a rewrite no longer refuses its publication: a tier independent of the path is kept', async () => {
     const w = twoDocuments();
+    indexBoth(w);
     const release = w.hold('A');
     try {
       const long = w.rewrite('A');
       await until(() => w.events.includes('engine A rotate'));
       // A page edit of B undone: nothing is dirty, and a redo entry exists.
-      w.setView(state => ({ ...state, pageRedoStack: [{ documents: [], dirtyPaths: ['B'], action: { type: 'NOOP' } } as never] }));
+      const b = documentOf(w, 'B');
+      w.store.dispatch({ type: 'ROTATE_PAGE_REF', docId: b.id, pageId: b.pages[0].id, rotation: 90 });
+      w.store.dispatch({ type: 'UNDO_PAGE_OP' });
+      release();
+      await long;
+      expect(w.events).toContain('publish work-A');
+      expect(w.disk.get('work-A')).toEqual(new Uint8Array([1, 2]));
+      const published = w.store.getState();
+      const bytesA = published.files.get('A')!.buffer;
+      expect(published.pageRedoStack).toHaveLength(1);
+      expect(published.pageRedoStack[0].documents.filter(d => d.path === 'A').map(d => d.buffer)).toEqual([bytesA]);
+      w.store.dispatch({ type: 'REDO_PAGE_OP' });
+      const redone = w.store.getState();
+      expect(redone.pageDirtyPaths).toEqual(['B']);
+      expect(documentOf(w, 'B').pages[0].rotation).toBe(90);
+      expect(documentOf(w, 'A').buffer).toBe(bytesA);
+    } finally { release(); }
+  });
+
+  it('page history tangled with the rewritten file, recorded during a rewrite, refuses its publication', async () => {
+    const w = twoDocuments();
+    indexBoth(w);
+    const release = w.hold('A');
+    try {
+      const long = w.rewrite('A');
+      await until(() => w.events.includes('engine A rotate'));
+      // A page of B moved into A and the move undone: the redo entry names A.
+      const a = documentOf(w, 'A');
+      const b = documentOf(w, 'B');
+      w.store.dispatch({ type: 'MOVE_PAGE', fromDocId: b.id, toDocId: a.id, pageId: b.pages[0].id, toIndex: 0 });
+      w.store.dispatch({ type: 'UNDO_PAGE_OP' });
+      expect(w.store.getState().pageRedoStack).toHaveLength(1);
       release();
       await expect(long).rejects.toThrow(/changed/);
       expect(w.events).not.toContain('publish work-A');
       expect(w.disk.get('work-A')).toEqual(new Uint8Array([1]));
-    } finally { release(); w.setView(null); }
+      expect(w.store.getState().pageRedoStack).toHaveLength(1);
+    } finally { release(); }
   });
 
   it('a commit of a dirty document does not wait for a long rewrite of another one', async () => {
@@ -656,7 +711,7 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
     } finally { releaseFirst(); releaseSecond(); w.setView(null); }
   });
 
-  it('a page edit of another document pending at the publication is committed first, then the rewrite publishes', async () => {
+  it('a page edit of another document tangled with the rewritten file, pending at the publication, is committed first, then the rewrite publishes', async () => {
     const w = twoDocuments();
     const commits: string[] = [];
     // The page commit: what it commits leaves the tier.
@@ -665,7 +720,7 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
     try {
       const long = w.rewrite('A');
       await until(() => w.events.includes('engine A rotate'));
-      w.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      w.setView(tangledEditOfB(w));
       release();
       await long;
       expect(commits).toEqual(['commit B']);
@@ -674,14 +729,14 @@ describe('a staged rewrite runs its engine step outside the publication lane', (
     } finally { release(); w.setView(null); }
   });
 
-  it('a page edit that cannot be committed refuses the rewrite; one on the rewritten file refuses before the next step', async () => {
+  it('a tangled page edit that cannot be committed refuses the rewrite; one on the rewritten file refuses before the next step', async () => {
     const stuck = twoDocuments();
     setCommitGate(async () => { throw new Error('commit refused'); });
     let release = stuck.hold('A');
     try {
       const long = stuck.rewrite('A');
       await until(() => stuck.events.includes('engine A rotate'));
-      stuck.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      stuck.setView(tangledEditOfB(stuck));
       release();
       await expect(long).rejects.toThrow('commit refused');
       expect(stuck.events).not.toContain('publish work-A');
@@ -862,7 +917,7 @@ describe('the page commit a rewrite runs under its write chain', () => {
       await until(() => w.events.includes('engine A rotate'));
       const undo = restoreHistory('undo', w.read, w.store.dispatch, w.history);
       await until(() => hasWorkspacePublication(['work-A']) && locks.__chainedCount() === 1);
-      w.setView(state => ({ ...state, pageDirtyPaths: ['B'] }));
+      w.setView(tangledEditOfB(w));
       release();
       await Promise.all([rewrite, undo]);
       expect(w.events).toEqual(['engine A rotate', 'engine A done', 'commit B', 'publish work-A', 'publish work-A']);
@@ -876,7 +931,7 @@ describe('the page commit a rewrite runs under its write chain', () => {
 describe('a page edit of another document during a rewrite, through the reducer', () => {
   afterEach(() => setCommitGate(null));
 
-  it('is committed before the publication, keeps its page ids, and the rewrite publishes', async () => {
+  async function throughReducer() {
     const onePage = async (width: number) => {
       const pdf = await PDFDocument.create(); pdf.addPage([width, 800]); return pdf.save();
     };
@@ -929,25 +984,96 @@ describe('a page edit of another document during a rewrite, through the reducer'
       },
       transaction,
     };
+    const rewrite = () => executeWorkspaceOperation('A', 'rotate', { angle: 90 }, store.getState, store.dispatch, io);
+    return { disk, store, events, rewrite, release: () => release(), transaction, remove };
+  }
+  const rotationOnDisk = async (bytes: Uint8Array) => (await PDFDocument.load(bytes)).getPage(0).getRotation().angle;
+
+  it('tangled with the rewritten file, is committed before the publication, keeps its page ids, and the rewrite publishes', async () => {
+    const w = await throughReducer();
     try {
-      const rewrite = executeWorkspaceOperation('A', 'rotate', { angle: 90 }, store.getState, store.dispatch, io);
-      await until(() => events.includes('engine A'));
-      store.dispatch({ type: 'ROTATE_PAGE_REF', docId: 'B#g1#0', pageId: 'B#g1#p0', rotation: 90 });
-      expect(store.getState().pageDirtyPaths).toEqual(['B']);
-      release();
+      const rewrite = w.rewrite();
+      await until(() => w.events.includes('engine A'));
+      // A copy of A's page imported into B reads A's current bytes.
+      const fileA = w.store.getState().files.get('A')!;
+      w.store.dispatch({ type: 'IMPORT_PAGES', toDocId: 'B#g1#0', toIndex: 1,
+        pages: [{ id: 'B#import#p0', sourceDocId: 'A', sourcePageIndex: 0, rotation: 0, width: 600, height: 800 }],
+        sources: [{ path: 'A', buffer: fileA.buffer! }] });
+      expect(w.store.getState().pageDirtyPaths).toEqual(['B']);
+      w.release();
       await rewrite;
-      expect(events).toEqual(['engine A', 'commit B', 'publish work-B', 'publish work-A']);
-      const state = store.getState();
+      expect(w.events).toEqual(['engine A', 'commit B', 'publish work-B', 'publish work-A']);
+      const state = w.store.getState();
       expect(state.pageDirtyPaths).toEqual([]);
       expect(state.files.get('B')!.undoStack).toHaveLength(1);
       expect(state.files.get('A')!.undoStack).toHaveLength(1);
-      // B's page keeps the id the commit planned; its turn is in its bytes now.
-      const pageB = state.workspace.documents.find(d => d.path === 'B')!.pages[0];
-      expect(pageB.id).toBe('B#g1#p0');
-      expect(pageB.rotation).toBe(0);
-      expect((await PDFDocument.load(disk.get('work-B')!)).getPage(0).getRotation().angle).toBe(90);
-      expect((await PDFDocument.load(disk.get('work-A')!)).getPage(0).getRotation().angle).toBe(90);
-      expect(state.files.get('A')!.buffer).toEqual(disk.get('work-A'));
-    } finally { release(); }
+      // B's pages keep the ids the commit planned; the copy is in B's bytes now.
+      const pagesB = state.workspace.documents.find(d => d.path === 'B')!.pages;
+      expect(pagesB.map(p => [p.id, p.sourceDocId])).toEqual([['B#g1#p0', 'B'], ['B#import#p0', 'B']]);
+      expect((await PDFDocument.load(w.disk.get('work-B')!)).getPageCount()).toBe(2);
+      expect(await rotationOnDisk(w.disk.get('work-A')!)).toBe(90);
+      expect(state.files.get('A')!.buffer).toEqual(w.disk.get('work-A'));
+    } finally { w.release(); }
+  });
+
+  it('a commit of it planned before a publication of the other document lands after that publication', async () => {
+    const w = await throughReducer();
+    // B's undo entry holds A's documents; the publication of A replaces them.
+    w.store.dispatch({ type: 'ROTATE_PAGE_REF', docId: 'B#g1#0', pageId: 'B#g1#p0', rotation: 90 });
+    const planned = w.store.getState();
+    const fileA = planned.files.get('A')!;
+    const rotated = await PDFDocument.load(fileA.buffer as Uint8Array);
+    rotated.getPage(0).setRotation(degrees(180));
+    const bytesA = await rotated.save();
+    const readA = documentsRead(fileA, bytesA, 1);
+    let published = false;
+    await commitPageEdits({ workspace: planned.workspace, files: planned.files, dirtyPaths: planned.pageDirtyPaths,
+      tier: { planned: { pageUndoStack: planned.pageUndoStack, pageRedoStack: planned.pageRedoStack }, current: w.store.getState },
+      dispatch: w.store.dispatch, transaction: w.transaction, remove: w.remove,
+      writeBuffer: async (path, bytes) => {
+        w.disk.set(path, bytes.slice());
+        if (published) return;
+        published = true;
+        // A's rewrite publishes while B's commit builds.
+        w.store.dispatch({ type: 'UPDATE_FILE', path: 'A', buffer: bytesA, pageCount: 1, snapshotPath: 'snap-A', documents: readA });
+      } });
+    expect(published).toBe(true);
+    const state = w.store.getState();
+    expect(state.files.get('A')!.buffer).toBe(bytesA);
+    expect(state.workspace.documents.filter(d => d.path === 'A')).toEqual(readA);
+    expect(state.pageDirtyPaths).toEqual([]);
+    expect(state.pageUndoStack).toEqual([]);
+    expect(state.pageEditRefusals).toBe(planned.pageEditRefusals);
+    expect(state.files.get('B')!.undoStack).toHaveLength(1);
+    expect(w.events).toEqual(['publish work-B']);
+    expect(await rotationOnDisk(w.disk.get('work-B')!)).toBe(90);
+  });
+
+  it('independent of the rewritten file, stays pending and undoable across the publication, and is not committed', async () => {
+    const w = await throughReducer();
+    try {
+      const rewrite = w.rewrite();
+      await until(() => w.events.includes('engine A'));
+      w.store.dispatch({ type: 'ROTATE_PAGE_REF', docId: 'B#g1#0', pageId: 'B#g1#p0', rotation: 90 });
+      const bytesB = w.disk.get('work-B')!.slice();
+      w.release();
+      await rewrite;
+      expect(w.events).toEqual(['engine A', 'publish work-A']);
+      const state = w.store.getState();
+      const bytesA = state.files.get('A')!.buffer;
+      expect(bytesA).toEqual(w.disk.get('work-A'));
+      expect(await rotationOnDisk(w.disk.get('work-A')!)).toBe(90);
+      expect(state.pageDirtyPaths).toEqual(['B']);
+      expect(state.pageUndoStack).toHaveLength(1);
+      expect(state.files.get('B')!.undoStack).toEqual([]);
+      expect(w.disk.get('work-B')).toEqual(bytesB);
+      // The recorded composition reads A's new bytes.
+      expect(state.pageUndoStack[0].documents.filter(d => d.path === 'A').map(d => d.buffer)).toEqual([bytesA]);
+      w.store.dispatch({ type: 'UNDO_PAGE_OP' });
+      const undone = w.store.getState();
+      expect(undone.pageDirtyPaths).toEqual([]);
+      expect(undone.workspace.documents.find(d => d.path === 'B')!.pages[0].rotation).toBe(0);
+      expect(undone.workspace.documents.find(d => d.path === 'A')!.buffer).toBe(bytesA);
+    } finally { w.release(); }
   });
 });

@@ -1,5 +1,5 @@
 import { AppState, AppAction, CanvasTool, FocusedTab, OpenDocument, OpenFile, PageAnnotation, PageEditAction, PageRef, PdfBuffer, UiState, isDocTab, NAV_PANE_MIN_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from './types';
-import { editsSincePlan } from './page-tier';
+import { editsSincePlan, sameEdits } from './page-tier';
 import { carriesManifest } from '../lib/doc-names';
 import { NO_OVERRIDES } from '../lib/toolbar-layout';
 // Safe from the reducer: commands/tools has type-only imports, so it carries no
@@ -469,11 +469,46 @@ function pageHistoryIndependentOfPath(state: AppState, path: string, retainSourc
       if (!retainSourceBytes && doc.pages.some((page) => page.sourceDocId === path)) return false;
     }
   }
-  return history.every((entry) => {
-    const snapshot = { ...state, workspace: { documents: entry.documents } };
-    const touched = editedDocuments(snapshot, entry.action);
+  // An undo entry holds the composition its action was applied to. A redo
+  // entry holds the composition its action produced; the one it applies to is
+  // the composition of the redo entry above it, or the live one for the top.
+  const redo = state.pageRedoStack;
+  const applied = [
+    ...state.pageUndoStack.map((entry) => ({ action: entry.action, documents: entry.documents })),
+    ...redo.map((entry, i) => ({
+      action: entry.action,
+      documents: i === redo.length - 1 ? state.workspace.documents : redo[i + 1].documents,
+    })),
+  ];
+  return applied.every(({ action, documents }) => {
+    const touched = editedDocuments({ ...state, workspace: { documents } }, action);
     return touched !== undefined && touched !== null && touched.every((doc) => doc.path !== path);
   });
+}
+
+/** Whether `path` can take new bytes while the page tier stays as it is: the
+ * tier is empty, or no pending or recorded edit names the path and no page of
+ * another document, live or recorded, reads from it. A tangled tier addresses
+ * the path's previous bytes and resets when they are replaced. */
+export function pageTierIndependentOfPath(state: AppState, path: string): boolean {
+  const tierEmpty =
+    state.pageUndoStack.length === 0 &&
+    state.pageRedoStack.length === 0 &&
+    state.pageDirtyPaths.length === 0;
+  return tierEmpty || pageHistoryIndependentOfPath(state, path, false);
+}
+
+/** `history` with `path`'s documents replaced by `incoming` in every entry
+ * that holds them; the same array when no entry does. */
+function placeInHistory(
+  history: AppState['pageUndoStack'],
+  path: string,
+  incoming: OpenDocument[],
+): AppState['pageUndoStack'] {
+  if (!history.some((entry) => entry.documents.some((d) => d.path === path))) return history;
+  return history.map((entry) => entry.documents.some((d) => d.path === path)
+    ? { ...entry, documents: placeDocuments(entry.documents, path, incoming) }
+    : entry);
 }
 
 function dropPathFromHistory(history: AppState['pageUndoStack'], path: string): AppState['pageUndoStack'] {
@@ -688,45 +723,50 @@ function applyFileUpdate(
  * show and take edits on other pages.
  *
  * The bytes' own ids are new, so selection, focus and reading position keep
- * nothing of the path. Other files' survive. Pending page edits are committed
- * before any byte replacement; a pending edit still here means a caller
- * bypassed the commit gate. It addresses the previous bytes, and cross-file
- * moves entangle every dirty path, so the whole tier resets and the other
- * dirty paths' documents are dropped for the indexer to re-derive from their
- * own bytes. */
+ * nothing of the path. Other files' survive. A page tier independent of the
+ * path (`pageTierIndependentOfPath`) stays: both stacks and the dirty paths
+ * are kept, and every recorded composition takes the new documents, so an
+ * undo or a redo never restores documents read from the previous bytes. A
+ * tangled tier addresses the previous bytes, and cross-file moves entangle
+ * every dirty path, so the whole tier resets and the other dirty paths'
+ * documents are dropped for the indexer to re-derive from their own bytes. */
 function withNewBytes(
   state: AppState,
   files: Map<string, OpenFile>,
   path: string,
   documents: OpenDocument[],
 ): AppState {
-  const tierEmpty =
-    state.pageUndoStack.length === 0 &&
-    state.pageRedoStack.length === 0 &&
-    state.pageDirtyPaths.length === 0;
-  const base = pruneSelectionForPaths(
-    state,
-    tierEmpty ? [path] : [path, ...state.pageDirtyPaths],
-    false,
-  );
-  const dropped = new Set(tierEmpty ? [] : state.pageDirtyPaths.filter((p) => p !== path));
+  if (pageTierIndependentOfPath(state, path)) {
+    const base = pruneSelectionForPaths(state, [path], false);
+    const placed = placeDocuments(state.workspace.documents, path, documents);
+    const pageUndoStack = placeInHistory(state.pageUndoStack, path, documents);
+    const pageRedoStack = placeInHistory(state.pageRedoStack, path, documents);
+    return {
+      ...base,
+      // A byte-only import source no page references any more goes, as after
+      // any reindex.
+      files: evictUnreferencedImportSources(files, placed, pageUndoStack, pageRedoStack),
+      ui: survivingUi(base.ui, state.workspace.documents, placed),
+      workspace: { documents: placed },
+      pageUndoStack,
+      pageRedoStack,
+    };
+  }
+  const base = pruneSelectionForPaths(state, [path, ...state.pageDirtyPaths], false);
+  const dropped = new Set(state.pageDirtyPaths.filter((p) => p !== path));
   const placed = placeDocuments(
     state.workspace.documents.filter((d) => !dropped.has(d.path)),
     path,
     documents,
   );
-  const pageUndoStack = tierEmpty ? state.pageUndoStack : [];
-  const pageRedoStack = tierEmpty ? state.pageRedoStack : [];
   return {
     ...base,
-    // A byte-only import source no page references any more goes, as after
-    // any reindex.
-    files: evictUnreferencedImportSources(files, placed, pageUndoStack, pageRedoStack),
+    files: evictUnreferencedImportSources(files, placed, [], []),
     ui: survivingUi(base.ui, state.workspace.documents, placed),
     workspace: { documents: placed },
-    pageUndoStack,
-    pageRedoStack,
-    pageDirtyPaths: tierEmpty ? state.pageDirtyPaths : [],
+    pageUndoStack: [],
+    pageRedoStack: [],
+    pageDirtyPaths: [],
   };
 }
 
@@ -1169,8 +1209,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const existing = state.files.get(action.path);
       const undo = action.direction === 'undo';
       if (!existing || existing !== action.expected.files.get(action.path)
-          || state.pageUndoStack !== action.expected.pageUndoStack
-          || state.pageRedoStack !== action.expected.pageRedoStack
+          || !sameEdits(state.pageUndoStack, action.expected.pageUndoStack)
+          || !sameEdits(state.pageRedoStack, action.expected.pageRedoStack)
           || state.pageDirtyPaths !== action.expected.pageDirtyPaths
           || (undo ? existing.undoStack : existing.redoStack).at(-1) !== action.snapshotPath
           || !Number.isSafeInteger(action.pageCount) || action.pageCount < 1
