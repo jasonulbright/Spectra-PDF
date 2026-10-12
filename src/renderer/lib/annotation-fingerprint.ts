@@ -17,20 +17,24 @@ const N = (name: string): PDFName => PDFName.of(name);
 
 /** The value stored under the key spelt `name`, unresolved, null included.
  *  pdf.js decodes a key's `#xx` escapes in either case (7.3.5); pdf-lib's
- *  parser decodes only uppercase ones and keeps a key such as `/B#6frder`
- *  under that literal spelling, so a key not found as written is looked for
- *  by its decoded spelling. With two spellings of one key, the one written
- *  plainly is taken. */
+ *  parser keeps a key such as `/B#6frder` under that literal spelling, so a
+ *  dictionary holding any key with a `#` is read by decoded spelling. Two
+ *  spellings of one key are two entries here and one in pdf.js, where the
+ *  one written later replaces the other; the entries keep file order, so the
+ *  last match is taken. A dictionary with no `#` key is read by exact key.
+ *  One spelling written twice keeps its first position with its last value,
+ *  so `/Border [0 0 1] /B#6frder [0 0 3] /Border [0 0 5]` reads [0 0 3] here
+ *  and [0 0 5] in pdf.js: the parsed dictionary no longer holds the order. */
 export function rawEntry(dict: PDFDict, name: string): PDFObject | undefined {
-  const exact = dict.get(N(name), true);
-  if (exact !== undefined) return exact;
-  for (const [key, value] of dict.entries()) {
-    // Only an escaped key can decode to a spelling the exact lookup missed,
-    // and an escaped key always carries `#` in its written form.
-    if (!key.asString().includes('#')) continue;
-    if (pdfNameKey(key) === name) return value;
+  const entries = dict.entries();
+  // `PDFName.of` decodes `#` pairs in the text it is given, so a decoded name
+  // holding one (`A#41`) would look up another key (`AA`) by exact key.
+  if (!name.includes('#') && !entries.some(([key]) => key.asString().includes('#'))) return dict.get(N(name), true);
+  let found: PDFObject | undefined;
+  for (const [key, value] of entries) {
+    if (pdfNameKey(key) === name) found = value;
   }
-  return undefined;
+  return found;
 }
 
 /** The value under the key spelt `name`, resolved; null reads as absent, as
@@ -94,11 +98,7 @@ export function hasNormalAppearance(dict: PDFDict): boolean {
   if (!(normal instanceof PDFDict)) return false;
   const state = entryOf(dict, 'AS');
   if (!(state instanceof PDFName)) return false;
-  const wanted = pdfNameKey(state);
-  for (const [key] of normal.entries()) {
-    if (pdfNameKey(key) === wanted) return normal.lookup(key) instanceof PDFStream;
-  }
-  return false;
+  return entryOf(normal, pdfNameKey(state)) instanceof PDFStream;
 }
 
 /** A border width as pdf.js takes it: a name is 0, a positive number wider
