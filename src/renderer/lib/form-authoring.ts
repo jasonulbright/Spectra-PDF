@@ -59,6 +59,7 @@ import {
 // through the catalog. i18n is itself a data module (catalogs + i18next), so
 // this file stays pure over bytes and unit-testable with no DOM.
 import { tChrome, type UiKey } from '../i18n';
+import { normalizeEscapedNames } from './pdf-name-normalize';
 
 export type NewFieldType =
   | 'text'
@@ -796,6 +797,7 @@ export async function addFormFields(
         ? new Uint8Array(buffer.slice(0))
         : new Uint8Array(buffer as number[]);
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  normalizeEscapedNames(doc);
   validateSpecs(doc, specs);
   for (const spec of specs) createField(doc, spec);
   writeCalculationOrder(doc, specs);

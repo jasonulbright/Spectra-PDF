@@ -118,3 +118,16 @@ describe('OCG resource remapping', () => {
     await expect(remapLayerIndex(before, after, 1, [[1, 0], [1, 1]])).rejects.toThrow();
   });
 });
+
+describe('OCG resource remapping over an escaped resource key', () => {
+  it('a /Pr#6fperties key on the earlier revision pairs with the rebuilt /Properties', async () => {
+    const pdf = await PDFDocument.create();
+    const groups = ['A', 'B', 'C'].map(name => pdf.context.register(pdf.context.obj({ Type: 'OCG', Name: PDFString.of(name) })));
+    for (const ref of groups) { const page = pdf.addPage(); page.node.set(PDFName.of('Resources'), pdf.context.obj({ PrZZZperties: { Group: ref } })); }
+    pdf.catalog.set(PDFName.of('OCProperties'), pdf.context.obj({ OCGs: groups, D: { ON: groups, OFF: [] } }));
+    const text = Buffer.from(await pdf.save({ useObjectStreams: false })).toString('latin1');
+    const before = new Uint8Array(Buffer.from(text.split('/PrZZZperties').join('/Pr#6fperties'), 'latin1'));
+    const after = await rebuild(before);
+    expect(await remapLayerIndex(before, after, 1, [[1, 0], [2, 1]])).toBe(0);
+  });
+});

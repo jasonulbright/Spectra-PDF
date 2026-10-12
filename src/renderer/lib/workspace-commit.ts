@@ -1,4 +1,5 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFRef } from 'pdf-lib';
+import { normalizeEscapedNames } from './pdf-name-normalize';
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import { baseName } from './create-pdf';
@@ -257,6 +258,9 @@ const MAX_FIELD_DEPTH = 32;
 export async function carriesLiveSignature(bytes: Uint8Array): Promise<boolean> {
   try {
     const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    // Read as the commit reads the same bytes: a catalog key such as
+    // /Acr#6fForm is the /AcroForm the rebuilt file will hold.
+    normalizeEscapedNames(doc);
     const resolve = (value: unknown): unknown => {
       if (!(value instanceof PDFRef)) return value;
       const resolved = doc.context.lookup(value);

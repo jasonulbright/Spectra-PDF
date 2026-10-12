@@ -105,8 +105,11 @@ function kindFor(subtype: string): PageAnnotation['kind'] {
 }
 
 interface RawAnnotation {
+  /** pdf.js's id: the object (`12R`) for an annotation held by reference. */
+  id?: string;
   subtype: string;
-  rect: [number, number, number, number];
+  /** Null for a /Popup with no width or no height. */
+  rect: [number, number, number, number] | null;
   color?: unknown;
   contentsObj?: { str: string };
   inkLists?: ArrayLike<number>[];
@@ -168,6 +171,27 @@ function quadRects(quadPoints: unknown): [number, number, number, number][] {
   return out;
 }
 
+/**
+ * Whether an annotation is left as it is: the sidecar found it ambiguous
+ * (`annotationDictionaryIsAmbiguous`), or the rectangle the sidecar read off
+ * its dictionary is not the one pdf.js reports, so the commit could never
+ * match it and would add a copy on every commit. A /Text note is reported at
+ * an icon size and is matched without its rectangle. An ambiguous annotation
+ * written directly in /Annots has no id to pair by, so the page's other
+ * annotations are left as they are too.
+ */
+function leftUntouched(rawStyles: RawAnnotStyle[] | undefined, a: PlacedAnnotation): boolean {
+  if (!rawStyles) return false;
+  if (rawStyles.some((s) => s.ambiguous && (s.ref === undefined || s.ref === a.id))) return true;
+  if (a.subtype === 'Text' || a.id === undefined) return false;
+  const own = rawStyles.find((s) => !s.ambiguous && s.ref === a.id);
+  return own !== undefined && !own.rect.every((v, k) => Math.abs(v - a.rect[k]) <= 0.5);
+}
+
+type PlacedAnnotation = RawAnnotation & { rect: [number, number, number, number] };
+
+const isPlaced = (a: RawAnnotation): a is PlacedAnnotation => Array.isArray(a.rect);
+
 // `page.view` is [x0,y0,x1,y1] — pdf.js's crop-intersected effective box.
 // The commit builder (pdfx-build.ts) maps display coordinates against
 // `copied.getCropBox()`, NOT getMediaBox() — CropBox defaults to MediaBox
@@ -190,7 +214,8 @@ export async function importPageAnnotations(
 
   const imported: PageAnnotation[] = [];
   for (const a of raw) {
-    if (!RECOGNIZED_SUBTYPES.has(a.subtype)) continue;
+    if (!RECOGNIZED_SUBTYPES.has(a.subtype) || !isPlaced(a)) continue;
+    if (leftUntouched(rawStyles, a)) continue;
     const kind = kindFor(a.subtype);
     const contents = a.contentsObj?.str || undefined;
     const color = colorToHex(a.color) ?? DEFAULT_COLOR[a.subtype];
@@ -405,7 +430,7 @@ function bboxOf(points: number[]): { x: number; y: number; w: number; h: number 
  * header's faithful-or-untouched rules). Returns null to leave the original
  * exactly as it is. */
 function importShape(
-  a: RawAnnotation,
+  a: PlacedAnnotation,
   sidecar: RawAnnotStyle | undefined,
   box: ViewBox,
   rotation: number,
@@ -497,7 +522,7 @@ function importShape(
  * refusing — a file counted by a later build must still open.
  */
 function importCountMark(
-  a: RawAnnotation,
+  a: PlacedAnnotation,
   sidecar: RawAnnotStyle | undefined,
   box: ViewBox,
   rotation: number,
@@ -541,7 +566,7 @@ function importCountMark(
  * become PDF path operators again on the next commit.
  */
 function importSymbolStamp(
-  a: RawAnnotation,
+  a: PlacedAnnotation,
   sidecar: RawAnnotStyle | undefined,
   box: ViewBox,
   rotation: number,
@@ -574,7 +599,7 @@ function importSymbolStamp(
  * lose the table on the next commit.
  */
 function importCountLegend(
-  a: RawAnnotation,
+  a: PlacedAnnotation,
   sidecar: RawAnnotStyle | undefined,
   box: ViewBox,
   rotation: number,
@@ -620,7 +645,7 @@ function importCountLegend(
 /** /FreeText + /IT /FreeTextCallout → kind 'callout', sidecar-gated: the
  * leader (/CL) and text-box insets (/RD) only exist raw. */
 function importCallout(
-  a: RawAnnotation,
+  a: PlacedAnnotation,
   sidecar: RawAnnotStyle | undefined,
   box: ViewBox,
   rotation: number,
