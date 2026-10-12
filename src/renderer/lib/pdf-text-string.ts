@@ -19,6 +19,15 @@ export const PDF_DOC_DIFFERENCES: ReadonlyMap<number, number> = new Map([
 ]);
 
 const ESCAPE = 0x1b;
+
+/** A string of character codes. Spreading a long run of codes into one call
+ *  overflows the stack, so the codes go in slices. */
+export function charactersOf(codes: readonly number[]): string {
+  const SLICE = 8192;
+  let out = '';
+  for (let i = 0; i < codes.length; i += SLICE) out += String.fromCharCode(...codes.slice(i, i + SLICE));
+  return out;
+}
 const BACKSLASH = 0x5c;
 const CR = 0x0d;
 const LF = 0x0a;
@@ -151,7 +160,7 @@ export function pdfNameBytes(name: PDFName): number[] {
 /** A name as the importer's pdf.js reading spells it: one character per
  *  byte, so a subtype or key compares equal on both sides. */
 export function pdfNameKey(name: PDFName): string {
-  return String.fromCharCode(...pdfNameBytes(name));
+  return charactersOf(pdfNameBytes(name));
 }
 
 /** A name's text: its bytes read as UTF-8 (7.3.5), else byte for byte. */
@@ -160,6 +169,6 @@ export function pdfNameText(name: PDFName): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
   } catch {
-    return String.fromCharCode(...bytes);
+    return charactersOf(bytes);
   }
 }

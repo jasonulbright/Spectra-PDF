@@ -20,6 +20,7 @@ import {
   fixFor,
   isFixableStatus,
   namesReportAddress,
+  sendPageCalls,
   suggestionFor,
   artifactCalls,
 } from '../src/renderer/lib/a11y-fixes';
@@ -235,5 +236,68 @@ describe('the fix surface is fully localized', () => {
     ]) {
       expect(PANEL_STRINGS).toHaveProperty(key);
     }
+  });
+});
+
+describe('declaring several pages, one call each', () => {
+  const calls = [2, 5, 7].map((page) => ({ method: 'tag_page_content' as const, params: { page } }));
+
+  /** A document whose revision is a number; each call publishes the next. */
+  function documentAt(start: number) {
+    const doc = { revision: start, sent: [] as { page: unknown; expected: number }[] };
+    const send = async (call: { params: Record<string, unknown> }, expected: number) => {
+      doc.sent.push({ page: call.params.page, expected });
+      doc.revision += 1;
+      return doc.revision;
+    };
+    const isCurrent = (revision: number) => doc.revision === revision;
+    return { doc, send, isCurrent };
+  }
+
+  it('binds each call to the revision the call before it published', async () => {
+    const { doc, send, isCurrent } = documentAt(10);
+    expect(await sendPageCalls(calls, 10, send, isCurrent)).toBe('fixed');
+    expect(doc.sent).toEqual([{ page: 2, expected: 10 }, { page: 5, expected: 11 }, { page: 7, expected: 12 }]);
+  });
+
+  it('stops before a call once the document moved, and keeps the pages already sent', async () => {
+    const { doc, send, isCurrent } = documentAt(10);
+    const moving = async (call: { params: Record<string, unknown> }, expected: number) => {
+      const published = await send(call, expected);
+      if (call.params.page === 2) doc.revision += 100;
+      return published;
+    };
+    expect(await sendPageCalls(calls, 10, moving, isCurrent)).toBe('refused');
+    expect(doc.sent).toEqual([{ page: 2, expected: 10 }]);
+  });
+
+  it('refuses before the first call when the report is not at the live revision', async () => {
+    const { doc, send, isCurrent } = documentAt(10);
+    expect(await sendPageCalls(calls, 9, send, isCurrent)).toBe('refused');
+    expect(doc.sent).toEqual([]);
+  });
+
+  it('reads a write that failed after the document moved as the refusal', async () => {
+    const { doc, isCurrent } = documentAt(10);
+    const failing = async () => {
+      doc.revision += 1;
+      throw new Error('rebuilt under the call');
+    };
+    expect(await sendPageCalls(calls, 10, failing, isCurrent)).toBe('refused');
+  });
+
+  it('passes on a write that failed while the document stood still', async () => {
+    const { isCurrent } = documentAt(10);
+    const failing = async (): Promise<number> => { throw new Error('disk full'); };
+    await expect(sendPageCalls(calls, 10, failing, isCurrent)).rejects.toThrow('disk full');
+  });
+
+  it('a declined call stops the run', async () => {
+    const { doc, isCurrent } = documentAt(10);
+    let sent = 0;
+    const declining = async () => { sent += 1; return 'declined' as const; };
+    expect(await sendPageCalls(calls, 10, declining, isCurrent)).toBe('stopped');
+    expect(sent).toBe(1);
+    expect(doc.revision).toBe(10);
   });
 });
