@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { beginDocumentWrite, whileDocumentLeaves, __documentWriteCount } from '../src/renderer/lib/document-writes';
+import {
+  beginDocumentWrite, beginDocumentWrites, documentWritesDrained, documentWritesOf, onDocumentWritesChange,
+  whileDocumentLeaves, whileDocumentsLeave, __documentWriteCount,
+} from '../src/renderer/lib/document-writes';
 import { createPageLabelDrafts, previewLabel, type LabelRange } from '../src/renderer/lib/page-label-drafts';
 import { createOwnedOperationRuns } from '../src/renderer/lib/owned-operation-run';
 import { writeRedactionMarks } from '../src/renderer/lib/redaction-write';
@@ -271,5 +274,136 @@ describe('an undo of a document that became active after the key press', () => {
     reading.resolve();
     await Promise.all([undone, left]);
     expect(w.events).toEqual(['restore B', 'restored B', 'left B']);
+  });
+});
+
+describe('documents that close', () => {
+  it('refuse a new gesture on any of them with the close refusal, and only them', async () => {
+    const steps = deferred();
+    let cancelledAtEnd: boolean | null = null;
+    const left = whileDocumentsLeave(['work-A', 'work-B'], 'close', async (cancelled) => {
+      await steps.promise;
+      cancelledAtEnd = cancelled();
+    });
+    await turn();
+    beginDocumentWrite('work-C')();
+    expect(() => beginDocumentWrite('work-B')).toThrow(/being closed/);
+    expect(() => beginDocumentWrites(['work-C', 'work-A'])).toThrow(/being closed/);
+    expect(__documentWriteCount()).toBe(0);
+    steps.resolve();
+    await left;
+    expect(cancelledAtEnd).toBe(true);
+    beginDocumentWrites(['work-A', 'work-B'])();
+    expect(__documentWriteCount()).toBe(0);
+  });
+
+  it('are not cancelled when no gesture was refused', async () => {
+    const seen = await whileDocumentsLeave(['work-A'], 'close', async (cancelled) => cancelled());
+    expect(seen).toBe(false);
+  });
+
+  it('admit a gesture while a recorded write of the same document runs', async () => {
+    const ended = beginDocumentWrite('work-A');
+    const left = whileDocumentsLeave(['work-A'], 'close', async (cancelled) => {
+      const inner = beginDocumentWrite('work-A');
+      ended();
+      inner();
+      return cancelled();
+    });
+    expect(await left).toBe(false);
+  });
+
+  it('a move still names the move in its refusal', async () => {
+    const steps = deferred();
+    const left = whileDocumentLeaves('work-A', async () => { await steps.promise; });
+    await turn();
+    expect(() => beginDocumentWrite('work-A')).toThrow(/moved to another window/);
+    steps.resolve();
+    await left;
+  });
+});
+
+describe('a close and a move of the same document at once', () => {
+  it('keep their own records: a refusal before a leave began never calls it off', async () => {
+    const exitSteps = deferred();
+    let exitCancelled: boolean | null = null;
+    const exit = whileDocumentsLeave(['work-A'], 'close', async (cancelled) => {
+      await exitSteps.promise;
+      exitCancelled = cancelled();
+    });
+    await turn();
+    // Refused by the close alone, with the close's text.
+    expect(() => beginDocumentWrite('work-A')).toThrow(/being closed/);
+
+    const moveSteps = deferred();
+    let moveCancelled: boolean | null = null;
+    const move = whileDocumentsLeave(['work-A'], 'move', async (cancelled) => {
+      await moveSteps.promise;
+      moveCancelled = cancelled();
+    });
+    await turn();
+    exitSteps.resolve();
+    await exit;
+    expect(exitCancelled).toBe(true);
+    moveSteps.resolve();
+    await move;
+    expect(moveCancelled).toBe(false);
+  });
+
+  it('a refusal while both run names the leave that began first and reaches both', async () => {
+    const steps = deferred();
+    const seen: Record<string, boolean> = {};
+    const move = whileDocumentsLeave(['work-A'], 'move', async (cancelled) => {
+      await steps.promise;
+      seen.move = cancelled();
+    });
+    const close = whileDocumentsLeave(['work-A'], 'close', async (cancelled) => {
+      await steps.promise;
+      seen.close = cancelled();
+    });
+    await turn();
+    expect(() => beginDocumentWrite('work-A')).toThrow(/moved to another window/);
+    steps.resolve();
+    await Promise.all([move, close]);
+    expect(seen).toEqual({ move: true, close: true });
+    beginDocumentWrite('work-A')();
+    expect(__documentWriteCount()).toBe(0);
+  });
+});
+
+describe('the writes recorded for documents', () => {
+  it('are counted once per write across the paths it names', () => {
+    const both = beginDocumentWrites(['work-A', 'work-B']);
+    const one = beginDocumentWrite('work-B');
+    expect(documentWritesOf(['work-A'])).toBe(1);
+    expect(documentWritesOf(['work-A', 'work-B'])).toBe(2);
+    expect(documentWritesOf(['work-C'])).toBe(0);
+    both();
+    one();
+    expect(documentWritesOf(['work-A', 'work-B'])).toBe(0);
+  });
+
+  it('notify a subscriber when a write is recorded and when it ends', () => {
+    const counts: number[] = [];
+    const stop = onDocumentWritesChange(() => counts.push(documentWritesOf(['work-A'])));
+    const ended = beginDocumentWrite('work-A');
+    ended();
+    ended();
+    stop();
+    beginDocumentWrite('work-A')();
+    expect(counts).toEqual([1, 0]);
+  });
+
+  it('drain once every write of the paths ends, including one recorded while waiting', async () => {
+    const first = beginDocumentWrite('work-A');
+    let drained = false;
+    const done = documentWritesDrained(['work-A', 'work-B']).then(() => { drained = true; });
+    const second = beginDocumentWrite('work-B');
+    first();
+    await turn();
+    expect(drained).toBe(false);
+    second();
+    await done;
+    expect(drained).toBe(true);
   });
 });

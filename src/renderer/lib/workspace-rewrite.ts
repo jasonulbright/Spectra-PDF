@@ -1,4 +1,6 @@
 import type { AppAction, AppState, OpenFile, PdfBuffer } from '../state/types';
+import { pageTierIndependentOfPath } from '../state/reducer';
+import { sameEdits } from '../state/page-tier';
 import { tChrome } from '../i18n';
 import { withFileLock, withWriteChain } from './engine-lock';
 import { announceWorkspacePublication, serializeWorkspacePublication } from './workspace-publication';
@@ -29,8 +31,13 @@ async function digest(value: Uint8Array<ArrayBuffer>): Promise<string> {
 }
 function changed(): Error { return new Error(tChrome('app.history.changed')); }
 function sameRevision(now: AppState, expected: AppState, path: string): boolean {
-  return now.files.get(path) === expected.files.get(path) && now.pageDirtyPaths === expected.pageDirtyPaths
-    && now.pageUndoStack === expected.pageUndoStack && now.pageRedoStack === expected.pageRedoStack;
+  if (now.files.get(path) !== expected.files.get(path)) return false;
+  return pageTierIndependentOfPath(now, path) || (now.pageDirtyPaths === expected.pageDirtyPaths
+    && sameEdits(now.pageUndoStack, expected.pageUndoStack) && sameEdits(now.pageRedoStack, expected.pageRedoStack));
+}
+/** Whether a pending page edit must be committed before the path publishes. */
+function tangledEditPending(state: AppState, path: string): boolean {
+  return state.pageDirtyPaths.length > 0 && !pageTierIndependentOfPath(state, path);
 }
 
 /** Rounds of "commit the pending page edits, then check" before a refusal. */
@@ -68,16 +75,20 @@ export function holdRewriteEngineSteps(): { release: () => void; waiting: () => 
  * bytes. Phase 1, in the publication lane: recover a pending page commit.
  * Phase 2, under a SHARED lock on the working path and outside the lane: the
  * stage, the engine steps, the read-back and the index; readers that run no
- * gate read the bytes the user still sees. Then, holding the chain only,
- * every pending page edit is committed. Phase 3: the exclusive lock, then the
- * lane, then the fence and the publication.
+ * gate read the bytes the user still sees. Then, holding the chain only, the
+ * pending page edits are committed when the page tier is tangled with the
+ * path. Phase 3: the exclusive lock, then the lane, then the fence and the
+ * publication.
  *
- * Fence: the file is the captured one, no page edit is pending anywhere, and
- * the page history is the one at phase 1 or empty. Replacing a file's bytes
- * resets a live page tier (`withNewBytes` in the reducer), so a pending edit
- * of another document is committed before phase 3, never published over, and
- * page history recorded during the rewrite refuses it. A page edit of the
- * rewritten file itself voids the work in progress.
+ * Fence: the file is the captured one, and either the page tier is
+ * independent of the path (`pageTierIndependentOfPath` in the reducer) or no
+ * page edit is pending anywhere and the page history is the one at phase 1 or
+ * empty. Replacing a file's bytes keeps an independent tier, its pending
+ * edits and both stacks, and resets a tangled one (`withNewBytes`). So a
+ * pending edit of a tangled set is committed before phase 3 in one commit,
+ * never published over, and page history recorded during the rewrite into a
+ * tangled tier refuses it. A page edit of the rewritten file itself voids the
+ * work in progress.
  *
  * The commit run while the chain is held is the page commit alone, never a
  * gate: a gate waits for announced publications, and a disk undo of this path
@@ -135,7 +146,7 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
     const settle = async (consent: boolean): Promise<boolean> => {
       for (let attempt = 0; attempt < REWRITE_COMMIT_ATTEMPTS; attempt++) {
         options.assertActive?.();
-        if (getState().pageDirtyPaths.length) {
+        if (tangledEditPending(getState(), path)) {
           await commitPendingPageEdits();
           continue;
         }
@@ -155,9 +166,9 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
     const publish = (): Promise<T | typeof DECLINED> =>
       withWriteChain([working], async () => {
         if (!await settle(true)) return DECLINED;
-        // The page history as the rewrite starts. Publishing resets a live page
-        // tier, so history recorded since (a page undo of another document)
-        // refuses the rewrite rather than being dropped.
+        // The page history as the rewrite starts. Publishing resets a page tier
+        // tangled with the path, so history recorded since into a tangled
+        // tier refuses the rewrite rather than being dropped.
         const history = await serializeWorkspacePublication(async () => {
           await recoverPendingPageCommit();
           requireCurrent();
@@ -166,7 +177,8 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
         }, [working]);
         const historyKept = () => {
           const now = getState();
-          return (now.pageUndoStack === history.pageUndoStack && now.pageRedoStack === history.pageRedoStack)
+          return (sameEdits(now.pageUndoStack, history.pageUndoStack)
+              && sameEdits(now.pageRedoStack, history.pageRedoStack))
             || (!now.pageUndoStack.length && !now.pageRedoStack.length);
         };
         const stage = `${working}.${options.kind}-${crypto.randomUUID()}.pdf`;
@@ -202,7 +214,9 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
           });
           const requireFence = () => {
             requireCurrent();
-            if (getState().pageDirtyPaths.length || !historyKept()) throw changed();
+            const now = getState();
+            if (pageTierIndependentOfPath(now, path)) return;
+            if (now.pageDirtyPaths.length || !historyKept()) throw changed();
           };
           for (let attempt = 0; ; attempt++) {
             if (attempt === REWRITE_COMMIT_ATTEMPTS) throw changed();
@@ -210,9 +224,9 @@ export async function rewriteWorkspaceFile<T>(path: string, getState: () => AppS
             await settle(false);
             const outcome = await withFileLock([working], () => serializeWorkspacePublication(async () => {
               requireCurrent();
-              // A page edit made since the commit above: commit it outside
-              // the lane and the exclusive lock, then try again.
-              if (getState().pageDirtyPaths.length) return RETRY;
+              // A tangled page edit made since the commit above: commit it
+              // outside the lane and the exclusive lock, then try again.
+              if (tangledEditPending(getState(), path)) return RETRY;
               requireFence();
               published = true;
               await publishPageCommit(io.transaction,

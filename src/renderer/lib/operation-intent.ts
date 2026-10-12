@@ -1,5 +1,6 @@
 import type { AppState, OpenFile } from '../state/types';
 import { tChrome } from '../i18n';
+import { sameEdits } from '../state/page-tier';
 
 /** Captured synchronously by the user gesture, before any prerequisite await.
  * Immutable reducer references include the pending page tier, not just disk. */
@@ -42,8 +43,8 @@ export function captureFileOperationIntent(state: AppState, source: OpenFile): O
 export function assertOperationIntent(state: AppState, intent: OperationIntent): void {
   if (state.files.get(intent.source.path) !== intent.source
       || state.pageDirtyPaths !== intent.pageDirtyPaths
-      || state.pageUndoStack !== intent.pageUndoStack
-      || state.pageRedoStack !== intent.pageRedoStack) throw changed();
+      || !sameEdits(state.pageUndoStack, intent.pageUndoStack)
+      || !sameEdits(state.pageRedoStack, intent.pageRedoStack)) throw changed();
 }
 
 /** A commit may adopt exactly its authored source -> result mapping. A fresh

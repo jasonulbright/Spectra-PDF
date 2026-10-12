@@ -396,6 +396,65 @@ export function planHandOff(reserved: boolean, dirty: boolean): HandOffPlan {
   return { hand: true, saveFirst: dirty };
 }
 
+/** How many commits a hand-off runs to bring the page tier to rest before it
+ * stops for an edit that keeps landing. */
+export const HAND_OFF_COMMIT_ROUNDS = 3;
+
+/** What the hand-off reads at each check after its last commit. */
+export interface HandOffCheck {
+  /** A gesture refused because the document is leaving. */
+  readonly cancelled: boolean;
+  /** The document's `editRevision` when the page tier came to rest. */
+  readonly noted: number;
+  /** Its `editRevision` now; undefined once the file is gone. */
+  readonly revision: number | undefined;
+  /** Whether the path has page edits the working copy does not hold. */
+  readonly pageDirty: boolean;
+}
+
+/**
+ * Why a hand-off stops at a check, or null to go on.
+ *
+ * The file on disk is the only thing the receiving window opens, so an edit
+ * that landed after the last commit would be dropped with the tab. The move
+ * stops instead and the edit stays here, pending.
+ */
+export function handOffStop(check: HandOffCheck): 'cancelled' | 'edited' | null {
+  if (check.cancelled) return 'cancelled';
+  if (check.pageDirty || (check.revision ?? 0) !== check.noted) return 'edited';
+  return null;
+}
+
+/** A point in a hand-off where an e2e run can hold it. */
+export type HandOffStage = 'committed' | 'sealed';
+
+const handOffHolds = new Map<HandOffStage, { held: Promise<void>; waiting: number }>();
+
+/**
+ * Hold every hand-off at `stage` until `release`. `committed`: the page tier is
+ * at rest and its revision noted, before the reservation. `sealed`: the file is
+ * written, marked saved and sealed, before the hand-over. Called only from the
+ * harness, which exists only in a `VITE_E2E` build.
+ */
+export function holdHandOff(stage: HandOffStage): { release: () => void; waiting: () => number } {
+  let release!: () => void;
+  const hold = { held: new Promise<void>(resolve => { release = resolve; }), waiting: 0 };
+  handOffHolds.set(stage, hold);
+  return {
+    release: () => { if (handOffHolds.get(stage) === hold) handOffHolds.delete(stage); release(); },
+    waiting: () => hold.waiting,
+  };
+}
+
+/** The hold at `stage`, or null when none is set: a production hand-off never
+ * awaits here. */
+export function handOffHold(stage: HandOffStage): Promise<void> | null {
+  const hold = handOffHolds.get(stage);
+  if (!hold) return null;
+  hold.waiting++;
+  return hold.held.finally(() => { hold.waiting--; });
+}
+
 /**
  * The hand-offs this window has started and not yet finished.
  *

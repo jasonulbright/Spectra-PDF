@@ -15,9 +15,13 @@ import {
   deleteSelectedCanvasPages,
   getState,
   getWorkspacePageIds,
+  handOffsWaiting,
+  holdHandOff,
   importPagesIntoDoc,
+  invokeAppCommand,
   openByPaths,
   pressGlobalKey,
+  releaseHandOff,
   selectCanvasPages,
   setView,
   tabDragDrop,
@@ -84,6 +88,7 @@ const CONFIRM_MESSAGE = '[data-testid="confirm-message"]';
 const CONFIRM_AFFIRM = '[data-testid="confirm-affirm"]';
 const NOTICE_OK = '[data-testid="notice-ok"]';
 const COMMIT_ERROR = '[data-testid="commit-error-bar"]';
+const PAGE_EDIT_REFUSED = '[data-testid="page-edit-refused-bar"]';
 
 /** How far inside the drop point a torn-off window is placed. */
 const TEAR_OFF_INSET = 24;
@@ -932,6 +937,96 @@ describe('cross-window tab drag', () => {
       timeoutMsg: 'the commit the failed hand-off ran could not be undone',
     });
     await browser.switchToWindow(secondHandle);
+    await browser.execute(() => {
+      void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    });
+    await browser.switchToWindow(mainHandle);
+    await waitForHandles(1);
+  });
+
+  // A page edit is not a write the move waits for: it lands in the page tier.
+  // The move commits until the tier is at rest; an edit after that stops the
+  // move and stays here, and from the seal on the edit is refused. The harness
+  // holds the move at each of those two points.
+  let editedPdf = '';
+
+  it("an edit after the move's last commit stops the move and stays pending here", async () => {
+    await browser.switchToWindow(mainHandle);
+    editedPdf = resolve(mkdtempSync(resolve(tmpdir(), 'tab-drag-edit-')), 'edited.pdf');
+    copyFileSync(SAMPLE_PDF, editedPdf);
+    await openByPaths([editedPdf]);
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(editedPdf));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never indexed',
+    });
+
+    await holdHandOff('committed');
+    try {
+      expect(await invokeAppCommand('window.moveToNewWindow')).toBe(true);
+      await browser.waitUntil(async () => (await handOffsWaiting('committed')) === 1, {
+        timeout: 30_000,
+        timeoutMsg: 'the move never reached its last commit',
+      });
+      await selectCanvasPages([(await pages())[0]]);
+      await deleteSelectedCanvasPages();
+      await browser.waitUntil(async () => (await pages()).length === 4, {
+        timeout: 30_000,
+        timeoutMsg: 'the page delete never landed in the page tier',
+      });
+    } finally {
+      await releaseHandOff('committed');
+    }
+
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000 });
+    expect(await $(CONFIRM_MESSAGE).getText()).toContain('edited during the move');
+    await $(NOTICE_OK).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 10_000, reverse: true });
+
+    // Nothing crossed: no window was built, the tab is here, and the edit is
+    // still pending in the page tier rather than in the user's file.
+    expect(await browser.getWindowHandles()).toHaveLength(1);
+    expect(await tabPaths()).toContain(editedPdf);
+    expect(await pages()).toHaveLength(4);
+    expect(await diskPageCount(editedPdf)).toBe(5);
+  });
+
+  it('an edit after the seal is refused out loud, and the moved file lacks it', async () => {
+    await browser.switchToWindow(mainHandle);
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(editedPdf));
+
+    await holdHandOff('sealed');
+    try {
+      expect(await invokeAppCommand('window.moveToNewWindow')).toBe(true);
+      await browser.waitUntil(async () => (await handOffsWaiting('sealed')) === 1, {
+        timeout: 30_000,
+        timeoutMsg: 'the move never reached its seal',
+      });
+      // The pending edit of the case above is in the file the move wrote.
+      expect(await diskPageCount(editedPdf)).toBe(4);
+      await selectCanvasPages([(await pages())[0]]);
+      await deleteSelectedCanvasPages();
+      await waitForDisplayedSelector(PAGE_EDIT_REFUSED, { timeout: 15_000 });
+      expect(await $(PAGE_EDIT_REFUSED).getText()).toContain('being moved to another window');
+      expect(await pages()).toHaveLength(4);
+    } finally {
+      await releaseHandOff('sealed');
+    }
+
+    const handles = await waitForHandles(2);
+    await waitForTabs([lockedPdf], 'the sealed document never left the source window');
+    expect(await diskPageCount(editedPdf)).toBe(4);
+    const moved = handles.find((h) => h !== mainHandle)!;
+    await browser.switchToWindow(moved);
+    await waitForHarness(30_000);
+    await waitForFileCount(1, 'the sealed document never arrived in its new window');
+    await browser.waitUntil(async () => (await getState()).activeFile?.pageCount === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the moved document did not open as the bytes the move wrote',
+    });
     await browser.execute(() => {
       void (window as any).__SPECTRA_TEST__.closeThisWindow();
     });

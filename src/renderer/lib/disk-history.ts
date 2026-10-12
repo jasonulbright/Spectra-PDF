@@ -1,5 +1,6 @@
 import type { AppAction, AppState, PdfBuffer } from '../state/types';
 import { tChrome } from '../i18n';
+import { sameEdits } from '../state/page-tier';
 import { withFileLock, withWriteChain } from './engine-lock';
 import { announceWorkspacePublication, serializeWorkspacePublication } from './workspace-publication';
 import { beginDocumentWrite } from './document-writes';
@@ -83,8 +84,8 @@ export function restoreHistory(direction: 'undo' | 'redo', getState: () => AppSt
     if (!current.buffer) throw changed();
     const isCurrent = () => {
       const now = getState();
-      return now.files.get(path) === current && now.pageUndoStack === expected.pageUndoStack
-        && now.pageRedoStack === expected.pageRedoStack && now.pageDirtyPaths === expected.pageDirtyPaths;
+      return now.files.get(path) === current && sameEdits(now.pageUndoStack, expected.pageUndoStack)
+        && sameEdits(now.pageRedoStack, expected.pageRedoStack) && now.pageDirtyPaths === expected.pageDirtyPaths;
     };
     // Read and validate the exact retained bytes BEFORE touching the working
     // file. Count them, not a later read of the mutable working path. The

@@ -331,6 +331,18 @@ export const WORKBENCH_STRINGS = {
 
   'app.close.unsaved': '"{{name}}" has unsaved changes. Save before closing?',
   'app.closeAll.unsaved': 'Unsaved changes in: {{names}}. Save before closing all?',
+  // A close waits for the operations already running on its documents, then
+  // asks about unsaved changes in their result. Close Now closes without the
+  // result of an operation still running.
+  'app.close.waitingTitle': 'Finishing Operations',
+  'app.close.waiting': 'An operation on "{{name}}" is still running. The document closes when it finishes.',
+  'app.close.waitingMany': 'Operations on these documents are still running: {{names}}. They close when the operations finish.',
+  'app.close.closeNow': 'Close Now',
+  // An action asked for while its document is closing does not run, and the
+  // document stays open.
+  'app.close.refusedAction': 'This action did not run because the document was being closed.',
+  'app.close.cancelled':
+    'The document stayed open because an action on it was asked for while it was closing. Close it again once the action has finished.',
   'app.exit.unsaved': 'Unsaved changes in: {{names}}. Save before exiting?',
   'app.window.unsaved': 'Unsaved changes in: {{names}}. Save before closing?',
 
@@ -354,6 +366,13 @@ export const WORKBENCH_STRINGS = {
     'This action did not run because the document was being moved to another window.',
   'app.window.moveCancelled':
     'The document stayed in this window because an action on it was asked for during the move. Move it again once the action has finished.',
+  // A page edit made while the document is being handed to another window:
+  // after the last commit it stops the move and stays here; once the file is
+  // sealed for the hand-over it is refused.
+  'app.window.moveStoppedByEdit':
+    'The document stayed in this window because it was edited during the move. Move it again to take the edit with it.',
+  'app.window.moveRefusedEdit':
+    'This edit was not made because the document is being moved to another window.',
   'app.window.openElsewhere':
     'Already open in another window: {{names}}. A file can be edited in one window at a time.',
   'app.window.importElsewhere':

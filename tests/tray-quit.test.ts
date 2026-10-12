@@ -114,5 +114,9 @@ describe('tray Quit', () => {
     const close = stepCall(3);
     expect(calleePath(close.expression)).toBe('closeGated');
     expect(print(close.arguments[0])).toBe('(force) => app.confirmClose(force)');
+    // The close step leaves again with this window's documents: a write
+    // started after the first prompt is waited for and asked about.
+    expect(close.arguments).toHaveLength(2);
+    expect(print(close.arguments[1])).toBe('exitDocuments(paths)');
   });
 });

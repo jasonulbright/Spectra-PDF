@@ -4,12 +4,14 @@ import { restoreHistory } from './lib/disk-history';
 import { saveFailureNotice } from './lib/save-failure';
 import { captureCanvasTextRequest, type CanvasTextRequest } from './lib/extract-text-owner';
 import { runPageCommit } from './lib/page-commit-run';
-import { whileDocumentLeaves, withDocumentWrite } from './lib/document-writes';
+import { documentWritesOf, whileDocumentLeaves, whileDocumentsLeave, withDocumentWrite } from './lib/document-writes';
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
 import { errorText, withoutFilePath } from './lib/error-text';
-import { HandOffGate, flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
+import {
+  HAND_OFF_COMMIT_ROUNDS, HandOffGate, flushTabOrder, handOffHold, handOffStop, planHandOff, reservationHolds, tabMoved,
+} from './lib/tab-drag';
 import {
   decodeToRawSource,
   type AddImageSource,
@@ -53,7 +55,10 @@ import { createUnlockPrompts, type UnlockPrompt } from './lib/unlock-prompts';
 import { reportLaunch } from './lib/launch-notices';
 import { PasswordDialog } from './components/PasswordDialog';
 import { copyBlock, selectionPageIds } from './lib/copy-permission';
-import { closeThroughWrites, waitForWrites, withdrawRequest, type CloseOutcome, type GatedClose, type WriteWait } from './lib/close-writes';
+import {
+  closeLeavingDocuments, closeThroughWrites, readyToClose, waitForDocumentWrites, waitForWrites, withdrawRequest,
+  type CloseOutcome, type CloseReadiness, type GatedClose, type WriteWait,
+} from './lib/close-writes';
 import { discardDocumentWorkingCopy, prepareDocumentWorkingCopy, saveWorkingCopy } from './lib/document-open';
 import { setStageCredentialCaller } from './lib/stage-credentials';
 import { setSealedReader } from './lib/sealed-edit';
@@ -770,36 +775,94 @@ function AppContent(): React.ReactElement {
     if (confirmState) confirmQueue.answer(confirmState.id)?.resolve(result);
   }, [confirmState, confirmQueue]);
 
-  // Writes still running hold the last window: it says so, closes by itself
-  // when they finish, and closes at once only if the user quits anyway.
-  const waitOnWrites = useCallback(
-    (): Promise<WriteWait> => {
-      let finishingId = 0;
-      return waitForWrites({
-      ask: () => new Promise<boolean>((resolve) => {
-        requestConfirm({
-          message: tChrome('app.exit.finishing'),
-          kind: 'proceed',
-          title: tChrome('app.exit.finishingTitle'),
-          affirmLabel: tChrome('app.exit.quitAnyway'),
-          resolve: (r) => resolve(r === 'save'),
-        });
-        // This request's own id: a later request queued behind it must not be
-        // the one a finished wait withdraws.
-        finishingId = lastConfirmId.current;
-      }),
-      withdraw: () => { withdrawRequest(confirmQueue, finishingId); },
-      listen: (onCount) => engine.onWritesInFlight(onCount),
-      current: () => engine.writesInFlight(),
+  // The choice a wait for running writes offers: the affirm button goes on
+  // without them, Cancel keeps what was closing. Returns the answer and how to
+  // withdraw this request, by its own id, when the writes finish first: a
+  // later request queued behind it must not be the one withdrawn.
+  const askWriteWait = useCallback(
+    (title: string, message: string, affirmLabel: string): { answer: Promise<boolean>; withdraw: () => void } => {
+      let id = 0;
+      const answer = new Promise<boolean>((resolve) => {
+        requestConfirm({ message, kind: 'proceed', title, affirmLabel, resolve: (r) => resolve(r === 'save') });
+        id = lastConfirmId.current;
       });
+      return { answer, withdraw: () => { withdrawRequest(confirmQueue, id); } };
     },
     [requestConfirm, confirmQueue],
   );
 
+  // Writes still running hold the last window: it says so, closes by itself
+  // when they finish, and closes at once only if the user quits anyway.
+  const waitOnWrites = useCallback(
+    (): Promise<WriteWait> => {
+      let withdraw = (): void => {};
+      return waitForWrites({
+        ask: () => {
+          const asked = askWriteWait(
+            tChrome('app.exit.finishingTitle'), tChrome('app.exit.finishing'), tChrome('app.exit.quitAnyway'),
+          );
+          withdraw = asked.withdraw;
+          return asked.answer;
+        },
+        withdraw: () => withdraw(),
+        listen: (onCount) => engine.onWritesInFlight(onCount),
+        current: () => engine.writesInFlight(),
+      });
+    },
+    [askWriteWait],
+  );
+
+  // The wait a close shows while writes recorded for its documents run. It
+  // names the documents with a write and closes by itself when the writes
+  // finish. Close Now goes on without them: the write continues, and its
+  // result is ignored once its document is no longer open.
+  const waitOnDocumentWrites = useCallback(
+    (workingPaths: readonly string[]): Promise<WriteWait> => {
+      let withdraw = (): void => {};
+      return waitForDocumentWrites(
+        workingPaths,
+        () => {
+          const closing = [...readState().files.values()].filter((f) => workingPaths.includes(f.workingPath));
+          const writing = closing.filter((f) => documentWritesOf([f.workingPath]) > 0);
+          const names = (writing.length ? writing : closing).map((f) => f.name);
+          const asked = askWriteWait(
+            tChrome('app.close.waitingTitle'),
+            names.length === 1
+              ? tChrome('app.close.waiting', { name: names[0] })
+              : tChrome('app.close.waitingMany', { names: names.join(', ') }),
+            tChrome('app.close.closeNow'),
+          );
+          withdraw = asked.withdraw;
+          return asked.answer;
+        },
+        () => withdraw(),
+      );
+    },
+    [readState, askWriteWait],
+  );
+
+  // `documents`: the documents this close ends that no earlier prompt covers
+  // to the end, as an Exit's own close step after other windows answered.
+  // The close then runs as a leave of them: it waits for their recorded
+  // writes, asks again about the bytes those writes produced, and refuses a
+  // new gesture on them until the window is gone. A refused gesture calls the
+  // close off and says so, as every other close of documents does.
   const closeGated = useCallback(
-    (close: (force: boolean) => Promise<CloseOutcome>): Promise<GatedClose> =>
-      closeThroughWrites(close, waitOnWrites),
-    [waitOnWrites],
+    (
+      close: (force: boolean) => Promise<CloseOutcome>,
+      documents?: { working: readonly string[]; recheck: () => Promise<boolean> },
+    ): Promise<GatedClose> => {
+      if (!documents) return closeThroughWrites(close, waitOnWrites);
+      const { working, recheck } = documents;
+      return whileDocumentsLeave(working, 'close', (cancelled) => closeLeavingDocuments(
+        cancelled,
+        { pending: () => documentWritesOf(working), wait: () => waitOnDocumentWrites(working), confirm: recheck },
+        close,
+        waitOnWrites,
+        () => { void showNotice(tCommandTitle('file.exit', 'Exit'), tChrome('app.close.cancelled')); },
+      ));
+    },
+    [waitOnWrites, waitOnDocumentWrites, showNotice],
   );
 
   // Fetch app version on mount
@@ -1027,12 +1090,6 @@ function AppContent(): React.ReactElement {
       setSealedReader(null);
     };
   }, [callRaw]);
-
-  const isFileDirty = useCallback(
-    (f: { path: string; dirty: boolean }) =>
-      f.dirty || state.pageDirtyPaths.includes(f.path),
-    [state.pageDirtyPaths],
-  );
 
   const releaseCredentials = useCallback((path: string, workingPath: string) => {
     forgetLostCredential(workingPath);
@@ -3164,18 +3221,51 @@ function AppContent(): React.ReactElement {
     [activeFile, saveFile, call],
   );
 
+  // Every close of documents: Close, Close All, the window's close and Exit.
+  // The documents leave from the first line, so a gesture that starts during
+  // the close refuses; the close waits for the writes recorded before it, asks
+  // about unsaved changes in the bytes those writes produced, and only then
+  // runs `close`, synchronously after the last check. A refused gesture keeps
+  // the documents and says so.
+  const closeAfterWrites = useCallback(
+    <T,>(
+      paths: readonly string[],
+      title: string,
+      confirm: () => Promise<boolean>,
+      close: () => T | Promise<T>,
+    ): Promise<{ readiness: CloseReadiness; closed?: T }> => {
+      const working = paths.flatMap((path) => readState().files.get(path)?.workingPath ?? []);
+      return whileDocumentsLeave(working, 'close', async (cancelled) => {
+        const readiness = await readyToClose(cancelled, {
+          pending: () => documentWritesOf(working),
+          wait: () => waitOnDocumentWrites(working),
+          confirm,
+        });
+        if (readiness === 'refused') void showNotice(title, tChrome('app.close.cancelled'));
+        return readiness === 'go' ? { readiness, closed: await close() } : { readiness };
+      });
+    },
+    [readState, waitOnDocumentWrites, showNotice],
+  );
+
   // Close file with unsaved changes prompt
   const handleCloseFile = useCallback(async (filePath: string) => {
     await sourcePathOperations.current.run([filePath], async () => {
-      if (!(await confirmCurrentDirtyFiles(
-        () => [filePath],
-        (names) => tChrome('app.close.unsaved', { name: names }),
-      ))) return;
-      if (!readState().files.has(filePath)) return;
-      dispatch({ type: 'CLOSE_FILE', path: filePath });
-      void releasePaths([filePath], pathInUse);
+      await closeAfterWrites(
+        [filePath],
+        tCommandTitle('file.close', 'Close'),
+        () => confirmCurrentDirtyFiles(
+          () => [filePath],
+          (names) => tChrome('app.close.unsaved', { name: names }),
+        ),
+        () => {
+          if (!readState().files.has(filePath)) return;
+          dispatch({ type: 'CLOSE_FILE', path: filePath });
+          void releasePaths([filePath], pathInUse);
+        },
+      );
     });
-  }, [readState, dispatch, confirmCurrentDirtyFiles, pathInUse]);
+  }, [readState, dispatch, confirmCurrentDirtyFiles, closeAfterWrites, pathInUse]);
 
   // Close all open files with unsaved changes prompt
   const handleCloseAll = useCallback(async () => {
@@ -3185,25 +3275,65 @@ function AppContent(): React.ReactElement {
     // on a path this close-all never locked.
     const paths = Array.from(readState().files.keys());
     await sourcePathOperations.current.run(paths, async () => {
-      if (!(await confirmCurrentDirtyFiles(
-        () => paths,
-        (names) => tChrome('app.closeAll.unsaved', { names }),
-      ))) return;
-      for (const path of paths) {
-        if (readState().files.has(path)) dispatch({ type: 'CLOSE_FILE', path });
-      }
-      void releasePaths(paths, pathInUse);
+      await closeAfterWrites(
+        paths,
+        tCommandTitle('file.closeAll', 'Close All'),
+        () => confirmCurrentDirtyFiles(
+          () => paths,
+          (names) => tChrome('app.closeAll.unsaved', { names }),
+        ),
+        () => {
+          for (const path of paths) {
+            if (readState().files.has(path)) dispatch({ type: 'CLOSE_FILE', path });
+          }
+          void releasePaths(paths, pathInUse);
+        },
+      );
     });
-  }, [readState, dispatch, confirmCurrentDirtyFiles, pathInUse]);
+  }, [readState, dispatch, confirmCurrentDirtyFiles, closeAfterWrites, pathInUse]);
+
+  // The documents an Exit closes with this window, for its close step. A write
+  // started after the first prompt is waited for there, and the dirty prompt
+  // runs again on its result; edits already answered are not asked about again.
+  //
+  // The baseline advances after each answered recheck: a confirm that returns
+  // true has every current snapshot answered, and no event runs between its
+  // return and the read below.
+  const exitDocuments = useCallback((paths: () => string[]) => {
+    let answered = dirtyPromptSnapshots(readState(), paths());
+    return {
+      working: paths().flatMap((path) => readState().files.get(path)?.workingPath ?? []),
+      recheck: async () => {
+        const confirmed = await confirmCurrentDirtyFiles(
+          paths,
+          (names) => tChrome('app.exit.unsaved', { names }),
+          answered,
+        );
+        if (confirmed) answered = dirtyPromptSnapshots(readState(), paths());
+        return confirmed;
+      },
+    };
+  }, [readState, confirmCurrentDirtyFiles]);
 
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
   // tray-minimize setting governs the window × (below), not an explicit Exit.
+  //
+  // The first prompt is a close of this window's documents: it waits for the
+  // writes recorded for them and asks about the bytes they produced. The
+  // documents stop leaving once it is answered, so this window stays usable
+  // while other windows answer; its close step leaves again (`exitDocuments`).
   const handleExit = useCallback(async () => {
     const paths = () => [...readState().files.keys()];
-    if (!(await confirmCurrentDirtyFiles(
-      paths,
-      (names) => tChrome('app.exit.unsaved', { names }),
-    ))) return;
+    const { readiness } = await closeAfterWrites(
+      paths(),
+      tCommandTitle('file.exit', 'Exit'),
+      () => confirmCurrentDirtyFiles(
+        paths,
+        (names) => tChrome('app.exit.unsaved', { names }),
+      ),
+      () => undefined,
+    );
+    if (readiness !== 'go') return;
     // The initiating window stays open and interactive while peers complete
     // their own prompts. Carry forward the exact dirty revisions answered
     // here so the final check asks only about later edits.
@@ -3241,7 +3371,7 @@ function AppContent(): React.ReactElement {
         alreadyAnswered,
       ),
       (sessionId) => app.quitCancelled(sessionId),
-      () => closeGated((force) => app.confirmClose(force)),
+      () => closeGated((force) => app.confirmClose(force), exitDocuments(paths)),
     );
     if (result === 'cancelled') return;
     // A missing peer receipt, malformed quit result, or failed session
@@ -3249,7 +3379,7 @@ function AppContent(): React.ReactElement {
     if (result === 'aborted') {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
     }
-  }, [readState, confirmCurrentDirtyFiles, showNotice, closeGated]);
+  }, [readState, confirmCurrentDirtyFiles, closeAfterWrites, showNotice, closeGated, exitDocuments]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
   // this workspace, so two live copies of one file never exist and every
@@ -3302,17 +3432,44 @@ function AppContent(): React.ReactElement {
           // write asked for before the move: the move waits for those. A
           // gesture asked for while the document leaves refuses at once and
           // keeps the document here, until the hand-over itself.
+          //
+          // A page edit is not a write: it lands in the page tier, which the
+          // commit flushes into the working copy. The commit repeats until the
+          // tier is at rest, and the revision it rests at is the one the file
+          // on disk holds. An edit after that stops the move and stays here,
+          // pending; from the seal to the close the store refuses it instead.
           let refused = false;
+          let stoppedByEdit = false;
           return whileDocumentLeaves(beforeCommit.workingPath, async (cancelled) => {
+            let sealed = false;
             try {
-              if (!(await commitOrAbort([beforeCommit.workingPath]))) return false;
+              for (let round = 0; ; round++) {
+                if (!(await commitOrAbort([beforeCommit.workingPath]))) return false;
+                if (!readState().pageDirtyPaths.includes(path) || round + 1 >= HAND_OFF_COMMIT_ROUNDS) break;
+              }
+              const noted = readState().files.get(path)?.editRevision ?? 0;
+              const committedHold = handOffHold('committed');
+              if (committedHold) await committedHold;
+              const stop = () => {
+                const now = readState();
+                return handOffStop({
+                  cancelled: cancelled(),
+                  noted,
+                  revision: now.files.get(path)?.editRevision,
+                  pageDirty: now.pageDirtyPaths.includes(path),
+                });
+              };
+              if (stop() === 'edited') {
+                stoppedByEdit = true;
+                return false;
+              }
               const held = await reserve();
               const handed = readState().files.get(path);
               if (!handed || handed.importOnly) {
                 await tabDrag.release(held.token).catch(() => {});
                 return false;
               }
-              const plan = planHandOff(reservationHolds(held), isFileDirty(handed));
+              const plan = planHandOff(reservationHolds(held), handed.dirty || readState().pageDirtyPaths.includes(path));
               if (!plan.hand) return false;
               // A destination that dies before it opens the document gives it back, and
               // the window it goes back to is this one. Recorded per path so the return
@@ -3320,12 +3477,17 @@ function AppContent(): React.ReactElement {
               // is still open here, and re-opening it would be a second copy.
               const flight = { returned: false };
               handOffsInFlight.current.set(path, flight);
+              const stayHere = async (): Promise<false> => {
+                handOffsInFlight.current.delete(path);
+                await tabDrag.release(held.token).catch(() => {});
+                return false;
+              };
               let moved: TabDragResult;
               try {
-                if (cancelled()) {
-                  handOffsInFlight.current.delete(path);
-                  await tabDrag.release(held.token).catch(() => {});
-                  return false;
+                const beforeSave = stop();
+                if (beforeSave) {
+                  stoppedByEdit = beforeSave === 'edited';
+                  return await stayHere();
                 }
                 if (plan.saveFirst) {
                   // A failed write gives the document back BEFORE it is reported:
@@ -3334,25 +3496,31 @@ function AppContent(): React.ReactElement {
                   if (!(await saveOrReportRef.current(
                     handed.workingPath, handed.path, false, (error) => failures.push(error),
                   ))) {
-                    handOffsInFlight.current.delete(path);
-                    await tabDrag.release(held.token).catch(() => {});
+                    await stayHere();
                     if (failures.length > 0) void reportSaveFailureRef.current(handed.path, failures[0]);
                     return false;
                   }
-                  dispatch({ type: 'MARK_SAVED', path });
                 }
-                if (cancelled()) {
-                  handOffsInFlight.current.delete(path);
-                  await tabDrag.release(held.token).catch(() => {});
-                  return false;
+                // Synchronous from this check to the seal: an edit either lands
+                // before the check and keeps the document here, or meets the
+                // seal. Marking it saved clears its disk history, so that waits
+                // for a move that goes on.
+                const beforeHandOver = stop();
+                if (beforeHandOver) {
+                  stoppedByEdit = beforeHandOver === 'edited';
+                  return await stayHere();
                 }
+                if (plan.saveFirst) dispatch({ type: 'MARK_SAVED', path });
+                dispatch({ type: 'SEAL_PAGE_TIER', path });
+                sealed = true;
                 flushReadingViewRecord(path);
+                const sealedHold = handOffHold('sealed');
+                if (sealedHold) await sealedHold;
                 moved = await tabDrag.commit(held.token);
               } catch (e) {
                 // The write a move costs failed. The document is still held somewhere
                 // else, and nothing will ever come for it.
-                handOffsInFlight.current.delete(path);
-                await tabDrag.release(held.token).catch(() => {});
+                await stayHere();
                 throw e;
               }
               handOffsInFlight.current.delete(path);
@@ -3361,25 +3529,29 @@ function AppContent(): React.ReactElement {
               if (!tabMoved(moved) || flight.returned) return false;
               // Closed WITHOUT a release — the path already belongs to the receiving
               // window, and releasing here would strip the claim off the window that
-              // now holds it.
+              // now holds it. The close lifts the seal.
               dispatch({ type: 'CLOSE_FILE', path });
               return true;
             } finally {
               refused = cancelled();
+              if (sealed) dispatch({ type: 'UNSEAL_PAGE_TIER', path });
             }
           }).then((moved) => {
             // A gesture refused during the move did not run, and an owned panel
             // run shows nothing for it: say so, and say whether the document
-            // stayed because of it.
-            if (refused) {
-              void showNotice(tCommandTitle('window.moveToNewWindow', 'Move to New Window'),
-                tChrome(moved ? 'app.window.moveRefusedAction' : 'app.window.moveCancelled'));
+            // stayed because of it. An edit that stopped the move is pending
+            // here; the move runs again once the user asks for it.
+            const title = tCommandTitle('window.moveToNewWindow', 'Move to New Window');
+            if (stoppedByEdit && !moved) {
+              void showNotice(title, tChrome('app.window.moveStoppedByEdit'));
+            } else if (refused) {
+              void showNotice(title, tChrome(moved ? 'app.window.moveRefusedAction' : 'app.window.moveCancelled'));
             }
             return moved;
           });
         }),
       ),
-    [dispatch, commitOrAbort, isFileDirty, readState, showNotice],
+    [dispatch, commitOrAbort, readState, showNotice],
   );
 
   const handleMoveToNewWindow = useCallback(async () => {
@@ -3730,17 +3902,24 @@ function AppContent(): React.ReactElement {
       // may have prompted it: an app Exit records the session and freezes the
       // record before any window is asked, and the app is still running. The
       // call is idempotent and harmless when this close was only a window ×.
-      if (!(await confirmCurrentDirtyFiles(
-        () => [...filesRef.current.keys()],
-        (names) => tChrome('app.window.unsaved', { names }),
-      ))) {
-        await app.quitCancelled(sessionId);
-        return;
-      }
-      if ((await closeOrReport(minimizeToTray)) === 'stayed') await app.quitCancelled(sessionId);
+      //
+      // The documents close only once the writes recorded for them finish,
+      // and the prompt asks about the bytes those writes produced. Rust hides
+      // only the last window to the tray and destroys any other, and this
+      // renderer cannot tell which it is, so the wait runs either way.
+      const { readiness, closed } = await closeAfterWrites(
+        [...filesRef.current.keys()],
+        tCommandTitle('file.close', 'Close'),
+        () => confirmCurrentDirtyFiles(
+          () => [...filesRef.current.keys()],
+          (names) => tChrome('app.window.unsaved', { names }),
+        ),
+        () => closeOrReport(minimizeToTray),
+      );
+      if (readiness !== 'go' || closed === 'stayed') await app.quitCancelled(sessionId);
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [confirmCurrentDirtyFiles, closeOrReport]);
+  }, [confirmCurrentDirtyFiles, closeOrReport, closeAfterWrites]);
 
   // Leaving doc-tab-land commits pending page edits (the "in-memory edits
   // exist only while a document tab is focused" invariant — the Tools panels
@@ -4164,9 +4343,11 @@ function AppContent(): React.ReactElement {
           className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0"
         >
           <span className="flex-1">
-            {state.pageEditRefusalReason
-              ? capabilityBlockText(state.pageEditRefusalReason)
-              : tChrome('app.history.changed')}
+            {state.pageEditRefusalReason === 'moving'
+              ? tChrome('app.window.moveRefusedEdit')
+              : state.pageEditRefusalReason
+                ? capabilityBlockText(state.pageEditRefusalReason)
+                : tChrome('app.history.changed')}
           </span>
           <button
             onClick={() => setPageEditRefused(false)}

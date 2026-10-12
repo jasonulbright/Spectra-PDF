@@ -15,6 +15,7 @@ import { gatesWaitingFor, runCommitGate } from './lib/commit-gate';
 import { holdRewriteEngineSteps } from './lib/workspace-rewrite';
 
 let rewriteHold: ReturnType<typeof holdRewriteEngineSteps> | null = null;
+const handOffHolds = new Map<HandOffStage, ReturnType<typeof holdHandOff>>();
 import { windowLabel } from './lib/window-label';
 import {
   platformCapabilities,
@@ -39,7 +40,7 @@ import {
   removeSymbolSet,
 } from './lib/symbol-library';
 import { importSymbolSetFromPath } from './lib/symbol-set-io';
-import { setTabOrderChannel } from './lib/tab-drag';
+import { holdHandOff, setTabOrderChannel, type HandOffStage } from './lib/tab-drag';
 import {
   ensureGsCapability,
   gsCapability,
@@ -1561,6 +1562,14 @@ export interface TestHarness {
   holdRewriteEngineSteps: () => void;
   releaseRewriteEngineSteps: () => void;
   rewriteEngineStepsWaiting: () => number;
+  /** Holds every hand-off of a document to another window at `stage` until
+   * `releaseHandOff(stage)`. `committed`: after the page tier came to rest
+   * and its revision was noted, before the reservation. `sealed`: after the
+   * file was written, marked saved and sealed, before the hand-over.
+   * `handOffsWaiting(stage)` counts the hand-offs held there. */
+  holdHandOff: (stage: HandOffStage) => void;
+  releaseHandOff: (stage: HandOffStage) => void;
+  handOffsWaiting: (stage: HandOffStage) => number;
   /** How many commit gates naming `workingPath` wait for a publication now. */
   commitGatesWaiting: (workingPath: string) => number;
   /** Override platform capability flags; unnamed flags keep their value.
@@ -2720,6 +2729,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       rewriteHold = null;
     },
     rewriteEngineStepsWaiting: () => rewriteHold?.waiting() ?? 0,
+    holdHandOff: (stage) => {
+      handOffHolds.get(stage)?.release();
+      handOffHolds.set(stage, holdHandOff(stage));
+    },
+    releaseHandOff: (stage) => {
+      handOffHolds.get(stage)?.release();
+      handOffHolds.delete(stage);
+    },
+    handOffsWaiting: (stage) => handOffHolds.get(stage)?.waiting() ?? 0,
     commitGatesWaiting: (workingPath) => gatesWaitingFor(workingPath),
     sendToEmailStage: async () => {
       const snap = deps.getStateSnapshot();
