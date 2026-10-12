@@ -340,6 +340,15 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M6 6.5h.01M18.5 15h.01M17 5.5h.01" strokeWidth="1.5" />
     </>
   ),
+  // Two beamed eighth notes.
+  omr: (
+    <>
+      <ellipse cx="7" cy="17.5" rx="2.6" ry="2" />
+      <ellipse cx="17" cy="15.5" rx="2.6" ry="2" />
+      <path d="M9.6 17.5V6.5l10-2.5v11.5" />
+      <path d="M9.6 9.6l10-2.5" />
+    </>
+  ),
   // A tick over the wavy underline a misspelling carries — the mark the
   // feature draws, and the verdict it gives.
   spelling: (

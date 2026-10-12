@@ -153,7 +153,7 @@ derived_nav.modeMustReplaceAppend	exact	derived_nav	mode must be "replace" or "a
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
-distill.inputFileFound	pattern	create_pdf,distill,office_export,soffice,trapping	input file not found: {{file}}
+distill.inputFileFound	pattern	create_pdf,distill,office_export,recognize_music,soffice,trapping	input file not found: {{file}}
 distill.outputMustDifferentFile	exact	distill	output must be a different file from the input
 distill.postscriptFileFileEmpty	exact	distill	not a PostScript file (the file is empty)
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
@@ -641,6 +641,26 @@ recognize.pageMustBased	exact	recognize	page must be 1-based
 recognize.recognitionInputReadableImage	exact	recognize	Recognition input is not a readable image
 recognize.recognitionLanguageInstalled	pattern	recognize	Recognition language is not installed: {{code}}
 recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run {{script}}.
+recognize_music.audiverisCannotReadFolder	pattern	recognize_music	Audiveris cannot read the folder {{folder}}: its path uses characters outside the system code page and has no short name
+recognize_music.audiverisCouldRun	pattern	recognize_music	Audiveris at {{path}} could not be run: {{reason}}
+recognize_music.audiverisProducedReadableScore	exact	recognize_music	Audiveris produced no readable score for the selected pages
+recognize_music.audiverisSetUpInstall	exact	recognize_music	Audiveris is not set up. Install it, then point Spectra PDF at it in Preferences ▸ Engine.
+recognize_music.documentPages	exact	recognize_music	The document has no pages
+recognize_music.musicRecognitionFailedAudiveris	pattern	recognize_music	Music recognition failed: Audiveris exited with status {{status}}
+recognize_music.ocrLanguageMustLanguage	exact	recognize_music	The OCR language must be language codes joined by +, for example eng+deu
+recognize_music.outputFolderFound	pattern	recognize_music	output folder not found: {{folder}}
+recognize_music.pageOutsideDocumentWhich	pattern	recognize_music	Page {{page}} is outside the document, which has {{count}} pages
+recognize_music.pagesMustListPage	exact	recognize_music	pages must be a list of page numbers, or 'all'
+recognize_music.recognitionEndedStartRecognize	exact	recognize_music	This recognition has ended; start Recognize music again
+recognize_music.recognitionResolutionMustWhole	exact	recognize_music	The recognition resolution must be a whole number from 200 to 500 DPI
+recognize_music.recognizeMusicNeedsCopy	exact	recognize_music	Recognize music needs the copy permission of this document
+recognize_music.recognizeMusicNothingPublish	exact	recognize_music	Recognize music has nothing to publish for this request
+recognize_music.scoreAttachMustMxl	exact	recognize_music	The score to attach must be a .mxl or .musicxml file
+recognize_music.scoreCannotAttachedDocument	exact	recognize_music	The score cannot be attached to a document that claims PDF/A conformance; the MusicXML file beside the document is still written
+recognize_music.scoreCannotAttachedDocument2	exact	recognize_music	The score cannot be attached to a document that claims PDF/A conformance. Turn off Attach to recognize this document.
+recognize_music.scoreNameCannotEmpty	exact	recognize_music	The score name cannot be empty, end with a dot or a space, or contain < > : " / \\ | ? *
+recognize_music.theseFilesAlreadyExist	pattern	recognize_music	These files already exist: {{names}}. Choose another name or confirm the overwrite
+recognize_music.unsupportedMusicFormatMxl	pattern	recognize_music	unsupported music format {{fmt}} (have mxl, musicxml)
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
 recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted — decrypt before recovery

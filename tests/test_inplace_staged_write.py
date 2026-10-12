@@ -65,6 +65,7 @@ from engine import pubkey_crypt as pubkey_crypt_mod
 from engine import redact as redact_mod
 from engine import redact_document as redact_document_mod
 from engine import redact_marks as redact_marks_mod
+from engine import recognize_music as recognize_music_mod
 from engine import reversion as reversion_mod
 from engine import rotate as rotate_mod
 from engine import pdfa as pdfa_mod
@@ -1086,6 +1087,48 @@ def _transplant_onto_the_original(src: str, out: str) -> dict:
         str(Path(src).parent / ORIGINAL_NAME), src, out)
 
 
+SCORE_NAME = "score.mxl"
+
+
+def _score_document(path: Path) -> Path:
+    """A one-page document and, beside it, the score a publication of it
+    wrote."""
+    import zipfile
+
+    import test_recognize_music
+
+    with zipfile.ZipFile(path.parent / SCORE_NAME, "w", zipfile.ZIP_DEFLATED) as score:
+        score.writestr(
+            "META-INF/container.xml",
+            '<container><rootfiles><rootfile full-path="s.xml"/></rootfiles></container>',
+        )
+        score.writestr(
+            "s.xml",
+            '<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><identification>'
+            '<miscellaneous><miscellaneous-field name="source-sheet-1">1</miscellaneous-field>'
+            "</miscellaneous></identification><part-list/></score-partwise>",
+        )
+    return test_recognize_music._document(path, [test_recognize_music._score_page()])
+
+
+def _attach_score(src: str, out: str) -> dict:
+    return recognize_music_mod.recognize_music_attach(src, out, str(Path(src).parent / SCORE_NAME))
+
+
+def _embedded_scores(path) -> list:
+    """Each embedded score's container entries. The stand-in stamps its
+    containers with the clock, so the entries are compared, not the zip."""
+    import io
+    import zipfile
+
+    scores = []
+    with pikepdf.open(str(path)) as pdf:
+        for name, spec in pdf.attachments.items():
+            with zipfile.ZipFile(io.BytesIO(bytes(spec.get_file().read_bytes()))) as archive:
+                scores.append((name, sorted((i.filename, archive.read(i)) for i in archive.infolist())))
+    return sorted(scores)
+
+
 CASES = (
     Case(
         "reversion",
@@ -1949,6 +1992,19 @@ CASES = (
         # run, so one input has more than one correct output.
         deterministic=False,
     ),
+    Case(
+        "recognize_music_attach",
+        recognize_music_mod,
+        _score_document,
+        _attach_score,
+        _embedded_scores,
+        doors=("recognize_music_attach",),
+        leaves=(SCORE_NAME,),
+        # The embedded file's /Params dates are the clock's, so the document
+        # bytes differ run to run; the embedded score does not.
+        deterministic=False,
+        compare=_embedded_scores,
+    ),
 )
 
 
@@ -2197,6 +2253,11 @@ from inplace_doors import registered_doors, same_path_capable  # noqa: E402
 #: Doors whose output is genuinely never the document they were handed. Each
 #: says why in its own terms; "no case yet" is never one of these.
 EXCLUDED_DOORS = {
+    "recognize_music_publish": (
+        "its sources are the scores in the run's private stage and its "
+        "targets are new score files named in the output folder, so no "
+        "argument of it names a document a target could overwrite"
+    ),
     "split": (
         "refuses exact and filesystem-alias source destinations in every "
         "publication mode; tests/test_split_publication.py pins unchanged "

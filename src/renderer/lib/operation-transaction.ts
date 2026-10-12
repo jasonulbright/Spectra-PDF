@@ -3,11 +3,12 @@ import type { EngineResult } from '../hooks/useEngine';
 import { tChrome } from '../i18n';
 import { EDIT_DECLINED } from './edit-text';
 import type { OpMethod } from './op-edit-class';
+import type { EngineCallOptions } from './engine-call';
 import { rewriteWorkspaceFile, type WorkspaceRewriteIo } from './workspace-rewrite';
 import { assertOperationGateResult, assertOperationIntent, type OperationIntent } from './operation-intent';
 
 export interface OperationIo extends WorkspaceRewriteIo {
-  callStaged: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  callStaged: (method: string, params: Record<string, unknown>, options?: EngineCallOptions) => Promise<unknown>;
   // Covers final validation/publication, not just a successful engine reply.
   track: (method: string, params: Record<string, unknown>, run: () => Promise<EngineResult>) => Promise<EngineResult>;
 }
@@ -30,6 +31,9 @@ export interface OperationOptions {
   /** One user edit that needs several engine calls: all run on the same private
    * stage and publish together. Not Guided Actions' deliberate per-step undo. */
   following?: readonly OperationStep[];
+  /** Asks the engine to stop the first step's request. The engine's answer
+   * still decides whether anything publishes. */
+  signal?: AbortSignal;
 }
 export type WorkspaceOperationResult = EngineResult & { publication: OpenFile };
 
@@ -61,15 +65,17 @@ export async function executeWorkspaceOperation(path: string, method: OpMethod,
     // Byte identity preserves signed originals for engine append/finalization.
     // file==output retains each engine method's existing in-place semantics.
     await io.write(stage, original);
-    const runStep = async (stepMethod: OpMethod, stepParams: Record<string, unknown>): Promise<EngineResult> => {
+    const runStep = async (stepMethod: OpMethod, stepParams: Record<string, unknown>,
+      signal?: AbortSignal): Promise<EngineResult> => {
       requireCurrent();
-      const answer = await io.callStaged(stepMethod, { ...stepParams, file: stage, output: stage });
+      const staged = { ...stepParams, file: stage, output: stage };
+      const answer = await (signal ? io.callStaged(stepMethod, staged, { signal }) : io.callStaged(stepMethod, staged));
       if (!answer || typeof answer !== 'object' || Array.isArray(answer)
           || (answer as Record<string, unknown>).output !== stage) throw unverified();
       return { ...answer, output: initial.workingPath } as EngineResult;
     };
     const prepared = options.prepareParams ? await options.prepareParams(getState()) : {};
-    const reports = [await runStep(method, { ...requested, ...prepared })];
+    const reports = [await runStep(method, { ...requested, ...prepared }, options.signal)];
     for (const step of following) reports.push(await runStep(step.method, step.params));
     // Keep operation-specific counts/refusals/warnings. The public output is
     // the stable working path, never the now-retired private stage.

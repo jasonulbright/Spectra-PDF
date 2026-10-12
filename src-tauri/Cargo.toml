@@ -71,6 +71,9 @@ dunce = "1"
 # risks overwriting a user's originals. Hand-rolled GetFileInformationByHandle
 # rejected: more unsafe code to get wrong than this zero-frills crate.
 same-file = "1"
+# Inflates the compressed MusicXML the Audiveris capability probe produces.
+# Already in the graph through the updater.
+flate2 = "1"
 clap = { version = "4", features = ["derive"] }
 # The app's one outbound HTTP client (`src/net.rs`). Already in the graph
 # because the updater plugin uses it; named directly so there is exactly one

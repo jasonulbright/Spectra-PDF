@@ -40,6 +40,7 @@
     {"op": "create_pdf_folders", "params": {"sources": "images"}, "asked": ["sources"], "need": "undecided"},
     {"op": "create_pdf_folders", "params": {"sources": "all"}, "asked": ["sources"], "sources": ["page.ps"], "need": "undecided"},
     {"op": "optimize", "params": {}, "need": "never", "cli": [["optimize", "in.pdf", "-o", "out.pdf"]]},
+    {"op": "omr", "params": {"format": "musicxml", "keep_project": true}, "need": "never", "cli": [["omr", "in.pdf"], ["omr", "in.pdf", "--format", "musicxml", "--attach"]]},
     {"op": "encrypt", "params": {"user_password": "secret"}, "need": "never", "cli": [["encrypt", "in.pdf", "-o", "out.pdf", "-p", "secret"]]},
     {"op": "watermark", "params": {"text": "DRAFT"}, "need": "never", "cli": [["watermark", "in.pdf", "-o", "out.pdf", "-t", "DRAFT"]]},
     {"op": "add_header_footer", "params": {"position": "tc", "text": "Page"}, "need": "never", "cli": [["header-footer", "in.pdf", "-o", "out.pdf", "--tc", "Page"]]},

@@ -25,6 +25,7 @@ import {
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import {
   invokeCommand as invokeRegisteredCommand,
+  isCommandEnabled,
   getCanvasServices,
   getCommandContext,
 } from './commands/context';
@@ -45,6 +46,12 @@ import {
   pinGsCapability,
   type GsCapability,
 } from './lib/gs-capability';
+import {
+  audiverisStatus,
+  ensureAudiverisStatus,
+  pinAudiverisStatus,
+  type AudiverisStatus,
+} from './lib/audiveris-status';
 import {
   ensureIccAssent,
   iccAssent,
@@ -1597,6 +1604,11 @@ export interface TestHarness {
    * toolbars and keymap share. Returns false when the command's
    * enablement predicate refused; throws on an unknown id. */
   invokeCommand: (id: string) => boolean;
+  /** Whether a command-registry entry may run now, without running it;
+   * throws on an unknown id. */
+  commandEnabled: (id: string) => boolean;
+  /** The last error a harness call recorded, or null. */
+  lastError: () => string | null;
   /** Arm a canvas interaction tool directly (absolute set, no pill toggle). */
   setTool: (tool: string) => void;
   /** Choose the document pane's view (absolute set, no pill toggle). A document
@@ -2183,6 +2195,16 @@ export interface TestHarness {
   gsRestore: () => Promise<GsCapability>;
   /** The renderer's current answer, for a spec that needs to see it. */
   gsAnswer: () => GsCapability;
+  /**
+   * Hold the Audiveris answer at "not set up" for this session. The machine
+   * running the suite may have Audiveris installed, and nothing outside the
+   * app can hide it from the Rust discovery.
+   */
+  audiverisForceAbsent: () => void;
+  /** Lift the hold and read the machine's real answer. */
+  audiverisRestore: () => Promise<AudiverisStatus>;
+  /** The renderer's current Audiveris answer. */
+  audiverisAnswer: () => AudiverisStatus;
   /** Answer the NEXT native "pick any file" dialog with this path, or with
    * `null` for a cancelled one. The pick is still STARTED by the control
    * that opens it, so the browse handler, its probe and its store-or-refuse
@@ -2784,6 +2806,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return invokeRegisteredCommand(id as CommandId);
+    },
+    lastError: () => lastError,
+    commandEnabled: (id) => {
+      if (!(id in COMMANDS)) {
+        const msg = `commandEnabled: unknown command id "${id}"`;
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return isCommandEnabled(id as CommandId);
     },
     setTool: (tool) => deps.setTool(tool),
     setDocViewMode: (mode) => deps.setDocViewMode(mode),
@@ -3793,6 +3824,22 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       return ensureGsCapability();
     },
     gsAnswer: () => gsCapability(),
+    audiverisForceAbsent: () => {
+      pinAudiverisStatus({
+        kind: 'not-configured',
+        path: null,
+        launcher: null,
+        version: null,
+        source: null,
+        ocrLanguages: [],
+        detail: null,
+      });
+    },
+    audiverisRestore: async () => {
+      pinAudiverisStatus(null);
+      return ensureAudiverisStatus();
+    },
+    audiverisAnswer: () => audiverisStatus(),
     answerAnyFilePicker: (path) => armAnyFilePicker(path),
     answerCertificatePicker: (path) => armCertificatePicker(path),
     answerImagePicker: (path) => armImagePicker(path),

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   app,
+  audiveris,
   batch,
   dialog,
   shellMenu,
@@ -14,6 +15,16 @@ import { contractCall, explorerMenuView } from '../lib/shell-action';
 import { gsBlocked, gsOriginKey, gsStateKey, refreshGsCapability } from '../lib/gs-capability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useGsCapability } from '../hooks/useGsCapability';
+import { useAudiverisStatus } from '../hooks/useAudiverisStatus';
+import {
+  AUDIVERIS_MINIMUM_VERSION,
+  audiverisOriginKey,
+  audiverisReady,
+  audiverisStateKey,
+  recheckAudiverisStatus,
+  setAudiverisPath,
+  takeAudiverisFocusRequest,
+} from '../lib/audiveris-status';
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { hostOs, platformCapability } from '../lib/platform-capabilities';
 import { preferenceAvailable } from '../commands/platform';
@@ -29,7 +40,7 @@ import {
 import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
 import { useFieldScriptsAllowed } from '../hooks/useFieldScriptsAllowed';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tOcrLanguage, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
+import { formattingLocale, tChrome, tOcrLanguage, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
 import { OCR_LANGUAGES } from '../ocr/languages';
 import { AUTO_OCR_LANGUAGE } from '../ocr/language-selection';
 import type { PanelKey } from '../i18n-panels';
@@ -368,6 +379,163 @@ function GhostscriptSection(): React.ReactElement {
 }
 
 /**
+ * Preferences ▸ Engine ▸ Audiveris. Spectra PDF ships no copy: the section
+ * names the program, shows what Rust resolved, and lets the user choose one.
+ * The chosen path is stored in Rust and stays the whole answer, even when it
+ * fails, until the user changes it.
+ */
+function AudiverisSection(): React.ReactElement {
+  useTranslation();
+  const status = useAudiverisStatus();
+  const [checking, setChecking] = useState(false);
+  const section = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (takeAudiverisFocusRequest()) {
+      section.current?.scrollIntoView({ block: 'start' });
+      section.current?.focus();
+    }
+  }, []);
+
+  const apply = useCallback(async (change: () => Promise<unknown>) => {
+    setChecking(true);
+    try {
+      await change();
+    } catch {
+      await recheckAudiverisStatus();
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  const browse = useCallback(() => {
+    void dialog.pickAnyFile().then((picked) => {
+      if (picked) void apply(() => setAudiverisPath(picked));
+    });
+  }, [apply]);
+
+  const ready = audiverisReady(status);
+  const problemKey = audiverisStateKey(status) as PanelKey | null;
+  const originKey = audiverisOriginKey(status) as PanelKey | null;
+  const flatpak = status.launcher === 'flatpak';
+
+  return (
+    <div data-testid="pref-audiveris" ref={section} tabIndex={-1} className="outline-none">
+      <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.audiverisEngine')}</label>
+      <div className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span
+            className={
+              'px-2 py-0.5 rounded text-xs font-medium ' +
+              (ready ? 'bg-green-800 text-green-100' : 'bg-neutral-700 text-neutral-300')
+            }
+            data-testid="pref-audiveris-status"
+            data-audiveris-kind={status.pending ? 'pending' : status.kind}
+          >
+            {tChrome(
+              checking || status.pending
+                ? 'panel.settings.audiverisChecking'
+                : ready
+                  ? 'panel.settings.audiverisStatusReady'
+                  : 'panel.settings.audiverisStatusMissing',
+            )}
+          </span>
+          {ready && status.version && (
+            <span className="text-xs text-neutral-400" data-testid="pref-audiveris-version">
+              {tChrome('panel.settings.version', { version: status.version })}
+            </span>
+          )}
+          {originKey && (
+            <span className="text-xs text-neutral-500" data-testid="pref-audiveris-origin">
+              {tChrome(originKey)}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2 text-xs text-neutral-400">
+          <span className="shrink-0">{tChrome('panel.settings.audiverisPathLabel')}</span>
+          <span className="break-all ltr-notation" data-testid="pref-audiveris-path">
+            {flatpak
+              ? tChrome('panel.settings.audiverisFlatpak')
+              : status.path ?? tChrome('panel.settings.audiverisNonePath')}
+          </span>
+        </div>
+        {problemKey && (
+          <span className="text-xs text-amber-300" data-testid="pref-audiveris-problem">
+            {tChrome(problemKey, { version: AUDIVERIS_MINIMUM_VERSION })}
+          </span>
+        )}
+        {!ready && status.detail && (
+          <span className="text-xs text-neutral-500 break-all" data-testid="pref-audiveris-detail">
+            {tChrome('panel.settings.audiverisDetail', { detail: status.detail })}
+          </span>
+        )}
+        {ready && (
+          <span className="text-xs text-neutral-400" data-testid="pref-audiveris-languages">
+            {status.ocrLanguages.length > 0
+              ? tChrome('panel.settings.audiverisOcrLanguages', {
+                  languages: new Intl.ListFormat(formattingLocale(), { type: 'unit' }).format(
+                    status.ocrLanguages.map((code) => tOcrLanguage(code)),
+                  ),
+                })
+              : tChrome('panel.common.audiverisNoOcrLanguages')}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2 mt-2">
+        <button
+          type="button"
+          onClick={browse}
+          disabled={checking}
+          data-testid="pref-audiveris-browse"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-60"
+        >
+          {tChrome('panel.settings.audiverisBrowse')}
+        </button>
+        {status.source === 'preferences' && (
+          <button
+            type="button"
+            onClick={() => void apply(() => setAudiverisPath(null))}
+            disabled={checking}
+            data-testid="pref-audiveris-clear"
+            className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-60"
+          >
+            {tChrome('panel.settings.audiverisUseDiscovered')}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void apply(recheckAudiverisStatus)}
+          disabled={checking}
+          data-testid="pref-audiveris-recheck"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-60"
+        >
+          {tChrome(checking ? 'panel.settings.audiverisChecking' : 'panel.settings.audiverisRecheck')}
+        </button>
+      </div>
+      <p className="text-xs text-neutral-500 mt-2" data-testid="pref-audiveris-used-for">
+        {tChrome('panel.settings.audiverisUsedFor')}
+      </p>
+      <p className="text-xs text-neutral-500 mt-1" data-testid="pref-audiveris-license">
+        {tChrome('panel.settings.audiverisLicense')}
+      </p>
+      <div className="flex flex-wrap items-center gap-2 mt-1">
+        <p className="text-xs text-neutral-500" data-testid="pref-audiveris-where">
+          {tChrome('panel.settings.audiverisWhereToGet')}
+        </p>
+        <button
+          type="button"
+          onClick={() => void audiveris.openReleases().catch(() => {})}
+          data-testid="pref-audiveris-releases"
+          className="px-2 py-1 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200"
+        >
+          {tChrome('panel.settings.audiverisOpenReleases')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Preferences categories. Data, like every other list in the workbench:
  * the nav renders from it, so a category cannot exist in one and be missing
  * from the other. `Record<PrefCategory, …>` keeps the labels total.
@@ -484,6 +652,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       </nav>
       <div className="prefs-body flex flex-col gap-6" data-testid={`prefs-body-${category}`}>
       {category === 'engine' && <GhostscriptSection />}
+      {category === 'engine' && <AudiverisSection />}
 
       {category === 'general' && (
       <>

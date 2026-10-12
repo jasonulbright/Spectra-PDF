@@ -15,6 +15,7 @@ import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
 import { focusOmniSearch, omniSearchAvailable } from './omnisearch-focus';
 import { gsBlocked } from '../lib/gs-capability';
+import { AUDIVERIS_MINIMUM_VERSION, audiverisReady, audiverisStateKey } from '../lib/audiveris-status';
 import { platformCapability } from '../lib/platform-capabilities';
 import { commandAvailable } from './platform';
 import { copyBlock, selectionPageIds } from '../lib/copy-permission';
@@ -54,6 +55,43 @@ export const GS_ONLY_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
  * ungray. */
 export function gsUsable(): boolean {
   return !gsBlocked();
+}
+
+/** The operations that run a user-installed Audiveris and nothing else. */
+export const AUDIVERIS_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>(['omr']);
+
+/** Whether an Audiveris surface may run right now: only on a probed, ready
+ * answer. */
+export function audiverisUsable(): boolean {
+  return audiverisReady();
+}
+
+/** A catalog message and its values. */
+export interface PrerequisiteText {
+  key: string;
+  vars: Record<string, string>;
+}
+
+/**
+ * Why a command waits for a program it does not include, or null.
+ *
+ * The document-permission refusal has its own text (`commandBlock`); this is
+ * the other reason a command can be gray, named for the menu tooltip and the
+ * tool dock.
+ */
+/** Whether a command is gray only because a program it runs is not ready
+ * (pending included). Its panel still opens: the state is rendered there. */
+export function commandAwaitsProgram(id: CommandId): boolean {
+  if (!id.startsWith('tools.panel.')) return false;
+  return AUDIVERIS_OPERATIONS.has(id.slice('tools.panel.'.length) as Operation) && !audiverisReady();
+}
+
+export function commandPrerequisite(id: CommandId): PrerequisiteText | null {
+  if (!id.startsWith('tools.panel.')) return null;
+  const op = id.slice('tools.panel.'.length) as Operation;
+  if (!AUDIVERIS_OPERATIONS.has(op)) return null;
+  const key = audiverisStateKey();
+  return key ? { key, vars: { version: AUDIVERIS_MINIMUM_VERSION } } : null;
 }
 
 export function canUndo(state: AppState): boolean {
@@ -341,7 +379,11 @@ function panelCommand(op: Operation): Command {
     // The chrome's half of the Ghostscript gate: one term on the ONE place
     // panel commands are built, so a menu item, a toolbar button and a Tools
     // Center tile cannot disagree about whether an operation is reachable.
-    when: GS_ONLY_OPERATIONS.has(op) ? () => gsUsable() : undefined,
+    when: GS_ONLY_OPERATIONS.has(op)
+      ? () => gsUsable()
+      : AUDIVERIS_OPERATIONS.has(op)
+        ? () => audiverisUsable()
+        : undefined,
     run: (ctx) => {
       // With a visible document, the panel opens in the right dock on that tab
       // so the document remains visible while the form is filled in. With no
@@ -1258,6 +1300,7 @@ const OPERATION_CAPABILITY: Partial<Record<Operation, Capability>> = {
   hairlines: 'modify',
   search_redact: 'modify',
   scanenhance: 'modify',
+  omr: 'copy',
   forms: 'fill',
   links: 'annotate',
   accessibility: 'accessibility',

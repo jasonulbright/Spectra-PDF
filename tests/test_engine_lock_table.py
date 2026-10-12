@@ -46,6 +46,9 @@ TABLE = ROOT / "src" / "renderer" / "lib" / "engine-lock.ts"
 #: stores, PKCS#11 modules, CA bundles), the dictionary files an import reads,
 #: the certificates an encryption reads, and base64 bytes.
 UNLOCKED = frozenset({
+    # The score Recognize music published beside the document, read once to
+    # embed it.
+    "score_path",
     "gs_path",
     "tesseract_path",
     "soffice_path",
@@ -119,7 +122,12 @@ SHARED_DESPITE_WRITE = {
 }
 
 #: Exclusive although the analysis reports no write.
-EXCLUSIVE_WITHOUT_WRITE: dict = {}
+EXCLUSIVE_WITHOUT_WRITE: dict = {
+    ("recognize_music_attach", "file"): (
+        "the window hands the working copy as both file and output, so the "
+        "document read is the document the attach replaces"
+    ),
+}
 
 PATH_NAMES = frozenset({
     "file", "files", "path", "paths", "output", "outputs", "source", "sources",

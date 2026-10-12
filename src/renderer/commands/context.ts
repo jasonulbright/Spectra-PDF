@@ -3,9 +3,10 @@
 // and the live state source; the canvas view registers its camera + find
 // services while mounted. invokeCommand() is the ONE entry point every
 // caller shares — keymap, UI buttons, menus, and the e2e harness.
-import { COMMANDS, commandBlock, type CommandId } from './registry';
+import { COMMANDS, commandBlock, commandPrerequisite, type CommandId } from './registry';
 import { commandAvailable } from './platform';
 import { capabilityBlockText } from '../lib/document-permission-text';
+import { tChrome, type UiKey } from '../i18n';
 import { drainPendingFind } from './find-intent';
 import type { AppCommandHandlers, CanvasServices, CommandContext } from './types';
 import type { AppAction, AppState } from '../state/types';
@@ -75,13 +76,15 @@ export function isCommandEnabled(id: CommandId): boolean {
   return cmd.when ? cmd.when(ctx) : true;
 }
 
-/** The sentence a disabled command shows when the document's permissions are
- * what disable it; null otherwise. */
+/** The sentence a disabled command shows when the document's permissions or
+ * a missing program disable it; null otherwise. */
 export function commandBlockText(id: CommandId): string | null {
   const ctx = getCommandContext();
   if (!ctx) return null;
   const block = commandBlock(ctx, id);
-  return block ? capabilityBlockText(block) : null;
+  if (block) return capabilityBlockText(block);
+  const prerequisite = commandPrerequisite(id);
+  return prerequisite ? tChrome(prerequisite.key as UiKey, prerequisite.vars) : null;
 }
 
 /**

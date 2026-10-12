@@ -20,7 +20,7 @@ interface PendingRequest {
 /** The raw shape both sidecars answer on `engine:response` with. */
 interface EngineResponse {
   id: number;
-  error?: { message: string };
+  error?: { message: string; data?: unknown };
   result?: unknown;
 }
 
@@ -47,7 +47,7 @@ export function resolvePendingResponse(
     // (the log, the batch report and the CLI read that); `message` renders
     // it through the catalog when the UI shows it, and passes it through
     // verbatim when the table doesn't know it.
-    req.reject(new EngineError(response.error.message));
+    req.reject(new EngineError(response.error.message, response.error.data));
   } else {
     req.resolve(response.result as EngineResult);
   }

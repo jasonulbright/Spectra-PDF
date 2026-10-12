@@ -163,6 +163,18 @@
         "tesseract_path"
       ]
     },
+    "omr": {
+      "method": "recognize_music_prepare",
+      "params": [
+        "dpi",
+        "format",
+        "keep_project",
+        "ocr_lang",
+        "overwrite",
+        "pages"
+      ],
+      "tools": []
+    },
     "optimize": {
       "method": "optimize",
       "params": [

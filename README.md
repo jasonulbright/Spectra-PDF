@@ -77,6 +77,7 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Scan & OCR** — acquire pages straight from a scanner (flatbed, feeder or duplex), deskew, despeckle, whiten and re-orient them, then make them searchable in 47 languages, fully offline.
 
 ![Scan & OCR panel measuring a scanned page before making it searchable](docs/images/shot_ocr.png)
+- **Recognize music** — Recognize printed music to MusicXML (requires Audiveris, installed separately).
 - **Compare** — text and visual diff.
 
 ![Compare Files showing a text diff between two revisions of a document](docs/images/shot_compare.png)

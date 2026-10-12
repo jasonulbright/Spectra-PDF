@@ -62,6 +62,7 @@ from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
 from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
+from engine.recognize_music import recognize_document, recognize_music_prepare, require_launcher
 from engine.preflight_fixups import apply_fixups
 from engine.sanitize import sanitize_pdf
 from engine.derived_nav import outline_from_structure
@@ -425,7 +426,20 @@ _STEPS: dict[str, _Step] = {
         frozenset({"gs_path"}),
         gs=_gs_always,
     ),
+    # Writes MusicXML beside the document under the document's own name and
+    # leaves the PDF as it is. A folder run performs the whole sequence in its
+    # own process through `recognize_document`; the window's single-document
+    # runner starts it at `recognize_music_prepare`.
+    "omr": _Step(
+        recognize_music_prepare,
+        frozenset({"pages", "format", "keep_project", "dpi", "ocr_lang", "overwrite"}),
+        frozenset(),
+    ),
 }
+
+#: The steps that run Audiveris. A run that has one refuses before its first
+#: row when no Audiveris resolves.
+AUDIVERIS_STEPS = ("omr",)
 
 # The steps that end a sequence by producing a non-PDF. Named once: the
 # validation, the in-place refusal and the output naming all ask the same
@@ -743,13 +757,26 @@ def plan_gs(steps, source: str = "") -> dict:
     }
 
 
-def _apply_steps(path: str, steps: list[dict], tool_paths: dict) -> int:
-    """Run every step in-place on `path`; returns the count applied."""
+def _apply_steps(path: str, steps: list[dict], tool_paths: dict, named: str = "") -> int:
+    """Run every step in-place on `path`; returns the count applied. `named` is
+    where the document lands when it is not `path` itself (an in-place run
+    stages it); a step that writes beside the document names its files after
+    it."""
     for step in steps:
         spec = _STEPS[step["op"]]
         kwargs = dict(step["params"])
         for key in spec.tools:
             kwargs[key] = tool_paths.get(key, "")
+        if step["op"] in AUDIVERIS_STEPS:
+            landing = Path(named or path)
+            recognize_document(
+                file=path,
+                output_dir=str(landing.parent),
+                base_name=landing.stem,
+                audiveris=tool_paths.get("audiveris"),
+                **kwargs,
+            )
+            continue
         spec.fn(file=path, output=path, **kwargs)
     return len(steps)
 
@@ -792,6 +819,7 @@ def run_action(
     in_place: bool = False,
     move_processed_root: str = "",
     plan: bool = False,
+    audiveris=None,
 ) -> dict:
     """Run a step sequence over every PDF under `source`, mirroring into
     `dest` — or, with `in_place`, REPLACING each original with its processed
@@ -805,7 +833,9 @@ def run_action(
     before they hand a run its Ghostscript.
 
     A run whose steps, or every one of whose rows, need Ghostscript refuses
-    before its first row when `gs_path` does not resolve."""
+    before its first row when `gs_path` does not resolve. A run with a step
+    that runs Audiveris refuses there when `audiveris`, the host's capability
+    answer, names no usable Audiveris."""
     if plan:
         return plan_gs(steps, source)
     source_path = Path(source).resolve()
@@ -873,7 +903,10 @@ def run_action(
         "tesseract_path": tesseract_path,
         "soffice_path": soffice_path,
         "font_dir": font_dir,
+        "audiveris": audiveris,
     }
+    if any(step["op"] in AUDIVERIS_STEPS for step in clean_steps):
+        require_launcher(audiveris)
 
     started_at = datetime.now()
     entries, skipped_dirs, group_members = _listing(source_path, clean_steps)
@@ -932,7 +965,12 @@ def run_action(
                 applied = 1 + _apply_steps(str(out_path), transform_steps[1:], tool_paths)
             elif stages:
                 shutil.copy2(abs_path, out_path)
-                applied = _apply_steps(str(out_path), transform_steps, tool_paths)
+                applied = _apply_steps(
+                    str(out_path),
+                    transform_steps,
+                    tool_paths,
+                    named=str(abs_path) if in_place else "",
+                )
             else:
                 applied = 0
             if in_place:

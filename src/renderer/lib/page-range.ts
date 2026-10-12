@@ -50,6 +50,23 @@ export function parsePageRangeField(input: string, pageCount: number): PageRange
   return pages.length ? { pages } : { error: 'badPages' };
 }
 
+/** The most pages a field may name when no page count bounds it. Expanding
+ * a range is linear in its span; a wider field is refused, not allocated. */
+export const MAX_LISTED_PAGES = 100_000;
+
+/**
+ * The field's syntax without a document to bound it: `'all'` (also for an
+ * empty field), the listed pages merged and in order, or null when any token
+ * is not a page or a range.
+ */
+export function parsePageScopeField(input: string): 'all' | number[] | null {
+  if (typeof input !== 'string') return null;
+  if (input.trim() === '') return 'all';
+  const parsed = parsePageRangeField(input, MAX_LISTED_PAGES);
+  if ('error' in parsed) return null;
+  return parsed.pages ?? 'all';
+}
+
 /**
  * Page numbers written back as the field's own syntax — runs of three or more
  * collapse to `from-to`. A pair stays two numbers: `4-5` is no shorter than

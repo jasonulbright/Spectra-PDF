@@ -214,6 +214,8 @@ pub enum CliCommand {
     EnhanceScan(EnhanceScanArgs),
     /// Run a guided action (a saved step sequence) over a folder of PDFs
     RunAction(RunActionArgs),
+    /// Recognize printed music to MusicXML with a separately installed Audiveris
+    Omr(OmrArgs),
     /// List optional-content layers (JSON)
     LayerList(LayerListArgs),
     /// Show or hide a layer by index
@@ -1242,6 +1244,265 @@ pub struct RunActionArgs {
     /// Where the run log is written (default: no log from the CLI)
     #[arg(long)]
     pub log_dir: Option<PathBuf>,
+    /// Audiveris program for an action with a Recognize music step. Without
+    /// this the CLI uses the Audiveris chosen in Preferences, then
+    /// SPECTRAPDF_AUDIVERIS_PATH, then the installed copies.
+    #[arg(long, value_name = "PATH")]
+    pub audiveris_path: Option<String>,
+}
+
+#[derive(Args)]
+pub struct OmrArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Pages to recognize, e.g. 1-3,5 (default: all)
+    #[arg(short, long)]
+    pub pages: Option<String>,
+    /// Score file to write (default: beside the input, under its name). Several
+    /// movements are written as NAME.mvt1.mxl, NAME.mvt2.mxl, ...
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    /// Score format: mxl (compressed MusicXML) or musicxml (plain MusicXML).
+    /// Default: the --output extension, else mxl
+    #[arg(long)]
+    pub format: Option<String>,
+    /// Also write the Audiveris project (NAME.omr) for corrections in Audiveris
+    #[arg(long)]
+    pub keep_project: bool,
+    /// Embed the scores in the input PDF as associated files
+    #[arg(long)]
+    pub attach: bool,
+    /// Replace score files and attachments that already exist
+    #[arg(long)]
+    pub overwrite: bool,
+    /// Resolution Audiveris renders each page at, 200-500 (default: 300)
+    #[arg(long)]
+    pub dpi: Option<u32>,
+    /// OCR languages for titles and lyrics, e.g. eng or eng+deu
+    #[arg(long)]
+    pub ocr_lang: Option<String>,
+    /// Audiveris program. Without this the CLI uses the Audiveris chosen in
+    /// Preferences, then SPECTRAPDF_AUDIVERIS_PATH, then the installed copies.
+    #[arg(long, value_name = "PATH")]
+    pub audiveris_path: Option<String>,
+}
+
+/// The page list `-p` names, with the grammar of the window's page field
+/// (`src/renderer/lib/page-range.ts`): `all` (any case) is the whole
+/// document, spelled as None; otherwise comma-separated 1-based numbers and
+/// inclusive `from-to` ranges, every token valid, merged and in order. The
+/// engine refuses a page past the document's end.
+pub fn parse_page_spec(spec: &str) -> Result<Option<Vec<u32>>, String> {
+    const REFUSAL: &str = "--pages must be e.g. 1,3,5-9 or all";
+    let trimmed = spec.trim().to_lowercase();
+    if trimmed == "all" {
+        return Ok(None);
+    }
+    let number = |text: &str| -> Result<u32, String> {
+        let text = text.trim();
+        if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(REFUSAL.to_string());
+        }
+        text.parse::<u32>().map_err(|_| REFUSAL.to_string())
+    };
+    let mut intervals: Vec<(u32, u32)> = Vec::new();
+    for token in trimmed.split(',') {
+        let token = token.trim();
+        let (from, to) = match token.split_once('-') {
+            Some((a, b)) => (number(a)?, number(b)?),
+            None => {
+                let page = number(token)?;
+                (page, page)
+            }
+        };
+        if from < 1 || to < from {
+            return Err(REFUSAL.to_string());
+        }
+        intervals.push((from, to));
+    }
+    intervals.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::new();
+    for (from, to) in intervals {
+        match merged.last_mut() {
+            Some(prior) if from.saturating_sub(prior.1) <= 1 => prior.1 = prior.1.max(to),
+            _ => merged.push((from, to)),
+        }
+    }
+    let total: u64 = merged.iter().map(|(from, to)| u64::from(to - from) + 1).sum();
+    if total > 100_000 {
+        return Err(REFUSAL.to_string());
+    }
+    Ok(Some(merged.into_iter().flat_map(|(from, to)| from..=to).collect()))
+}
+
+/// The score format an output name's extension spells, and the name without
+/// that extension.
+fn music_format_of(file: &str) -> Option<(&'static str, String)> {
+    let lower = file.to_lowercase();
+    [(".mxl", "mxl"), (".musicxml", "musicxml"), (".xml", "musicxml")]
+        .iter()
+        .find(|(ext, _)| lower.ends_with(ext))
+        .map(|(ext, format)| (*format, file[..file.len() - ext.len()].to_string()))
+}
+
+/// Where `spectrapdf omr` writes: (folder, score name, format). `-o` naming a
+/// folder (an existing one, or a path ending in a separator) keeps the
+/// input's name.
+fn omr_target(args: &OmrArgs) -> Result<(PathBuf, String, String), String> {
+    let input = abs(&args.input);
+    let asked = args.format.as_deref().map(str::to_lowercase);
+    let input_stem = || {
+        input
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+    let Some(output) = &args.output else {
+        let folder = input.parent().map(Path::to_path_buf).unwrap_or_default();
+        return Ok((folder, input_stem(), asked.unwrap_or_else(|| "mxl".to_string())));
+    };
+    let spelled = output.to_string_lossy();
+    let output = abs(output);
+    if spelled.ends_with('/') || spelled.ends_with('\\') || output.is_dir() {
+        return Ok((output, input_stem(), asked.unwrap_or_else(|| "mxl".to_string())));
+    }
+    let folder = output
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "--output names no folder".to_string())?;
+    let file = output
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "--output names no file".to_string())?;
+    match (music_format_of(&file), asked) {
+        (Some((spelled, _)), Some(asked)) if spelled != asked => Err(format!(
+            "--format {asked} does not match the --output name {file}, which spells {spelled}"
+        )),
+        (Some((spelled, stem)), _) => Ok((folder, stem, spelled.to_string())),
+        (None, asked) => Ok((folder, file, asked.unwrap_or_else(|| "mxl".to_string()))),
+    }
+}
+
+/// Why `--attach` cannot rewrite a document, from its `signature_policy`.
+fn attach_refusal(policy: &Value) -> Option<String> {
+    if let Some(error) = policy.get("error").and_then(Value::as_str) {
+        return Some(format!("--attach could not read this document's signatures: {error}"));
+    }
+    (policy.get("signed").and_then(Value::as_bool) == Some(true))
+        .then(|| "--attach refuses a signed document: rewriting it would invalidate its signatures".to_string())
+}
+
+/// The run request of `spectrapdf omr`.
+fn omr_run_params(args: &OmrArgs, token: &str, audiveris: &crate::audiveris::AudiverisStatus) -> Value {
+    let mut params = json!({
+        "token": token,
+        "keep_project": args.keep_project,
+        "audiveris": audiveris,
+    });
+    if let Some(dpi) = args.dpi {
+        params["dpi"] = json!(dpi);
+    }
+    if let Some(lang) = &args.ocr_lang {
+        params["ocr_lang"] = json!(lang);
+    }
+    params
+}
+
+/// The movements a run answer reports.
+fn run_movements(ran: &Value) -> Vec<crate::audiveris::Movement> {
+    ran.get("movements")
+        .and_then(Value::as_array)
+        .map(|movements| {
+            movements
+                .iter()
+                .filter_map(|movement| {
+                    Some(crate::audiveris::Movement {
+                        index: movement.get("index")?.as_u64()?,
+                        suffix: movement.get("name")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `spectrapdf omr`: the window's four steps in order, the stage discarded
+/// whatever happens.
+fn run_omr(engine: &mut CliEngine, args: &OmrArgs) -> Result<Value, String> {
+    let audiveris = crate::audiveris::resolve_for_cli(args.audiveris_path.as_deref())?;
+    let (folder, name, format) = omr_target(args)?;
+    let pages = match &args.pages {
+        Some(spec) => parse_page_spec(spec)?,
+        None => None,
+    };
+    let input = abs(&args.input).to_string_lossy().to_string();
+    if args.attach {
+        let policy = engine.call("signature_policy", json!({ "path": input }))?;
+        if let Some(refusal) = attach_refusal(&policy) {
+            return Err(refusal);
+        }
+    }
+    let mut prepare = json!({ "file": input, "attach": args.attach });
+    if let Some(pages) = pages {
+        prepare["pages"] = json!(pages);
+    }
+    let prepared = engine.call("recognize_music_prepare", prepare)?;
+    let token = prepared
+        .get("token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "the engine prepared no recognition".to_string())?
+        .to_string();
+    let outcome = (|| -> Result<Value, String> {
+        let ran = engine.call("recognize_music_run", omr_run_params(args, &token, &audiveris))?;
+        let kept = args.keep_project && ran.get("project").and_then(Value::as_bool) == Some(true);
+        let extension = if format == "musicxml" { ".musicxml" } else { ".mxl" };
+        let consent = if args.overwrite {
+            crate::audiveris::target_names(&name, extension, &run_movements(&ran), kept)
+        } else {
+            Vec::new()
+        };
+        let published = engine.call(
+            "recognize_music_publish",
+            json!({
+                "token": token,
+                "output_dir": folder.to_string_lossy(),
+                "base_name": name,
+                "format": format,
+                "keep_project": args.keep_project,
+                "overwrite_names": consent,
+            }),
+        )?;
+        let mut ties = Vec::new();
+        if args.attach {
+            for file in published.get("files").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let score = file.get("path").and_then(Value::as_str).unwrap_or_default();
+                let attached = engine.call(
+                    "recognize_music_attach",
+                    json!({ "file": input, "output": input, "score_path": score }),
+                )?;
+                ties.push(attached.get("structureTies").cloned().unwrap_or(Value::Null));
+            }
+        }
+        Ok(json!({
+            "files": published.get("files").cloned().unwrap_or(Value::Null),
+            "project": published.get("project").cloned().unwrap_or(Value::Null),
+            "skippedPages": ran.get("skippedPages").cloned().unwrap_or(Value::Null),
+            "log": ran.get("log").cloned().unwrap_or(Value::Null),
+            "attached": args.attach,
+            "structureTies": ties,
+        }))
+    })();
+    let _ = engine.call("recognize_music_discard", json!({ "token": token }));
+    outcome
+}
+
+/// Whether an action's steps run Audiveris.
+fn action_runs_audiveris(steps: &Value) -> bool {
+    steps.as_array().is_some_and(|steps| {
+        steps
+            .iter()
+            .any(|step| step.get("op").and_then(Value::as_str) == Some("omr"))
+    })
 }
 
 #[derive(Args)]
@@ -3189,6 +3450,7 @@ fn command_gs_need(command: &CliCommand) -> GsNeed {
         | C::PreflightFix(_)
         | C::PreflightSweep(_) => Optional,
         C::RunAction(_) | C::CreatePdfFolders(_) | C::Batch(_) => return GsNeed::PerItem,
+        C::Omr(_) => Never,
         // A scan's pages are images, and every other command reads or edits
         // the document without rendering it.
         C::Scan(_)
@@ -3591,11 +3853,7 @@ impl CliEngine {
             }
             if let Ok(response) = serde_json::from_slice::<Value>(&line) {
                 if let Some(err) = response.get("error") {
-                    let msg = err
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("Unknown engine error");
-                    return Err(msg.to_string());
+                    return Err(engine_error_text(err));
                 }
                 return Ok(response
                     .get("result")
@@ -3620,6 +3878,32 @@ impl CliEngine {
         let stdin = self.child.stdin.as_ref()?;
         stdin.as_handle().try_clone_to_owned().ok().map(std::fs::File::from)
     }
+}
+
+/// The text a command prints for an engine error: its message, and the log
+/// the engine names in `data.log`.
+fn engine_error_text(error: &Value) -> String {
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("Unknown engine error");
+    let mut text = match error.pointer("/data/log").and_then(Value::as_str) {
+        Some(log) => format!("{message} (log: {log})"),
+        None => message.to_string(),
+    };
+    if let Some(unrestored) = error.pointer("/data/unrestored").and_then(Value::as_object) {
+        let pairs: Vec<String> = unrestored
+            .iter()
+            .map(|(target, backup)| match backup.as_str().filter(|b| !b.is_empty()) {
+                Some(backup) => format!("{target} (its previous content is in {backup})"),
+                None => target.clone(),
+            })
+            .collect();
+        if !pairs.is_empty() {
+            text.push_str(&format!("; not restored: {}", pairs.join("; ")));
+        }
+    }
+    text
 }
 
 /// The request line `CliEngine::call` writes, newline included.
@@ -5449,9 +5733,17 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 .map_err(|e| format!("Cannot read action file {}: {e}", args.action.display()))?;
             let parsed: serde_json::Value = serde_json::from_str(&raw)
                 .map_err(|e| format!("Action file is not valid JSON: {e}"))?;
-            let gs = planned_gs_path(engine, &args.source, &action_steps(&parsed)?)?;
-            engine.call("run_action", run_action_params(args, &parsed, gs)?)
+            let steps = action_steps(&parsed)?;
+            let gs = planned_gs_path(engine, &args.source, &steps)?;
+            let mut params = run_action_params(args, &parsed, gs)?;
+            if action_runs_audiveris(&steps) {
+                let audiveris = crate::audiveris::resolve_for_cli(args.audiveris_path.as_deref())?;
+                params["audiveris"] = json!(audiveris);
+            }
+            engine.call("run_action", params)
         }
+
+        CliCommand::Omr(args) => run_omr(engine, args),
 
         CliCommand::PortfolioCreate(args) => {
             let sources: Vec<String> = args
@@ -8196,6 +8488,183 @@ mod tests {
             format!("CLI_SURFACE = \"{value}\""),
         ] {
             assert!(source.contains(&line), "{} no longer says {line}", path.display());
+        }
+    }
+
+    fn omr_args(argv: &[&str]) -> OmrArgs {
+        match parse(argv).command {
+            Some(CliCommand::Omr(args)) => args,
+            _ => panic!("not the omr arm"),
+        }
+    }
+
+    fn ready_audiveris() -> crate::audiveris::AudiverisStatus {
+        crate::audiveris::AudiverisStatus {
+            kind: crate::audiveris::READY.into(),
+            path: Some("Audiveris".into()),
+            launcher: Some(crate::audiveris::LAUNCHER_EXE.into()),
+            version: Some("5.11.0".into()),
+            source: Some(crate::audiveris::SOURCE_EXPLICIT.into()),
+            ocr_languages: vec![],
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn omr_pages_follow_the_window_grammar() {
+        assert_eq!(parse_page_spec("1-3,5").unwrap(), Some(vec![1, 2, 3, 5]));
+        assert_eq!(parse_page_spec(" 4 , 2 - 2,4").unwrap(), Some(vec![2, 4]));
+        assert_eq!(parse_page_spec("3-5,1-4").unwrap(), Some(vec![1, 2, 3, 4, 5]));
+        assert_eq!(parse_page_spec(" ALL ").unwrap(), None);
+        for bad in ["", "0", "3-1", "a", "1-", "2-x", "1,,3", "1,", ",1", "+2", "1-2-3", "-2"] {
+            assert_eq!(parse_page_spec(bad), Err("--pages must be e.g. 1,3,5-9 or all".to_string()), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn omr_writes_beside_the_input_by_default() {
+        let folder = std::env::temp_dir().join("scores");
+        let input = folder.join("song.pdf").to_string_lossy().to_string();
+        let args = omr_args(&["spectrapdf", "omr", &input]);
+        let (out, name, format) = omr_target(&args).unwrap();
+        assert_eq!(out, folder);
+        assert_eq!(name, "song");
+        assert_eq!(format, "mxl");
+        let run = omr_run_params(&args, "1-a", &ready_audiveris());
+        assert_eq!(run["keep_project"], false);
+        assert!(run.get("dpi").is_none());
+        assert_eq!(run["audiveris"]["kind"], "ready");
+    }
+
+    #[test]
+    fn omr_options_reach_the_engine_requests() {
+        let input = std::env::temp_dir().join("scores").join("song.pdf").to_string_lossy().to_string();
+        let out = std::env::temp_dir().join("out");
+        let output = out.join("Song Book.musicxml").to_string_lossy().to_string();
+        let args = omr_args(&[
+            "spectrapdf", "omr", &input, "-p", "2-3", "-o", &output, "--format", "musicxml",
+            "--keep-project", "--attach", "--overwrite", "--dpi", "400", "--ocr-lang", "eng+deu",
+            "--audiveris-path", r"C:\Apps\Audiveris\Audiveris.exe",
+        ]);
+        assert_eq!(args.audiveris_path.as_deref(), Some(r"C:\Apps\Audiveris\Audiveris.exe"));
+        assert_eq!(omr_target(&args).unwrap(), (out, "Song Book".to_string(), "musicxml".to_string()));
+        let run = omr_run_params(&args, "1-a", &ready_audiveris());
+        assert_eq!(run["dpi"], 400);
+        assert_eq!(run["ocr_lang"], "eng+deu");
+        assert_eq!(run["keep_project"], true);
+        assert_eq!(run["token"], "1-a");
+        assert!(args.attach && args.overwrite);
+    }
+
+    #[test]
+    fn omr_output_naming_a_folder_keeps_the_input_name() {
+        let input = std::env::temp_dir().join("song.pdf").to_string_lossy().to_string();
+        let existing = tempfile::tempdir().unwrap();
+        let folder = existing.path().to_string_lossy().to_string();
+        let args = omr_args(&["spectrapdf", "omr", &input, "-o", &folder]);
+        assert_eq!(omr_target(&args).unwrap().1, "song");
+        let separator = format!("{}{}", std::env::temp_dir().join("new-scores").to_string_lossy(), std::path::MAIN_SEPARATOR);
+        let args = omr_args(&["spectrapdf", "omr", &input, "-o", &separator, "--format", "musicxml"]);
+        let (out, name, format) = omr_target(&args).unwrap();
+        assert_eq!((name.as_str(), format.as_str()), ("song", "musicxml"));
+        assert!(out.ends_with("new-scores"), "{out:?}");
+    }
+
+    #[test]
+    fn omr_takes_its_format_from_the_output_name_and_refuses_a_conflict() {
+        let input = std::env::temp_dir().join("song.pdf").to_string_lossy().to_string();
+        let out = std::env::temp_dir().join("out");
+        let named = |name: &str| out.join(name).to_string_lossy().to_string();
+        let format_of = |argv: &[&str]| omr_target(&omr_args(argv)).map(|(_, name, format)| (format, name));
+
+        let plain = named("a.musicxml");
+        assert_eq!(format_of(&["spectrapdf", "omr", &input, "-o", &plain]).unwrap(), ("musicxml".into(), "a".into()));
+        let packed = named("A.MXL");
+        assert_eq!(format_of(&["spectrapdf", "omr", &input, "-o", &packed]).unwrap(), ("mxl".into(), "A".into()));
+        let xml = named("b.xml");
+        assert_eq!(format_of(&["spectrapdf", "omr", &input, "-o", &xml]).unwrap(), ("musicxml".into(), "b".into()));
+        let bare = named("c");
+        assert_eq!(
+            format_of(&["spectrapdf", "omr", &input, "-o", &bare, "--format", "musicxml"]).unwrap(),
+            ("musicxml".into(), "c".into())
+        );
+        assert_eq!(format_of(&["spectrapdf", "omr", &input, "-o", &bare]).unwrap(), ("mxl".into(), "c".into()));
+
+        let conflict = format_of(&["spectrapdf", "omr", &input, "-o", &packed, "--format", "musicxml"]).unwrap_err();
+        assert!(conflict.contains("--format musicxml does not match"), "{conflict}");
+        let conflict = format_of(&["spectrapdf", "omr", &input, "-o", &plain, "--format", "mxl"]).unwrap_err();
+        assert!(conflict.contains("--format mxl does not match"), "{conflict}");
+    }
+
+    #[test]
+    fn omr_attach_refuses_a_signed_or_unreadable_document() {
+        assert_eq!(attach_refusal(&json!({"signed": false, "count": 0})), None);
+        let signed = attach_refusal(&json!({"signed": true, "count": 1})).unwrap();
+        assert!(signed.starts_with("--attach refuses a signed document"), "{signed}");
+        let unreadable = attach_refusal(&json!({"signed": false, "error": "policy unreadable"})).unwrap();
+        assert_eq!(unreadable, "--attach could not read this document's signatures: policy unreadable");
+    }
+
+    #[test]
+    fn an_engine_error_names_its_log() {
+        assert_eq!(
+            engine_error_text(&json!({"message": "Music recognition failed: Audiveris exited with status 2",
+                                       "data": {"log": "C:/logs/run.log"}})),
+            "Music recognition failed: Audiveris exited with status 2 (log: C:/logs/run.log)"
+        );
+        assert_eq!(engine_error_text(&json!({"message": "plain"})), "plain");
+        assert_eq!(engine_error_text(&json!({"message": "names", "data": {"names": ["a.mxl"]}})), "names");
+        assert_eq!(engine_error_text(&json!({})), "Unknown engine error");
+        assert_eq!(
+            engine_error_text(&json!({"message": "C:/s/a.mvt2.mxl is held open", "data": {
+                "landed": ["C:/s/a.mvt1.mxl"],
+                "unrestored": {"C:/s/a.mvt1.mxl": "C:/s/.spectra-stage-1-x.pdf"}
+            }})),
+            "C:/s/a.mvt2.mxl is held open; not restored: C:/s/a.mvt1.mxl (its previous content is in C:/s/.spectra-stage-1-x.pdf)"
+        );
+        assert_eq!(
+            engine_error_text(&json!({"message": "m", "data": {"unrestored": {"C:/s/new.mxl": ""}}})),
+            "m; not restored: C:/s/new.mxl"
+        );
+    }
+
+    #[test]
+    fn omr_consents_to_exactly_the_files_its_run_produced() {
+        let ran = json!({"movements": [
+            {"index": 1, "pages": [1], "name": ".mvt1"},
+            {"index": 2, "pages": [3], "name": ".mvt2"}
+        ], "project": true});
+        assert_eq!(
+            crate::audiveris::target_names("book", ".mxl", &run_movements(&ran), true),
+            ["book.mvt1.mxl", "book.mvt2.mxl", "book.omr"]
+        );
+    }
+
+    #[test]
+    fn omr_needs_no_ghostscript_and_its_refusal_names_the_cli_fixes() {
+        let input = std::env::temp_dir().join("song.pdf").to_string_lossy().to_string();
+        let command = parse(&["spectrapdf", "omr", &input]).command.unwrap();
+        assert!(matches!(command_gs_need(&command), GsNeed::Command(GsDemand::Never)));
+        let missing = std::env::temp_dir().join("nowhere").join("Audiveris.exe");
+        let refusal = crate::audiveris::resolve_for_cli(Some(&missing.to_string_lossy())).unwrap_err();
+        assert!(refusal.starts_with(crate::audiveris::CLI_REQUIRED), "{refusal}");
+        assert!(refusal.contains("--audiveris-path"));
+        assert!(refusal.contains("SPECTRAPDF_AUDIVERIS_PATH"));
+    }
+
+    #[test]
+    fn a_run_action_with_a_music_step_takes_an_audiveris() {
+        assert!(action_runs_audiveris(&json!([{"op": "compress"}, {"op": "omr"}])));
+        assert!(!action_runs_audiveris(&json!([{"op": "compress"}])));
+        let args = parse(&[
+            "spectrapdf", "run-action", "in", "--dest", "out", "--action", "a.json",
+            "--audiveris-path", "C:/Apps/Audiveris/Audiveris.exe",
+        ]);
+        match args.command {
+            Some(CliCommand::RunAction(args)) => {
+                assert_eq!(args.audiveris_path.as_deref(), Some("C:/Apps/Audiveris/Audiveris.exe"))
+            }
+            _ => panic!("not the run-action arm"),
         }
     }
 }

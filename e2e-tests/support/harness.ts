@@ -236,6 +236,23 @@ export async function invokeAppCommand(id: string): Promise<boolean> {
   );
 }
 
+/** The last error a harness call recorded in the app, or null. */
+export async function harnessLastError(): Promise<string | null> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.lastError() as string | null;
+  });
+}
+
+/** Whether a command may run now, without running it. */
+export async function commandEnabled(id: string): Promise<boolean> {
+  return await browser.execute<boolean, [string]>(
+    function (i) {
+      return (window as any).__SPECTRA_TEST__.commandEnabled(i);
+    },
+    id,
+  );
+}
+
 export async function setActiveOp(op: string): Promise<void> {
   await browser.execute<void, [string]>(
     function (o) {
@@ -3769,6 +3786,39 @@ export async function gsAnswer(): Promise<GsAnswer> {
   return browser.execute(function () {
     return (window as any).__SPECTRA_TEST__.gsAnswer();
   }) as Promise<GsAnswer>;
+}
+
+/** The renderer's Audiveris answer (`lib/audiveris-status.ts`). */
+export interface AudiverisAnswer {
+  kind: 'ready' | 'not-configured' | 'not-executable' | 'probe-failed' | 'version-below-minimum';
+  path: string | null;
+  launcher: 'exe' | 'flatpak' | null;
+  version: string | null;
+  source: string | null;
+  ocrLanguages: string[];
+  detail: string | null;
+  pending: boolean;
+}
+
+/** Hold this session's Audiveris answer at "not set up". */
+export async function audiverisForceAbsent(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.audiverisForceAbsent();
+  });
+}
+
+/** Lift the hold and read the machine's real Audiveris answer. */
+export async function audiverisRestore(): Promise<AudiverisAnswer> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.audiverisRestore();
+  }) as Promise<AudiverisAnswer>;
+}
+
+/** The renderer's current Audiveris answer. */
+export async function audiverisAnswer(): Promise<AudiverisAnswer> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.audiverisAnswer();
+  }) as Promise<AudiverisAnswer>;
 }
 
 /** Answer the next native "pick any file" dialog (Preferences ▸ Engine ▸

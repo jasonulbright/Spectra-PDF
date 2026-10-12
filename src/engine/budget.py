@@ -230,6 +230,13 @@ def _attach_windows_job(process: subprocess.Popen) -> _WindowsJob | None:
         raise
 
 
+def contain_windows_child(process: subprocess.Popen) -> _WindowsJob | None:
+    """`process`, started with CREATE_SUSPENDED, inside a kill-on-close job
+    and resumed. None off Windows. Closing the returned job ends the process
+    and every descendant it started."""
+    return _attach_windows_job(process)
+
+
 def timed_out(what: str, budget: float, *, size_bytes: int = 0, pages: int = 0) -> TimeBudgetExceeded:
     """The refusal a caller raises when `subprocess.TimeoutExpired` fires."""
     return TimeBudgetExceeded(

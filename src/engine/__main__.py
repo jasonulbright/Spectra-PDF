@@ -184,6 +184,13 @@ from engine.forms import (
 from engine.enhance_scan import analyze_scan, enhance_scan
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize, recognize_raster
+from engine.recognize_music import (
+    recognize_music_attach,
+    recognize_music_discard,
+    recognize_music_prepare,
+    recognize_music_publish,
+    recognize_music_run,
+)
 from engine.batch_ocr import batch_ocr, ocr_file, remove_empty_folders_in
 from engine.guided_actions import run_action
 from engine.autotag import autotag
@@ -427,6 +434,11 @@ def main() -> None:
     server.register("enhance_scan", enhance_scan)
     server.register("batch_ocr", batch_ocr)
     server.register("ocr_file", ocr_file)
+    server.register("recognize_music_prepare", recognize_music_prepare)
+    server.register("recognize_music_run", recognize_music_run)
+    server.register("recognize_music_publish", recognize_music_publish)
+    server.register("recognize_music_attach", recognize_music_attach)
+    server.register("recognize_music_discard", recognize_music_discard)
     server.register("remove_empty_folders", remove_empty_folders_in)
     server.register("run_action", run_action)
     server.register("autotag", autotag)
