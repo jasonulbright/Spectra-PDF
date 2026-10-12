@@ -7,9 +7,9 @@
 // commit-time strip. No sidecar (encrypted file, parse failure) degrades to
 // pdf.js-only import: the shape kinds then stay UNIMPORTED rather than
 // imported blind — faithful-or-untouched.
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFNumber, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
-import { entryOf, importedRect } from './annotation-fingerprint';
+import { entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import { pdfNameKey } from './pdf-text-string';
 
 export interface RawAnnotStyle {
@@ -94,8 +94,22 @@ function colorHex(arr: unknown): string | undefined {
 }
 
 function nameOf(v: unknown): string | undefined {
-  return v instanceof PDFName ? v.decodeText() : undefined;
+  return v instanceof PDFName ? pdfNameKey(v) : undefined;
 }
+
+/** The value under the key spelt `name` (decoded as pdf.js decodes keys),
+ *  refused like a typed lookup when it is present with another type. */
+function typedEntry<T>(dict: PDFDict, name: string, is: (value: unknown) => value is T): T | undefined {
+  const value = entryOf(dict, name);
+  if (value === undefined) return undefined;
+  if (!is(value)) throw new Error(`/${name} is not the type it must be`);
+  return value;
+}
+
+const isDict = (v: unknown): v is PDFDict => v instanceof PDFDict;
+const isArray = (v: unknown): v is PDFArray => v instanceof PDFArray;
+const isNumber = (v: unknown): v is PDFNumber => v instanceof PDFNumber;
+const isName = (v: unknown): v is PDFName => v instanceof PDFName;
 
 /** A PDF text string (literal or hex) as JS text; a /Name decodes too, since
  * the private /SpectraSymbol is written as one. */
@@ -149,12 +163,12 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           // Keyed by the rectangle pdf.js reports, which the strip compares too:
           // an annotation with no appearance is reported at the box pdf.js draws.
           const rect = importedRect(dict, subtype);
-          const bs = dict.lookupMaybe(PDFName.of('BS'), PDFDict);
-          const be = dict.lookupMaybe(PDFName.of('BE'), PDFDict);
+          const bs = typedEntry(dict, 'BS', isDict);
+          const be = typedEntry(dict, 'BE', isDict);
           // /LE is legitimately an ARRAY on Line/PolyLine and a NAME on
           // FreeText — a typed lookupMaybe THROWS on the other shape, so
           // resolve untyped and branch on instanceof.
-          const leRaw = dict.lookup(PDFName.of('LE'));
+          const leRaw = entryOf(dict, 'LE');
           let le: string[] | undefined;
           if (leRaw instanceof PDFArray) {
             const names: string[] = [];
@@ -164,28 +178,29 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             }
             if (names.length) le = names;
           } else if (leRaw instanceof PDFName) {
-            le = [leRaw.decodeText()];
+            le = [pdfNameKey(leRaw)];
           }
-          const rd = numArray(dict.lookupMaybe(PDFName.of('RD'), PDFArray));
+          const rd = numArray(typedEntry(dict, 'RD', isArray));
+          const measure = rawEntry(dict, 'Measure');
           styles.push({
             subtype,
             rect: rect as [number, number, number, number],
-            strokeWidth: num(bs?.lookupMaybe(PDFName.of('W'), PDFNumber)),
-            opacity: num(dict.lookupMaybe(PDFName.of('CA'), PDFNumber)),
-            fillColor: colorHex(dict.lookupMaybe(PDFName.of('IC'), PDFArray)),
-            cloudy: nameOf(be?.lookupMaybe(PDFName.of('S'), PDFName)) === 'C',
-            cloudIntensity: num(be?.lookupMaybe(PDFName.of('I'), PDFNumber)),
-            it: nameOf(dict.lookupMaybe(PDFName.of('IT'), PDFName)),
-            cl: numArray(dict.lookupMaybe(PDFName.of('CL'), PDFArray)),
+            strokeWidth: num(bs ? typedEntry(bs, 'W', isNumber) : undefined),
+            opacity: num(typedEntry(dict, 'CA', isNumber)),
+            fillColor: colorHex(typedEntry(dict, 'IC', isArray)),
+            cloudy: nameOf(be ? typedEntry(be, 'S', isName) : undefined) === 'C',
+            cloudIntensity: num(be ? typedEntry(be, 'I', isNumber) : undefined),
+            it: nameOf(typedEntry(dict, 'IT', isName)),
+            cl: numArray(typedEntry(dict, 'CL', isArray)),
             le,
-            vertices: numArray(dict.lookupMaybe(PDFName.of('Vertices'), PDFArray)),
-            l: numArray(dict.lookupMaybe(PDFName.of('L'), PDFArray)),
-            measure: !!dict.get(PDFName.of('Measure')),
-            subj: text(dict.lookup(PDFName.of('Subj'))),
-            spectraSymbol: text(dict.lookup(PDFName.of('SpectraSymbol'))),
-            spectraLegend: text(dict.lookup(PDFName.of('SpectraLegend'))),
-            spectraSymbolParts: text(dict.lookup(PDFName.of('SpectraSymbolParts'))),
-            spectraInkStyle: text(dict.lookup(PDFName.of('SpectraInkStyle'))),
+            vertices: numArray(typedEntry(dict, 'Vertices', isArray)),
+            l: numArray(typedEntry(dict, 'L', isArray)),
+            measure: measure !== undefined && measure !== PDFNull,
+            subj: text(entryOf(dict, 'Subj')),
+            spectraSymbol: text(entryOf(dict, 'SpectraSymbol')),
+            spectraLegend: text(entryOf(dict, 'SpectraLegend')),
+            spectraSymbolParts: text(entryOf(dict, 'SpectraSymbolParts')),
+            spectraInkStyle: text(entryOf(dict, 'SpectraInkStyle')),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

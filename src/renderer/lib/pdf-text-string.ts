@@ -138,15 +138,24 @@ export function decodePdfTextString(codes: ArrayLike<number>): string {
   return withoutEscapes(body, (code) => PDF_DOC_DIFFERENCES.get(code) ?? code);
 }
 
-/** A name's bytes (7.3.5). The parser decodes only uppercase `#XX` escapes
- *  and keeps a lowercase one as the three characters, so those are decoded
- *  here. A name written with `#23` before two hex digits reads as one escaped
- *  byte: the parsed name keeps no trace of which form the file used. */
+const isLowerHexLetter = (code: number | undefined): boolean => code !== undefined && code >= 0x61 && code <= 0x66;
+
+/** A parsed name's bytes as pdf.js decodes the file's spelling (7.3.5).
+ *
+ *  The parser decodes, once, every `#` pair of decimal digits or uppercase
+ *  hex letters, and keeps a pair holding a lowercase a-f as the three
+ *  characters. So in the parsed name a `#` before a pair with no lowercase
+ *  letter was written `#23` in the file and stays a `#`; only a pair holding a
+ *  lowercase letter is decoded here. A file `#23` followed by such a pair
+ *  reads as one escaped byte: the parsed name keeps no trace of which form
+ *  the file used. Every caller passes a name the parser made (a dictionary key
+ *  or a name value read from the file). */
 export function pdfNameBytes(name: PDFName): number[] {
   const parsed = name.asBytes();
   const bytes: number[] = [];
   for (let i = 0; i < parsed.length; i++) {
-    const high = parsed[i] === 0x23 ? hexDigit(parsed[i + 1] ?? -1) : -1;
+    const pending = parsed[i] === 0x23 && (isLowerHexLetter(parsed[i + 1]) || isLowerHexLetter(parsed[i + 2]));
+    const high = pending ? hexDigit(parsed[i + 1] ?? -1) : -1;
     const low = high === -1 ? -1 : hexDigit(parsed[i + 2] ?? -1);
     if (low === -1) bytes.push(parsed[i]);
     else {
