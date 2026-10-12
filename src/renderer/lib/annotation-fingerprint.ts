@@ -6,8 +6,9 @@
 // pdf.js keeps /Rect (normalised, or [0 0 0 0] when it is not four numbers)
 // except where it draws an appearance of its own for an annotation that has
 // none: there the rectangle becomes the box of what it draws.
-import { PDFArray, PDFDict, PDFName, PDFNull, PDFNumber, PDFStream } from 'pdf-lib';
-import { pdfNameKey } from './pdf-text-string';
+import { PDFArray, PDFBool, PDFDict, PDFHexString, PDFName, PDFNull, PDFNumber, PDFStream, PDFString } from 'pdf-lib';
+import { charactersOf, pdfNameKey, pdfStringCodes } from './pdf-text-string';
+import { maxOf, minOf } from './coordinate-bounds';
 
 export type Rect = [number, number, number, number];
 
@@ -80,19 +81,74 @@ function widthOf(value: unknown, rect: Rect): number {
   return width;
 }
 
-/** The border width (12.5.4): /BS /W, else the third /Border entry, else 0. */
+/** An object as pdf.js holds it, spelt the way a JavaScript string
+ *  conversion spells that value: a string is its characters, a number its
+ *  digits, an array its elements joined by commas (null as nothing), and a
+ *  name, dictionary, stream or reference never a number. */
+function jsText(value: unknown): string {
+  if (value instanceof PDFNumber) return String(value.asNumber());
+  if (value instanceof PDFBool) return String(value.asBoolean());
+  if (value instanceof PDFString || value instanceof PDFHexString) return charactersOf(pdfStringCodes(value));
+  if (value === PDFNull) return '';
+  if (value instanceof PDFArray) return value.asArray().map(jsText).join(',');
+  return '[object]';
+}
+
+/** `+value` for an object as pdf.js holds it. A reference to an object the
+ *  file does not hold resolves to null there (7.3.10), which is 0. */
+function jsNumber(value: unknown): number {
+  if (value instanceof PDFNumber) return value.asNumber();
+  if (value instanceof PDFBool) return value.asBoolean() ? 1 : 0;
+  if (value === PDFNull || value === undefined) return 0;
+  return Number(jsText(value));
+}
+
+function jsTruthy(value: unknown): boolean {
+  if (value === undefined || value === PDFNull) return false;
+  if (value instanceof PDFNumber) return value.asNumber() !== 0 && !Number.isNaN(value.asNumber());
+  if (value instanceof PDFBool) return value.asBoolean();
+  if (value instanceof PDFString || value instanceof PDFHexString) return pdfStringCodes(value).length > 0;
+  return true;
+}
+
+/** Whether a dash pattern (12.5.4, Table 168 /D) sets the border width to 0
+ *  in pdf.js: an array with an entry that is not a number at least 0, or a
+ *  non-empty array of zeros; or any other value that is not falsy.
+ *  `resolved` says whether the array's own entries were resolved, which pdf.js
+ *  does for /BS /D and not inside /Border. */
+function dashVoidsWidth(dash: unknown, resolved: boolean): boolean {
+  if (dash instanceof PDFArray) {
+    if (dash.size() === 0) return false;
+    let allZeros = true;
+    for (let i = 0; i < dash.size(); i++) {
+      const value = jsNumber(resolved ? dash.lookup(i) : dash.get(i));
+      if (!(value >= 0)) return true;
+      if (value > 0) allZeros = false;
+    }
+    return allZeros;
+  }
+  return jsTruthy(dash);
+}
+
+/** The border width (12.5.4): /BS /W, else the third /Border entry, else 0;
+ *  a dash pattern pdf.js rejects (/BS /D, or a fourth /Border entry) makes it
+ *  0. */
 function borderWidth(dict: PDFDict, rect: Rect): number {
   if (dict.has(N('BS'))) {
     const bs = dict.lookup(N('BS'));
     if (!(bs instanceof PDFDict)) return 1;
     const type = bs.lookup(N('Type'));
     const typed = type === undefined || type === PDFNull || (type instanceof PDFName && pdfNameKey(type) === 'Border');
-    return typed ? widthOf(bs.lookup(N('W')), rect) : 1;
+    if (!typed) return 1;
+    return dashVoidsWidth(bs.lookup(N('D')), true) ? 0 : widthOf(bs.lookup(N('W')), rect);
   }
   if (dict.has(N('Border'))) {
     const border = dict.lookup(N('Border'));
     if (!(border instanceof PDFArray)) return 1;
-    if (border.size() >= 3) return widthOf(border.lookup(2), rect);
+    if (border.size() >= 3) {
+      if (border.size() === 4 && dashVoidsWidth(border.lookup(3), false)) return 0;
+      return widthOf(border.lookup(2), rect);
+    }
     return border.size() === 0 ? 0 : 1;
   }
   return 0;
@@ -108,7 +164,7 @@ function quadBoxes(dict: PDFDict): Rect[] | null {
   for (let i = 0; i < points.length; i += 8) {
     const xs = [points[i], points[i + 2], points[i + 4], points[i + 6]];
     const ys = [points[i + 1], points[i + 3], points[i + 5], points[i + 7]];
-    boxes.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+    boxes.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]);
   }
   return boxes;
 }
@@ -124,6 +180,16 @@ function pathRect(rect: Rect, points: ArrayLike<number>[], width: number): Rect 
     }
   }
   return intersects(rect, box) ? rect : box;
+}
+
+/** The dictionary whose /Contents pdf.js reads for a markup annotation: a
+ *  group reply (12.5.6.2, /IRT with /RT /Group) shows its parent's. */
+export function contentsHolder(dict: PDFDict): PDFDict {
+  if (!dict.has(N('IRT'))) return dict;
+  const type = dict.lookup(N('RT'));
+  if (!(type instanceof PDFName) || pdfNameKey(type) !== 'Group') return dict;
+  const parent = dict.lookup(N('IRT'));
+  return parent instanceof PDFDict ? parent : dict;
 }
 
 /** The file's /Rect normalised (7.9.5), or null when it is not four numbers. */

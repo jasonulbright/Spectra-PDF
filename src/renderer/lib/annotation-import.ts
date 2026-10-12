@@ -26,6 +26,7 @@ import {
   symbolById,
   type CountLegendRow,
 } from './count-marks';
+import { maxOf, minOf } from './coordinate-bounds';
 
 type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 
@@ -143,7 +144,7 @@ function quadRects(quadPoints: unknown): [number, number, number, number][] {
           ys.push(Number((pt as { y: number }).y));
         }
       }
-      if (xs.length >= 2) out.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+      if (xs.length >= 2) out.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]);
     }
     return out;
   }
@@ -153,7 +154,7 @@ function quadRects(quadPoints: unknown): [number, number, number, number][] {
     for (let i = 0; i + 3 < pts.length; i += 4) {
       const xs = [pts[i].x, pts[i + 1].x, pts[i + 2].x, pts[i + 3].x].map(Number);
       const ys = [pts[i].y, pts[i + 1].y, pts[i + 2].y, pts[i + 3].y].map(Number);
-      out.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+      out.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]);
     }
     return out;
   }
@@ -162,7 +163,7 @@ function quadRects(quadPoints: unknown): [number, number, number, number][] {
   for (let i = 0; i + 7 < nums.length; i += 8) {
     const xs = [nums[i], nums[i + 2], nums[i + 4], nums[i + 6]];
     const ys = [nums[i + 1], nums[i + 3], nums[i + 5], nums[i + 7]];
-    out.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+    out.push([minOf(xs), minOf(ys), maxOf(xs), maxOf(ys)]);
   }
   return out;
 }
@@ -269,9 +270,9 @@ export async function importPageAnnotations(
       }
       const xs = quads.filter((_, i) => i % 2 === 0);
       const ys = quads.filter((_, i) => i % 2 === 1);
-      const x = Math.min(...xs);
-      const y = Math.min(...ys);
-      if (Math.max(...xs) - x <= 0 || Math.max(...ys) - y <= 0) continue;
+      const x = minOf(xs);
+      const y = minOf(ys);
+      if (maxOf(xs) - x <= 0 || maxOf(ys) - y <= 0) continue;
       imported.push({
         id: crypto.randomUUID(),
         kind: 'textmarkup',
@@ -279,8 +280,8 @@ export async function importPageAnnotations(
         quads,
         x,
         y,
-        w: Math.max(...xs) - x,
-        h: Math.max(...ys) - y,
+        w: maxOf(xs) - x,
+        h: maxOf(ys) - y,
         color,
         note: contents,
         importedOriginal,
@@ -307,15 +308,15 @@ export async function importPageAnnotations(
       if (strokes.length === 0) continue; // nothing usable — skip rather than import a degenerate one
       const xs = strokes.flatMap((s) => s.filter((_, i) => i % 2 === 0));
       const ys = strokes.flatMap((s) => s.filter((_, i) => i % 2 === 1));
-      const x = Math.min(...xs);
-      const y = Math.min(...ys);
+      const x = minOf(xs);
+      const y = minOf(ys);
       imported.push({
         id: crypto.randomUUID(),
         kind,
         x,
         y,
-        w: Math.max(...xs) - x,
-        h: Math.max(...ys) - y,
+        w: maxOf(xs) - x,
+        h: maxOf(ys) - y,
         color,
         note: contents,
         strokes,
@@ -395,9 +396,9 @@ function bboxOf(points: number[]): { x: number; y: number; w: number; h: number 
   const xs = points.filter((_, i) => i % 2 === 0);
   const ys = points.filter((_, i) => i % 2 === 1);
   if (xs.length === 0) return null;
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  const x = minOf(xs);
+  const y = minOf(ys);
+  return { x, y, w: maxOf(xs) - x, h: maxOf(ys) - y };
 }
 
 /** /Circle /Line /Polygon /PolyLine → kind 'shape', sidecar-gated (the

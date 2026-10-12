@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
 import type { PDFContext } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -273,4 +273,130 @@ describe('shapes with an appearance and no readable /Rect', () => {
       expect(await subtypes(await commitCycle(once))).toEqual([subtype]);
     });
   }
+});
+
+/** Dash patterns (12.5.4) and the border width pdf.js is left with after
+ *  them, for a stated width of 3. */
+const DASHES: [string, (ctx: PDFContext) => Record<string, unknown>, number][] = [
+  ['/BS /D of zeros', () => ({ BS: { W: 3, D: [0] } }), 0],
+  ['/BS /D that is a number', () => ({ BS: { W: 3, D: 5 } }), 0],
+  ['/BS /D that is zero', () => ({ BS: { W: 3, D: 0 } }), 3],
+  ['/BS /D with a negative entry', () => ({ BS: { W: 3, D: [3, -1] } }), 0],
+  ['/BS /D with a name', () => ({ BS: { W: 3, D: ['Dash'] } }), 0],
+  ['/BS /D that is empty', () => ({ BS: { W: 3, D: [] } }), 3],
+  ['/BS /D that is a dash', () => ({ BS: { W: 3, D: [3, 2] } }), 3],
+  ['a fourth /Border entry of zeros', (ctx) => ({ Border: ctx.obj([0, 0, 3, [0]]) }), 0],
+  ['a fourth /Border entry that is a number', (ctx) => ({ Border: ctx.obj([0, 0, 3, 5]) }), 0],
+  ['a fourth /Border entry that is a dash', (ctx) => ({ Border: ctx.obj([0, 0, 3, [2, 1]]) }), 3],
+  ['a /Border of five entries', (ctx) => ({ Border: ctx.obj([0, 0, 3, [0], 9]) }), 3],
+];
+
+describe('a dash pattern pdf.js rejects leaves no border width', () => {
+  for (const [label, extra, width] of DASHES) {
+    const bw = width || 1;
+    it(`Ink: ${label}`, async () => {
+      const source = await pageWith((ctx) => ctx.obj({
+        Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...extra(ctx),
+      }));
+      const { pdfjs: theirs, ours } = await bothRects(source);
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual([100 - 2 * bw, 100 - 2 * bw, 150 + 2 * bw, 150 + 2 * bw]);
+      expect(await importAll(source)).toHaveLength(1);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual(['Ink']);
+      expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+    });
+    it(`Line: ${label}`, async () => {
+      const { pdfjs: theirs, ours } = await bothRects(await pageWith(lineWith(extra)));
+      ours.forEach((v, k) => expect(v).toBeCloseTo(theirs[k], 3));
+      expect(ours).toEqual([36 - bw, 96 - bw, 164 + bw, 144 + bw]);
+    });
+    for (const subtype of ['Polygon', 'PolyLine']) {
+      it(`${subtype}: ${label}`, async () => {
+        const { pdfjs: theirs, ours } = await bothRects(await pageWith((ctx) => ctx.obj({
+          Type: 'Annot', Subtype: subtype, Vertices: [100, 100, 150, 150], Rect: [10, 10, 20, 20], C: [1, 0, 0], ...extra(ctx),
+        })));
+        expect(ours).toEqual(theirs);
+        expect(ours).toEqual([100 - 2 * bw, 100 - 2 * bw, 150 + 2 * bw, 150 + 2 * bw]);
+      });
+    }
+  }
+});
+
+/** A page holding a /Text parent and one reply to it. */
+async function replyPage(replyType: string, ownContents?: string): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 600]);
+  const ctx = doc.context;
+  const parent = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [10, 370, 30, 390], F: 4 });
+  parent.set(PDFName.of('Contents'), PDFHexString.fromText('Parent note'));
+  const parentRef = ctx.register(parent);
+  const reply = ctx.obj({
+    Type: 'Annot', Subtype: 'Highlight', Rect: [98, 498, 202, 522], QuadPoints: QUAD, C: [1, 1, 0], IRT: parentRef, RT: replyType,
+  });
+  if (ownContents !== undefined) reply.set(PDFName.of('Contents'), PDFHexString.fromText(ownContents));
+  page.node.set(PDFName.of('Annots'), ctx.obj([parentRef, ctx.register(reply)]));
+  return doc.save();
+}
+
+describe('a reply to another annotation (12.5.6.2)', () => {
+  it('a group reply imports with its parent text and stays one annotation through two commits', async () => {
+    const source = await replyPage('Group');
+    const highlight = (await importAll(source)).find((a) => a.importedOriginal?.subtype === 'Highlight');
+    expect(highlight?.note).toBe('Parent note');
+    const once = await commitCycle(source);
+    expect((await subtypes(once)).sort()).toEqual(['Highlight', 'Text']);
+    expect((await subtypes(await commitCycle(once))).sort()).toEqual(['Highlight', 'Text']);
+  });
+
+  it('a plain reply keeps its own text and stays one annotation through two commits', async () => {
+    const source = await replyPage('R', 'Own note');
+    const highlight = (await importAll(source)).find((a) => a.importedOriginal?.subtype === 'Highlight');
+    expect(highlight?.note).toBe('Own note');
+    const once = await commitCycle(source);
+    expect((await subtypes(once)).sort()).toEqual(['Highlight', 'Text']);
+    expect((await subtypes(await commitCycle(once))).sort()).toEqual(['Highlight', 'Text']);
+  });
+});
+
+describe('dash entries pdf.js resolves in unusual ways', () => {
+  const inkWith = (dash: (ctx: PDFContext) => unknown) => (ctx: PDFContext) => ctx.obj({
+    Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1],
+    BS: ctx.obj({ W: 2, D: dash(ctx) as never }),
+  });
+
+  it('a reference to an object the file does not hold reads as null, a valid 0', async () => {
+    const source = await pageWith(inkWith((ctx) => ctx.obj([3, PDFRef.of(999)])));
+    const { pdfjs: theirs, ours } = await bothRects(source);
+    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([96, 96, 154, 154]);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+
+  it('a string of 200000 characters is read without failing the commit', async () => {
+    const source = await pageWith(inkWith((ctx) => ctx.obj([PDFString.of('a'.repeat(200_000))])));
+    const { pdfjs: theirs, ours } = await bothRects(source);
+    expect(ours).toEqual(theirs);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+});
+
+describe('a coordinate array larger than a call can take as arguments', () => {
+  it('an Ink of 200000 points imports, fingerprints as pdf.js reports it, and stays one annotation', async () => {
+    const path: number[] = [];
+    for (let i = 0; i < 200_000; i++) path.push(20 + (i % 260), 20 + ((i * 7) % 360));
+    const source = await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [path], Rect: [0, 0, 300, 400], C: [0, 0, 1],
+    }));
+    const { pdfjs: theirs, ours } = await bothRects(source);
+    expect(ours).toEqual(theirs);
+    expect(await importAll(source)).toHaveLength(1);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  }, 120_000);
 });

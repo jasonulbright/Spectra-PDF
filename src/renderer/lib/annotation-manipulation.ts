@@ -13,6 +13,7 @@ import {
   formatDistanceWithFactor,
   formatAreaWithFactor,
 } from './measure';
+import { maxOf, minOf } from './coordinate-bounds';
 
 /** One geometry edit, the TRANSFORM_ANNOTATIONS entry shape. */
 export interface AnnotationTransform {
@@ -232,10 +233,10 @@ export function paddedPointsBbox(
 ): { x: number; y: number; w: number; h: number } {
   const xs = [...points.filter((_, i) => i % 2 === 0), ...extraXs];
   const ys = [...points.filter((_, i) => i % 2 === 1), ...extraYs];
-  let x = Math.min(...xs);
-  let y = Math.min(...ys);
-  let w = Math.max(...xs) - x;
-  let h = Math.max(...ys) - y;
+  let x = minOf(xs);
+  let y = minOf(ys);
+  let w = maxOf(xs) - x;
+  let h = maxOf(ys) - y;
   if (w < MIN_SIZE_NORM) {
     x = clamp01(x - (MIN_SIZE_NORM - w) / 2);
     w = MIN_SIZE_NORM;
@@ -359,10 +360,10 @@ export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransf
   const xs1 = movable.map((m) => m.annotation.x + m.annotation.w);
   const ys1 = movable.map((m) => m.annotation.y + m.annotation.h);
   const box = {
-    x0: Math.min(...xs0),
-    y0: Math.min(...ys0),
-    x1: Math.max(...xs1),
-    y1: Math.max(...ys1),
+    x0: minOf(xs0),
+    y0: minOf(ys0),
+    x1: maxOf(xs1),
+    y1: maxOf(ys1),
   };
   const out: AnnotationTransform[] = [];
   for (const m of movable) {
@@ -597,14 +598,14 @@ export function rotateFlipEdits(
     if (all.length < 2) continue;
     const xs = all.filter((_, i) => i % 2 === 0);
     const ys = all.filter((_, i) => i % 2 === 1);
-    const x = Math.min(...xs);
-    const y = Math.min(...ys);
+    const x = minOf(xs);
+    const y = minOf(ys);
     const s: Staged = {
       m,
       x,
       y,
-      w: Math.max(...xs) - x,
-      h: Math.max(...ys) - y,
+      w: maxOf(xs) - x,
+      h: maxOf(ys) - y,
       ...(points ? { points } : {}),
       ...(strokes ? { strokes } : {}),
     };
@@ -821,9 +822,9 @@ export function strokesBbox(
   if (all.length < 2) return null;
   const xs = all.filter((_, i) => i % 2 === 0);
   const ys = all.filter((_, i) => i % 2 === 1);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  const x = minOf(xs);
+  const y = minOf(ys);
+  return { x, y, w: maxOf(xs) - x, h: maxOf(ys) - y };
 }
 
 /** One scallop of a cloud border: a cubic from `s` to `e` with control
