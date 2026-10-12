@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { readFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { readFileSync, existsSync, rmSync, mkdtempSync, copyFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -19,6 +19,11 @@ import {
   rotateSelectedCanvasPages,
   refreshActiveBuffer,
   recognitionRuns,
+  getState,
+  invokeAppCommand,
+  holdSelectionRecognition,
+  releaseSelectionRecognition,
+  selectionRecognitionWaiting,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -150,6 +155,13 @@ async function openRecognisedScan(): Promise<void> {
     timeout: OCR_TIMEOUT,
     timeoutMsg: 'the recognised page never reported ready',
   });
+}
+
+/** Whether the active document's file name is `name`. Paths are canonicalized
+ *  at the Rust boundary, so only the last component is compared. */
+async function activeIs(name: string): Promise<boolean> {
+  const path = (await getState()).activeFile?.path ?? '';
+  return path.replace(/\\/g, '/').toLowerCase().endsWith(`/${name}`);
 }
 
 async function waitForRecognition(): Promise<void> {
@@ -343,6 +355,52 @@ describe('selecting and highlighting text on a scanned page', () => {
     await selectCanvasPages([pages[0].id]);
     await rotateSelectedCanvasPages(270);
     await browser.pause(1_000);
+  });
+
+  it('closing one of two documents over equal bytes mid-recognition leaves the other recognisable', async function () {
+    this.timeout(OCR_TIMEOUT * 3);
+    // Both documents share one recognition entry under their content key.
+    // Closing the one whose run is pending destroys its pdf.js document under
+    // that run; the cancellation must not be served to the other document as
+    // a failed recognition of the same bytes.
+    const a = resolve(tmp, 'scan-a.pdf');
+    const b = resolve(tmp, 'scan-b.pdf');
+    copyFileSync(SCANNED, a);
+    copyFileSync(SCANNED, b);
+    await closeAllFiles();
+    await openByPaths([b]);
+    await openByPaths([a]);
+    await browser.waitUntil(() => activeIs('scan-a.pdf'), {
+      timeout: 15_000,
+      timeoutMsg: 'the second scan never became active',
+    });
+    await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+
+    let runs = 0;
+    await holdSelectionRecognition();
+    try {
+      await browser.waitUntil(
+        async () => (await beginSelectionGesture()) && (await selectionRecognitionWaiting()) === 1,
+        { timeout: 30_000, interval: 500, timeoutMsg: 'the recognition of the first scan never started' },
+      );
+      runs = await recognitionRuns();
+      expect(await invokeAppCommand('file.close')).toBe(true);
+      await browser.waitUntil(() => activeIs('scan-b.pdf'), {
+        timeout: 15_000,
+        timeoutMsg: 'the other scan never became active after the close',
+      });
+      await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+    } finally {
+      await releaseSelectionRecognition();
+    }
+
+    await waitForRecognition();
+    await $('[data-testid="text-layer"][data-ocr-status="ready"]').waitForExist({
+      timeout: OCR_TIMEOUT,
+      timeoutMsg: 'the open scan never reported ready after the other one closed',
+    });
+    expect(await spanCount()).toBeGreaterThan(0);
+    expect(await recognitionRuns()).toBeGreaterThan(runs);
   });
 
   it('preference OFF unmounts the spans on the page already on screen', async function () {

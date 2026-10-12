@@ -313,6 +313,27 @@ export async function recognitionRuns(): Promise<number> {
   });
 }
 
+/** Hold every recognition for selection of this window, after it takes its
+ * slot and before its run, until `releaseSelectionRecognition`. */
+export async function holdSelectionRecognition(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.holdSelectionRecognition();
+  });
+}
+
+export async function releaseSelectionRecognition(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.releaseSelectionRecognition();
+  });
+}
+
+/** How many recognitions for selection of this window are held now. */
+export async function selectionRecognitionWaiting(): Promise<number> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.selectionRecognitionWaiting() as number;
+  });
+}
+
 /** The reader folders (`r<pid>-<hex>`) in the working folder of
  * `workingPath`. A working folder that is gone holds none. */
 export function readerFolders(workingPath: string): string[] {

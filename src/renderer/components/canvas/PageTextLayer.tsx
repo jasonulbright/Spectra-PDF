@@ -14,6 +14,7 @@ import { contentKeyOf, replacementOf } from '../../lib/pdfDocCache';
 import {
   peekSelectionCache,
   rasterScaleFor,
+  RecognitionCancelled,
   recognizeForSelection,
   releaseOcrSelection,
   wordSpanBox,
@@ -396,7 +397,18 @@ export function PageTextLayer({
           spin,
           ocrSelection.lang,
           async () => {
-            const png = await renderPageToPng(page, spin);
+            // A request to a destroyed document never settles, and a render in
+            // flight when it is destroyed rejects: either one is a cancellation,
+            // never a verdict on the bytes another document still shows.
+            const destroyed = () => pdf.loadingTask.destroyed || page.destroyed;
+            if (destroyed()) throw new RecognitionCancelled();
+            let png: Uint8Array | null;
+            try {
+              png = await renderPageToPng(page, spin);
+            } catch (error) {
+              if (destroyed()) throw new RecognitionCancelled();
+              throw error;
+            }
             if (!png) return null;
             return recognizeRaster(ocrSelection.callRaw, png, ocrSelection.lang);
           },

@@ -4,6 +4,9 @@
 // shape and the overlay math the panel uses to project the engine's
 // changed-region rectangles onto pdf.js-rendered page canvases.
 
+import { readerRevisionIn, readsLiveRevision } from './reader-copy';
+import type { AppState } from '../state/types';
+
 export interface VisualRegion {
   x: number; // PDF points, from the left of the rendered page
   y: number; // PDF points, from the TOP of the rendered page
@@ -73,4 +76,25 @@ export function scaleRegionToDisplay(
  * unpaired extras (identical pairs are summarized, not listed). */
 export function listableVisualPages(pages: VisualPagePair[]): VisualPagePair[] {
   return pages.filter((p) => p.only_in != null || p.identical === false);
+}
+
+/**
+ * Where a visual result stands against the live documents it compared.
+ * `live`: both inputs were read at the revision now live, so its page numbers
+ * and regions address the pages on screen. `stale`: either document was
+ * committed or edited since the read; its regions belong to pages that may no
+ * longer be at those numbers. `closed`: either document is no longer open.
+ */
+export type VisualResultStanding = 'live' | 'stale' | 'closed';
+
+export function visualResultStanding(
+  result: unknown,
+  state: Pick<AppState, 'files' | 'pageDirtyPaths'>,
+  workingA: string,
+  workingB: string,
+): VisualResultStanding {
+  if (!readerRevisionIn(state, workingA) || !readerRevisionIn(state, workingB)) return 'closed';
+  return readsLiveRevision(result, state, workingA) && readsLiveRevision(result, state, workingB)
+    ? 'live'
+    : 'stale';
 }
