@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
-import { useAppDispatch } from '../state/AppStateProvider';
+import { useAppDispatch, useReadAppState } from '../state/AppStateProvider';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -10,6 +10,10 @@ import { EDIT_DECLINED } from '../lib/edit-text';
 import { getCanvasServices } from '../commands/context';
 import { dialog, report as reportFile } from '../lib/tauri-bridge';
 import { parkStructSelection } from '../lib/a11y-jump';
+import { runCommitGate } from '../lib/commit-gate';
+import { latestRun } from '../lib/latest-run';
+import { liveOrRefuse } from '../lib/live-report';
+import { readerRevisionIn, recordReadRevision } from '../lib/reader-copy';
 import { mergeUntouched } from '../lib/late-read';
 import { TEST_HARNESS_ENABLED, registerAccessibility } from '../testHarness';
 import { LOCALE_NATIVE_NAMES, SHIPPED_LOCALES, tChrome } from '../i18n';
@@ -24,6 +28,7 @@ import {
   type AuthoredFix,
   type FixOffer,
 } from '../lib/a11y-fixes';
+import { findingKey, liveFindingFor } from '../lib/a11y-findings';
 import type { PlaceableFinding } from '../lib/a11y-findings';
 import {
   categoryCount,
@@ -100,10 +105,6 @@ const OWNING_OP: Record<string, string> = {
 // lists a bounded prefix and says how many it did not draw; the exported
 // report carries every one of them, which is what the export is for.
 const MAX_LISTED_FINDINGS = 200;
-
-function findingKey(check: Check, index: number): string {
-  return `${check.id}:${index}`;
-}
 
 /** One authored value and its Apply — the Tags panel's draft/apply shape.
  *
@@ -191,18 +192,19 @@ function AuthoredEditor({
 /** The findings of `check` that have a place on a page. */
 function placeable(check: Check): PlaceableFinding[] {
   const out: PlaceableFinding[] = [];
-  for (const finding of check.findings) {
-    if (finding.address.kind !== 'content') continue;
+  check.findings.forEach((finding, index) => {
+    if (finding.address.kind !== 'content') return;
     const page = finding.address.page;
-    if (typeof page !== 'number' || !finding.rect) continue;
+    if (typeof page !== 'number' || !finding.rect) return;
     out.push({
+      key: findingKey(check.id, index),
       page,
       rect: finding.rect,
       checkId: check.id,
       detailKey: finding.detail_key,
       preview: finding.preview,
     });
-  }
+  });
   return out;
 }
 
@@ -214,6 +216,7 @@ export function AccessibilityPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const readState = useReadAppState();
   const { performOperation } = useOperations();
   const dispatch = useAppDispatch();
   const [report, setReport] = useState<AccessibilityReport | null>(null);
@@ -238,14 +241,27 @@ export function AccessibilityPanel(): React.ReactElement {
   // so buffer identity cannot key it — the Tags panel's rule, same reason.
   const seededFor = useRef<string | null>(null);
 
+  // The gate's commit replaces the buffer and starts another run while this
+  // one awaits; only the run begun last applies its report or clears `busy`.
+  const runs = useRef(latestRun()).current;
   const run = useCallback(async () => {
     if (!workingPath) return;
+    const current = runs.begin();
     setBusy(true);
     setStatus(tChrome('panel.a11y.checking'));
     try {
-      const res = (await call('check_accessibility', {
-        file: workingPath,
-      })) as unknown as AccessibilityReport;
+      // A read over a pending page edit addresses the bytes, not the pages on
+      // screen; committing first lets the bracket below record a live read.
+      await runCommitGate([workingPath]);
+      if (!current()) return;
+      const before = readerRevisionIn(readState(), workingPath);
+      const res = recordReadRevision(
+        (await call('check_accessibility', { file: workingPath })) as unknown as AccessibilityReport,
+        workingPath,
+        before,
+        readerRevisionIn(readState(), workingPath),
+      );
+      if (!current()) return;
       setReport(res);
       // The addresses in the previous run's findings were read from a tree
       // this run has replaced, so what is drawn on the page goes with them.
@@ -264,21 +280,27 @@ export function AccessibilityPanel(): React.ReactElement {
       }
       setStatus('');
     } catch (e: unknown) {
+      if (!current()) return;
       setStatus(
         tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
       );
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
-  }, [workingPath, call]);
+  }, [workingPath, call, readState, runs]);
 
   useEffect(() => {
     if (!buffer || !workingPath) {
+      // A run still in flight read a document that is gone: overtaken here,
+      // it stores no report, and no run is left to own `busy`.
+      runs.begin();
+      setBusy(false);
+      setStatus('');
       setReport(null);
       return;
     }
     void run();
-  }, [buffer, workingPath, run]);
+  }, [buffer, workingPath, run, runs]);
 
   // The findings on the page belong to the document that produced them.
   useEffect(() => {
@@ -450,11 +472,12 @@ export function AccessibilityPanel(): React.ReactElement {
         setShownCheck(null);
         return;
       }
+      if (!liveOrRefuse(report, readState(), workingPath, setStatus)) return;
       const { shown } = await services.a11yFindings.publish(path, placeable(check));
       setShownCheck(shown > 0 ? check.id : null);
       if (shown === 0) setStatus(tChrome('panel.a11y.nothingToShow'));
     },
-    [path, shownCheck],
+    [path, readState, report, shownCheck, workingPath],
   );
 
   /** One finding's jump — one of the three address kinds, each landing on the
@@ -473,24 +496,20 @@ export function AccessibilityPanel(): React.ReactElement {
           setStatus(tChrome('panel.a11y.noCanvas'));
           return;
         }
-        const findings = placeable(check);
+        if (!liveOrRefuse(report, readState(), workingPath, setStatus)) return;
         if (shownCheck !== check.id) {
-          const { shown } = await services.a11yFindings.publish(path, findings);
+          const { shown } = await services.a11yFindings.publish(path, placeable(check));
           setShownCheck(shown > 0 ? check.id : null);
         }
-        // The published set is this check's content findings in order, so the
-        // clicked row's position within THAT list is what addresses it.
-        const at = check.findings.slice(0, index + 1).filter((f) => f.address.kind === 'content')
-          .length - 1;
-        const live = services.a11yFindings.list();
-        const target = live[at];
+        const target = liveFindingFor(services.a11yFindings.list(), path, findingKey(check.id, index));
         if (target) services.a11yFindings.focus(target.id);
+        else setStatus(tChrome('panel.a11y.nothingToShow'));
         return;
       }
       const op = OWNING_OP[check.id];
       if (op) dispatch({ type: 'UI_SET_ACTIVE_OP', op });
     },
-    [dispatch, path, shownCheck],
+    [dispatch, path, readState, report, shownCheck, workingPath],
   );
 
   /** Emit the report to `target`. The extension the user landed on picks the
@@ -796,7 +815,7 @@ export function AccessibilityPanel(): React.ReactElement {
                             {listed.length > 0 && (
                               <ul className="mt-1 flex flex-col gap-0.5">
                                 {listed.map((finding, index) => (
-                                  <li key={findingKey(check, index)}>
+                                  <li key={findingKey(check.id, index)}>
                                     <button
                                       className="w-full text-start text-xs text-neutral-300 hover:text-neutral-100"
                                       title={tChrome('panel.a11y.jumpTitle')}

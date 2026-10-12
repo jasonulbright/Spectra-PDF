@@ -17,6 +17,7 @@ import {
   saveActiveAs,
   setReactInputValue,
 } from '../support/harness.js';
+import { waitForSettledLayers } from '../support/text-layer.js';
 
 const require = createRequire(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
@@ -27,10 +28,13 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 // page in the reading view and the floating bar turns it into a native
 // /Highlight (or Underline/StrikeOut/Squiggly) with real /QuadPoints.
 
+/** The fixture's page height in points, which the settled-layer wait measures against. */
+const PAGE_HEIGHT_PT = 400;
+
 async function makeTextPdf(path: string): Promise<void> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  const page = doc.addPage([400, 400]);
+  const page = doc.addPage([400, PAGE_HEIGHT_PT]);
   page.drawText('Selectable sentence for markup', { x: 40, y: 320, size: 16, font });
   page.drawText('A second line of body text', { x: 40, y: 290, size: 16, font });
   writeFileSync(path, await doc.save());
@@ -89,10 +93,7 @@ describe('authoring text markup from a selection', () => {
     await openByPaths([source]);
     // The reading view is where the text layer lives; a document opens there.
     await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
-    await browser.waitUntil(
-      async () => (await $$('[data-testid="text-layer"] span').getElements()).length > 0,
-      { timeout: 20_000, timeoutMsg: 'the text layer never rendered' },
-    );
+    await waitForSettledLayers(1, PAGE_HEIGHT_PT);
 
     const text = await selectFirstTextSpan();
     expect(text.length).toBeGreaterThan(3);
@@ -115,10 +116,7 @@ describe('authoring text markup from a selection', () => {
   });
 
   it('links the same selection to a URL', async () => {
-    await browser.waitUntil(
-      async () => (await $$('[data-testid="text-layer"] span').getElements()).length > 0,
-      { timeout: 20_000, timeoutMsg: 'the text layer never rendered' },
-    );
+    await waitForSettledLayers(1, PAGE_HEIGHT_PT);
     await selectFirstTextSpan();
     await $('[data-testid="text-selection-menu"]').waitForDisplayed({ timeout: 10_000 });
     await $('[data-testid="markup-link"]').click();
