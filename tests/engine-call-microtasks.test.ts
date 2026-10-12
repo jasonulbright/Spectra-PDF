@@ -27,6 +27,7 @@ const io: ReaderCopyIo = {
   remove: async () => true,
   lend: async () => false,
   giveBack: async () => {},
+  revision: () => undefined,
 };
 
 function closures(trackable: boolean, readerCopies: ReaderCopyIo | null) {

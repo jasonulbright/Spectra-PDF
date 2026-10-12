@@ -313,29 +313,78 @@ fn a_closed_windows_write_finishes_before_its_worker_stops_and_the_exit_wait_cov
     let live = live_app(&python);
     let handle = live.app.handle().clone();
     let scratch = tempfile::tempdir().unwrap();
-    let pid_b = pid_of(&live, B, 100);
+    let open = scratch.path().join("open");
+    std::fs::write(&open, b"").unwrap();
+    let gate = scratch.path().join("gate");
+    let mut inbox = Inbox::new(&live.b);
+    send(&live, B, gated(1, "distill", &open));
+    let (pid_job, _, _) = gated_result(&inbox.take(1, Duration::from_secs(120)));
     let root = claim_output(&live, B, scratch.path());
 
-    send(&live, B, request(1, "test_sleep", serde_json::json!({ "seconds": 3 })));
-    let started = Instant::now();
+    // The write cannot finish before its gate exists, so every check up to
+    // the gate holds whatever the machine's load.
+    send(&live, B, gated(2, "distill", &gate));
     engine::retire_window(&handle, B);
     live.app.state::<ClaimState>().release_label(B);
-    std::thread::sleep(Duration::from_millis(800));
-    assert!(alive(pid_b), "a closed window's write was cut off");
+    assert!(alive(pid_job), "a closed window's write was cut off");
     assert!(
         !live.app.state::<ClaimState>().claim_roots(std::slice::from_ref(&root), A).unwrap().granted,
         "the write's folder was released while the write was running"
     );
-
     // The same wait the app's exit takes.
+    assert!(
+        !tauri::async_runtime::block_on(engine::wait_for_writes(&handle, Duration::from_millis(500))),
+        "the exit wait returned before the write finished"
+    );
+
+    std::fs::write(&gate, b"").unwrap();
     assert!(tauri::async_runtime::block_on(engine::wait_for_writes(&handle, Duration::from_secs(60))));
-    assert!(started.elapsed() >= Duration::from_secs(2), "the exit wait returned before the write finished");
-    wait_dead(pid_b, Duration::from_secs(30));
+    wait_dead(pid_job, Duration::from_secs(30));
     assert!(
         live.app.state::<ClaimState>().claim_roots(std::slice::from_ref(&root), A).unwrap().granted,
         "the finished write kept its folder"
     );
     engine::retire_window(&handle, A);
+}
+
+/// A reader copy of a closed window is removed from this report, so the report
+/// comes only after every write the drain keeps has answered, including one
+/// queued behind the running one.
+#[test]
+fn a_closed_windows_stop_report_waits_for_its_queued_write() {
+    let _guard = DRAIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var(engine::ENGINE_DRAIN_ENV);
+    let Some(python) = provisioned_python() else { return };
+    let live = live_app(&python);
+    let handle = live.app.handle().clone();
+    let scratch = tempfile::tempdir().unwrap();
+    let pid_b = pid_of(&live, B, 100);
+    claim_output(&live, B, scratch.path());
+
+    // Taken before the first send: the two writes run one after the other,
+    // so no report that waits for both can come sooner than 4 s after this.
+    // Slack only lengthens that, so the bound cannot fail on a loaded machine.
+    let started = Instant::now();
+    send(&live, B, request(1, "test_sleep", serde_json::json!({ "seconds": 2 })));
+    send(&live, B, request(2, "test_sleep", serde_json::json!({ "seconds": 2 })));
+    let (tx, reports) = channel::<Instant>();
+    engine::retire_window_then(&handle, B, move || {
+        let _ = tx.send(Instant::now());
+    });
+    live.app.state::<ClaimState>().release_label(B);
+    let reported = reports.recv_timeout(Duration::from_secs(60)).expect("the stop was never reported");
+    assert!(
+        reported.duration_since(started) >= Duration::from_secs(4),
+        "the stop was reported before the queued write ran"
+    );
+    wait_dead(pid_b, Duration::from_secs(30));
+
+    // An idle window reports at once after its kill.
+    let (tx, reports) = channel::<()>();
+    engine::retire_window_then(&handle, A, move || {
+        let _ = tx.send(());
+    });
+    reports.recv_timeout(Duration::from_secs(30)).expect("an idle window's stop was never reported");
 }
 
 #[test]
@@ -381,23 +430,33 @@ fn an_assent_restart_returns_at_once_and_replaces_a_writing_worker_after_its_wri
     let live = live_app(&python);
     let handle = live.app.handle().clone();
     let scratch = tempfile::tempdir().unwrap();
+    let open = scratch.path().join("open");
+    std::fs::write(&open, b"").unwrap();
+    let gate = scratch.path().join("gate");
     let pid_a = pid_of(&live, A, 100);
     let pid_b = pid_of(&live, B, 100);
+    let mut inbox = Inbox::new(&live.a);
+    send(&live, A, gated(1, "distill", &open));
+    let (pid_job, _, _) = gated_result(&inbox.take(1, Duration::from_secs(120)));
     claim_output(&live, A, scratch.path());
 
-    send(&live, A, request(1, "test_sleep", serde_json::json!({ "seconds": 3 })));
-    let asked = Instant::now();
+    // The write cannot finish before its gate exists: a restart that waited
+    // for it would never return, and one that cut it is answered cancelled.
+    send(&live, A, gated(2, "distill", &gate));
     tauri::async_runtime::block_on(engine::restart_for_assent(&handle));
-    assert!(asked.elapsed() < Duration::from_secs(2), "the caller waited on a write in flight");
-    // The idle worker is already stopped when the call returns.
-    wait_dead(pid_b, Duration::from_secs(10));
-    assert!(alive(pid_a), "the write in flight was cut");
-    let finished = await_response(&live.a, 1, Duration::from_secs(10));
-    assert_eq!(finished["result"]["slept"].as_u64(), Some(3), "the restart cut the write: {finished}");
-    wait_dead(pid_a, Duration::from_secs(30));
+    assert!(!gate.exists());
+    // The idle workers stop without waiting for the write.
     wait_dead(pid_b, Duration::from_secs(30));
-    assert_ne!(pid_of(&live, A, 2), pid_a);
-    assert_ne!(pid_of(&live, B, 2), pid_b);
+    wait_dead(pid_a, Duration::from_secs(30));
+    assert!(alive(pid_job), "the write in flight was cut");
+
+    std::fs::write(&gate, b"").unwrap();
+    let (pid_written, cancelled, _) = gated_result(&inbox.take(2, Duration::from_secs(60)));
+    assert_eq!(pid_written, pid_job);
+    assert!(!cancelled, "the restart cut the write");
+    wait_dead(pid_job, Duration::from_secs(30));
+    assert_ne!(pid_of(&live, A, 3), pid_a);
+    assert_ne!(pid_of(&live, B, 3), pid_b);
     live.app.state::<ClaimState>().release_label(A);
     engine::retire_window(&handle, A);
     engine::retire_window(&handle, B);

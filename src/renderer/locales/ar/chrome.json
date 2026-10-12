@@ -4407,6 +4407,7 @@
   "panel.comments.summary_two": "{{count}} تعليقان",
   "panel.comments.summary_zero": "{{count}} تعليقات",
   "panel.common.error": "خطأ: {{message}}",
+  "panel.common.documentChanged": "تغيّر المستند بعد أن قرأته هذه الأداة. شغّلها مرة أخرى.",
   "panel.common.folderRouteHint": "هذا يعمل على المستند المفتوح. ولتطبيق الخطوات نفسها على كل مستند في مجلد، أنشئ إجراءً.",
   "panel.common.folderRouteOpen": "فتح الإجراءات الموجّهة",
   "panel.common.gsNotExecutable": "لم يعد Ghostscript المحدَّد في «التفضيلات ▸ المحرك» موجودًا. اختر البرنامج من جديد.",

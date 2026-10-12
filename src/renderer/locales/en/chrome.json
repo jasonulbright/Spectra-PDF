@@ -4145,6 +4145,7 @@
   "panel.common.audiverisRequired": "This needs Audiveris, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Preferences ▸ Engine.",
   "panel.common.audiverisSetUp": "Set up Audiveris",
   "panel.common.audiverisTooOld": "This Audiveris is older than version {{version}}. Install a newer one, then choose it in Preferences ▸ Engine.",
+  "panel.common.documentChanged": "The document changed after this tool read it. Run it again.",
   "panel.common.error": "Error: {{message}}",
   "panel.common.folderRouteHint": "This works on the open document. To run the same steps over every document in a folder, build an action.",
   "panel.common.folderRouteOpen": "Open Guided Actions",

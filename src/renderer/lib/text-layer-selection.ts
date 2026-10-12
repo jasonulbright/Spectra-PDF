@@ -157,6 +157,45 @@ export function restoredBoundaries<N extends NodeLike & { textContent: string | 
   return anchor && focus ? { anchor, focus } : null;
 }
 
+/**
+ * The ends of `held` after `root` lost the text the selection covered in it:
+ * an end held outside keeps its boundary, and the end held in the layer moves
+ * to the layer's edge that faces the outside end, so the selection keeps
+ * covering what it covers on other pages and none of this layer. Null when
+ * both ends were in the layer; nothing outside it is left to cover.
+ */
+export function edgeBoundaries<N extends NodeLike>(
+  root: N,
+  held: HeldSelection,
+): { anchor: Boundary<N>; focus: Boundary<N> } | null {
+  const { anchor, focus } = held;
+  if (anchor.inLayer && focus.inLayer) return null;
+  // The outside end precedes the layer when it is the anchor of a forward
+  // selection or the focus of a backward one.
+  const outsideFirst = focus.inLayer === held.forward;
+  const edge: Boundary<N> = { node: root, offset: outsideFirst ? 0 : root.childNodes.length };
+  if (!anchor.inLayer) return { anchor: { node: anchor.node as N, offset: anchor.offset }, focus: edge };
+  if (!focus.inLayer) return { anchor: edge, focus: { node: focus.node as N, offset: focus.offset } };
+  return null;
+}
+
+function placeSelection(selection: Selection, ends: { anchor: Boundary; focus: Boundary } | null): void {
+  if (!ends) {
+    selection.removeAllRanges();
+    return;
+  }
+  selection.setBaseAndExtent(
+    ends.anchor.node as unknown as Node, ends.anchor.offset,
+    ends.focus.node as unknown as Node, ends.focus.offset,
+  );
+}
+
+function holdLayerSelection(live: HTMLElement, selection: Selection | null): HeldSelection | null {
+  if (!selection || selection.rangeCount === 0) return null;
+  return holdSelection(live as unknown as NodeLike & { textContent: string | null }, selection,
+    selectionIsForward(selection as unknown as DirectedSelection));
+}
+
 /** The parts of a DOM node the direction test reads. */
 export interface PositionedNode {
   parentNode: PositionedNode | null;
@@ -205,16 +244,12 @@ export function selectionIsForward(selection: DirectedSelection): boolean {
  * Replaces `live`'s children with `staged`'s in one step, with the layer
  * styles and the rotation attribute pdf.js wrote on `staged`. A selection with
  * an end in the old spans keeps its ends when the new spans spell the same
- * text, and is cleared when they do not: removing the old spans would
- * otherwise leave it covering other characters.
+ * text. When they do not, its ends in this layer go (`edgeBoundaries`):
+ * removing the old spans would otherwise leave it covering other characters.
  */
 export function swapTextLayer(live: HTMLElement, staged: HTMLElement): void {
   const selection = typeof window === 'undefined' ? null : window.getSelection();
-  let held: HeldSelection | null = null;
-  if (selection && selection.rangeCount > 0) {
-    held = holdSelection(live as unknown as NodeLike & { textContent: string | null }, selection,
-      selectionIsForward(selection as unknown as DirectedSelection));
-  }
+  const held = holdLayerSelection(live, selection);
   for (let i = 0; i < staged.style.length; i++) {
     const name = staged.style.item(i);
     live.style.setProperty(name, staged.style.getPropertyValue(name));
@@ -225,24 +260,17 @@ export function swapTextLayer(live: HTMLElement, staged: HTMLElement): void {
   delete live.dataset.ocrLayer;
   live.replaceChildren(...Array.from(staged.childNodes));
   if (!held || !selection) return;
-  const ends = restoredBoundaries(live as unknown as NodeLike & { textContent: string | null }, held);
-  if (!ends) {
-    selection.removeAllRanges();
-    return;
-  }
-  selection.setBaseAndExtent(
-    ends.anchor.node as unknown as Node, ends.anchor.offset,
-    ends.focus.node as unknown as Node, ends.focus.offset,
-  );
+  const root = live as unknown as NodeLike & { textContent: string | null };
+  placeSelection(selection, restoredBoundaries(root, held) ?? edgeBoundaries(root, held));
 }
 
-/** Empties `live`, clearing a selection with an end in it: removing the spans
- * would otherwise leave it covering other characters. */
+/** Empties `live`. A selection with an end in it loses that end
+ * (`edgeBoundaries`): removing the spans would otherwise leave it covering
+ * other characters. */
 export function clearTextLayer(live: HTMLElement): void {
   const selection = typeof window === 'undefined' ? null : window.getSelection();
-  if (selection && selection.rangeCount > 0
-      && (live.contains(selection.anchorNode) || live.contains(selection.focusNode))) {
-    selection.removeAllRanges();
-  }
+  const held = holdLayerSelection(live, selection);
   live.replaceChildren();
+  if (!held || !selection) return;
+  placeSelection(selection, edgeBoundaries(live as unknown as NodeLike, held));
 }

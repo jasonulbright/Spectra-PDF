@@ -4247,6 +4247,7 @@
   "panel.comments.summary_one": "{{count}} коментар",
   "panel.comments.summary_other": "{{count}} коментаря",
   "panel.common.error": "Помилка: {{message}}",
+  "panel.common.documentChanged": "Документ змінився після того, як цей інструмент його прочитав. Запустіть його знову.",
   "panel.common.folderRouteHint": "Це діє на відкритий документ. Щоб виконати ті самі кроки для кожного документа в теці, створіть дію.",
   "panel.common.folderRouteOpen": "Відкрити покрокові дії",
   "panel.common.gsNotExecutable": "Ghostscript, заданий у «Параметри ▸ Механізм», більше не існує. Виберіть програму знову.",

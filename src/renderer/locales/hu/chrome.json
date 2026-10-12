@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} megjegyzés",
   "panel.comments.summary_other": "{{count}} megjegyzés",
   "panel.common.error": "Hiba: {{message}}",
+  "panel.common.documentChanged": "A dokumentum megváltozott, miután ez az eszköz beolvasta. Futtassa újra.",
   "panel.common.folderRouteHint": "Ez a megnyitott dokumentumra hat. Ha ugyanezeket a lépéseket egy mappa minden dokumentumán szeretné lefuttatni, hozzon létre egy műveletet.",
   "panel.common.folderRouteOpen": "Vezetett műveletek megnyitása",
   "panel.common.gsNotExecutable": "A Beállítások ▸ Motor alatt megadott Ghostscript már nincs meg. Válassza ki újra a programot.",

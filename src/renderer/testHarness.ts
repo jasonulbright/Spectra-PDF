@@ -27,6 +27,7 @@ import {
 } from './lib/platform-capabilities';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import { rebuildTextLayers } from './lib/text-layer-rebuild';
+import { recognitionRunCount } from './lib/ocr-selection';
 import {
   invokeCommand as invokeRegisteredCommand,
   isCommandEnabled,
@@ -1575,6 +1576,12 @@ export interface TestHarness {
    * pdf.js proxy for the same bytes does. Each layer's `data-text-build`
    * advances when its rebuild has been swapped in. */
   rebuildTextLayers: () => void;
+  /** Replaces the active file's buffer with a copy of its own bytes through
+   * `REFRESH_BUFFER`, keeping its documents, so every page is drawn from a new
+   * pdf.js document for unchanged bytes. Throws when the reducer refuses. */
+  refreshActiveBuffer: () => void;
+  /** How many recognitions for selection have started in this window. */
+  recognitionRuns: () => number;
   /** Holds every hand-off of a document to another window at `stage` until
    * `releaseHandOff(stage)`. `committed`: after the page tier came to rest
    * and its revision was noted, before the reservation. `sealed`: after the
@@ -2532,6 +2539,7 @@ export interface TestHarnessDeps {
   dropFilesOntoDoc: (paths: string[], toDocId: string, toIndex: number) => Promise<void>;
   /** Export via the engine, with an explicit destination (no dialog). */
   exportActiveDocument: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
+  refreshActiveBuffer: () => void;
 }
 
 export const TEST_HARNESS_ENABLED =
@@ -2752,6 +2760,8 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     readerCopiesWaiting: () => readerHold?.waiting() ?? 0,
     rebuildTextLayers: () => rebuildTextLayers(),
+    refreshActiveBuffer: () => deps.refreshActiveBuffer(),
+    recognitionRuns: () => recognitionRunCount(),
     holdHandOff: (stage) => {
       handOffHolds.get(stage)?.release();
       handOffHolds.set(stage, holdHandOff(stage));

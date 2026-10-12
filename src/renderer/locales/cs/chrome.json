@@ -4247,6 +4247,7 @@
   "panel.comments.summary_one": "{{count}} komentář",
   "panel.comments.summary_other": "{{count}} komentářů",
   "panel.common.error": "Chyba: {{message}}",
+  "panel.common.documentChanged": "Dokument se změnil poté, co jej tento nástroj načetl. Spusťte jej znovu.",
   "panel.common.folderRouteHint": "Toto působí na otevřený dokument. Chcete-li stejné kroky provést na každém dokumentu ve složce, vytvořte akci.",
   "panel.common.folderRouteOpen": "Otevřít řízené akce",
   "panel.common.gsNotExecutable": "Ghostscript nastavený v „Předvolby ▸ Stroj“ už neexistuje. Zvolte program znovu.",
