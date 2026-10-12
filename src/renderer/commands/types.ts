@@ -230,6 +230,14 @@ export interface AppCommandHandlers {
   ): Promise<boolean>;
 }
 
+/** What `formCandidates.publish` placed. `stale`: the document stopped being
+ * the shown one before placing finished, and the candidate set is unchanged. */
+export interface CandidatePublish {
+  shown: number;
+  skipped: number;
+  stale?: true;
+}
+
 /**
  * Services owned by the canvas view while it is mounted. Getter-shaped
  * because the underlying handle/find state changes without re-registration.
@@ -367,11 +375,12 @@ export interface CanvasServices {
    * the ONE field-authoring operation the hand-drawn placement already uses.
    */
   formCandidates: {
-    /** Replace the candidate set from a detection result. */
+    /** Replace the candidate set from a detection result, unless `path` is no
+     * longer the shown document once its geometry is read. */
     publish(
       path: string,
       result: import('../lib/form-candidates').DetectionResult,
-    ): Promise<{ shown: number; skipped: number }>;
+    ): Promise<CandidatePublish>;
     /** The live set, pruned to pages that still exist. */
     list(): import('../lib/form-candidates').FieldCandidate[];
     /** Turn the named candidates into fields — one snapshot, one undo entry. */

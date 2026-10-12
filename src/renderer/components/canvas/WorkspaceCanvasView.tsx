@@ -238,6 +238,8 @@ import {
 import type { FieldActions } from '../../lib/form-candidates';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasSnapshot, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
 import { invokeCommand, confirmPageEditNow, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
+import type { CandidatePublish } from '../../commands/types';
+import { publishToShownDocument } from '../../lib/active-publish';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
@@ -3107,7 +3109,7 @@ export function WorkspaceCanvasView({
   liveCandidatesRef.current = liveCandidates;
   const candidateSubscribersRef = useRef(new Set<() => void>());
   const candidateServiceRef = useRef<{
-    publish: (path: string, result: DetectionResult) => Promise<{ shown: number; skipped: number }>;
+    publish: (path: string, result: DetectionResult) => Promise<CandidatePublish>;
     accept: (ids: readonly string[]) => Promise<{ created: number; skipped: number }>;
     update: (next: readonly FieldCandidate[]) => void;
     clear: () => void;
@@ -6208,41 +6210,55 @@ export function WorkspaceCanvasView({
   // page-space rect into a cell rect needs the pdf.js proxies and the PageRef
   // rotations, and there is exactly one place that has both.
   const publishCandidates = useCallback(
-    async (path: string, result: DetectionResult): Promise<{ shown: number; skipped: number }> => {
-      const doc = docsRef.current.find((d) => d.path === path);
-      if (!doc) return { shown: 0, skipped: result.candidates.length };
-      const geometry = new Map<number, PageGeometry>();
-      for (const page of new Set(result.candidates.map((c) => c.page))) {
-        const pageRef = doc.pages[page - 1];
-        if (!pageRef) continue;
-        geometry.set(page, await geometryForPage(pageRef));
-      }
-      const { candidates, skipped } = candidatesFromDetection(
-        result,
+    async (path: string, result: DetectionResult): Promise<CandidatePublish> => {
+      // The candidate set is one set for the whole canvas: a result whose
+      // document stopped being the shown one during the geometry awaits is
+      // dropped, never written over the set the shown document owns.
+      const outcome = await publishToShownDocument(
         path,
-        (row) => {
-          const pageRef = doc.pages[row.page - 1];
-          const geo = geometry.get(row.page);
-          if (!pageRef || !geo) return null;
-          return {
-            pageId: pageRef.id,
-            // Detection reasons in unrotated user space; the projection is
-            // where the page's baked /Rotate and its pending delta apply.
-            rect: pdfRectToDisplay(
-              row.rect,
-              geo.box,
-              geo.bakedRotate + (pageRef.rotation ?? 0),
-            ),
-            rotationAtDraw: ((((pageRef.rotation ?? 0) % 360) + 360) % 360) as 0 | 90 | 180 | 270,
-          };
+        readState,
+        async () => {
+          const doc = docsRef.current.find((d) => d.path === path);
+          if (!doc) return null;
+          const geometry = new Map<number, PageGeometry>();
+          for (const page of new Set(result.candidates.map((c) => c.page))) {
+            const pageRef = doc.pages[page - 1];
+            if (!pageRef) continue;
+            geometry.set(page, await geometryForPage(pageRef));
+          }
+          return candidatesFromDetection(
+            result,
+            path,
+            (row) => {
+              const pageRef = doc.pages[row.page - 1];
+              const geo = geometry.get(row.page);
+              if (!pageRef || !geo) return null;
+              return {
+                pageId: pageRef.id,
+                // Detection reasons in unrotated user space; the projection is
+                // where the page's baked /Rotate and its pending delta apply.
+                rect: pdfRectToDisplay(
+                  row.rect,
+                  geo.box,
+                  geo.bakedRotate + (pageRef.rotation ?? 0),
+                ),
+                rotationAtDraw: ((((pageRef.rotation ?? 0) % 360) + 360) % 360) as 0 | 90 | 180 | 270,
+              };
+            },
+            () => crypto.randomUUID(),
+          );
         },
-        () => crypto.randomUUID(),
+        (placed) => {
+          if (!placed) return;
+          setFieldCandidates(placed.candidates);
+          setSelectedCandidateId(null);
+        },
       );
-      setFieldCandidates(candidates);
-      setSelectedCandidateId(null);
-      return { shown: candidates.length, skipped };
+      if (outcome.stale) return { shown: 0, skipped: result.candidates.length, stale: true };
+      if (!outcome.placed) return { shown: 0, skipped: result.candidates.length };
+      return { shown: outcome.placed.candidates.length, skipped: outcome.placed.skipped };
     },
-    [geometryForPage],
+    [geometryForPage, readState],
   );
 
   const acceptCandidates = useCallback(

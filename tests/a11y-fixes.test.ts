@@ -19,7 +19,9 @@ import {
   draftKey,
   fixFor,
   isFixableStatus,
+  namesReportAddress,
   suggestionFor,
+  artifactCalls,
 } from '../src/renderer/lib/a11y-fixes';
 import { CHECK_INVENTORY, type Check, type Finding } from '../src/renderer/lib/accessibility-report';
 
@@ -143,6 +145,15 @@ describe('where an authored value goes', () => {
       method: 'set_struct_props',
       params: { path: [0, 1], props: { summary: 'Revenue' } },
     });
+  });
+
+  it('knows which calls name addresses taken from the report', () => {
+    const content = finding({ kind: 'content', page: 2, run: 0 });
+    expect(namesReportAddress(authoredCall('tagged_content', content, 'Artifact', true)!)).toBe(true);
+    expect(namesReportAddress(authoredCall('figures_alt', finding({ kind: 'struct', path: [0, 2] }), 'A chart', true)!)).toBe(true);
+    expect(artifactCalls(check('tagged_content', 'fail', { findings: [content] }), true).every(namesReportAddress)).toBe(true);
+    expect(namesReportAddress(authoredCall('lang', null, 'en-GB', true)!)).toBe(false);
+    expect(namesReportAddress(authoredCall('field_descriptions', finding({ kind: 'object', field: 'approval' }), 'Sign', true)!)).toBe(false);
   });
 
   it('refuses an empty value rather than writing one', () => {

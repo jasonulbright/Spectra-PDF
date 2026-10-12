@@ -1,0 +1,276 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
+import type { PDFContext } from 'pdf-lib';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
+import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
+import { importedRect } from '../src/renderer/lib/annotation-fingerprint';
+import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
+import type { OpenDocument, OpenFile, PageAnnotation, PageRef, Workspace } from '../src/renderer/state/types';
+
+const require = createRequire(import.meta.url);
+pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+  require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
+
+async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
+  return (await pdfjs.getDocument({ data: bytes.slice() }).promise) as PDFDocumentProxy;
+}
+
+/** One page holding one annotation the caller builds. */
+async function pageWith(build: (ctx: PDFContext) => PDFDict): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 400]);
+  page.node.set(PDFName.of('Annots'), doc.context.obj([doc.context.register(build(doc.context))]));
+  return doc.save({ useObjectStreams: false });
+}
+
+function appearance(ctx: PDFContext): PDFDict {
+  return ctx.obj({ N: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })) });
+}
+
+async function importAll(bytes: Uint8Array): Promise<PageAnnotation[]> {
+  const pdf = await loadPdf(bytes);
+  const styles = await readRawAnnotationStyles(bytes);
+  const imported = await importPageAnnotations(await pdf.getPage(1), styles?.[0]);
+  await pdf.loadingTask.destroy();
+  return imported;
+}
+
+function makeFile(path: string, buffer: Uint8Array): OpenFile {
+  return { path, workingPath: `${path}.working`, name: path, pageCount: 1, buffer, dirty: false, undoStack: [], redoStack: [] };
+}
+
+/** One import + commit cycle of every annotation the page holds. */
+async function commitCycle(bytes: Uint8Array): Promise<Uint8Array> {
+  const imported = await importAll(bytes);
+  const file = makeFile('a.pdf', bytes);
+  const page: PageRef = { id: 'a.pdf#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0, annotations: imported };
+  const doc: OpenDocument = { ...file, id: 'a.pdf#0', name: file.name, pages: [page], pageCount: 1 };
+  const workspace: Workspace = { documents: [doc] };
+  const [plan] = planCommit(workspace, new Map([['a.pdf', file]]), ['a.pdf']);
+  return buildCommitBytes(plan);
+}
+
+async function subtypes(bytes: Uint8Array): Promise<string[]> {
+  const pdf = await loadPdf(bytes);
+  const annots = (await (await pdf.getPage(1)).getAnnotations()) as { subtype: string }[];
+  await pdf.loadingTask.destroy();
+  return annots.map((a) => a.subtype);
+}
+
+/** pdf.js's rectangle for the page's one annotation beside this module's. */
+async function bothRects(bytes: Uint8Array): Promise<{ pdfjs: number[]; ours: number[] }> {
+  const pdf = await loadPdf(bytes);
+  const [annot] = (await (await pdf.getPage(1)).getAnnotations()) as { rect: number[]; subtype: string }[];
+  await pdf.loadingTask.destroy();
+  const doc = await PDFDocument.load(bytes);
+  const dict = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+  return { pdfjs: Array.from(annot.rect), ours: importedRect(dict, annot.subtype) };
+}
+
+const QUAD = [100, 520, 200, 520, 100, 500, 200, 500];
+
+/** Each annotation the importer recognizes, drawn by pdf.js because it has
+ *  no /AP, with a /Rect that differs from what pdf.js draws. */
+const NO_APPEARANCE: [string, (ctx: PDFContext) => PDFDict][] = [
+  ['Highlight', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Highlight', QuadPoints: QUAD, Rect: [98, 498, 202, 522], C: [1, 1, 0] })],
+  ['Underline', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Underline', QuadPoints: QUAD, Rect: [98, 498, 202, 522], C: [0, 0, 1] })],
+  ['StrikeOut', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'StrikeOut', QuadPoints: QUAD, Rect: [98, 498, 202, 522], C: [1, 0, 0] })],
+  ['Squiggly', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Squiggly', QuadPoints: QUAD, Rect: [98, 498, 202, 522], C: [0, 1, 0] })],
+  ['Line', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Line', L: [40, 100, 160, 140], Rect: [36, 96, 164, 144], C: [0, 0, 0], BS: { W: 2 } })],
+  ['Ink', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150, 180, 120]], Rect: [0, 0, 10, 10], C: [0, 0, 1] })],
+  ['Polygon', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Polygon', Vertices: [100, 100, 150, 150, 180, 100], Rect: [0, 0, 10, 10], C: [1, 0, 0] })],
+  ['PolyLine', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'PolyLine', Vertices: [100, 100, 150, 150, 180, 100], Rect: [0, 0, 10, 10], C: [1, 0, 0] })],
+];
+
+describe('the fingerprint rectangle agrees with pdf.js', () => {
+  for (const [subtype, build] of NO_APPEARANCE) {
+    it(`for ${subtype} with no appearance`, async () => {
+      const { pdfjs: theirs, ours } = await bothRects(await pageWith(build));
+      ours.forEach((v, k) => expect(v).toBeCloseTo(theirs[k], 3));
+    });
+  }
+
+  it('for an unreadable /Rect, read as [0 0 0 0]', async () => {
+    const { pdfjs: theirs, ours } = await bothRects(await pageWith((ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Square', Rect: [10, 10, 50], C: [1, 0, 0], AP: appearance(ctx) })));
+    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([0, 0, 0, 0]);
+  });
+
+  it('for a Line whose /Rect misses its line, widened by the border', async () => {
+    const { pdfjs: theirs, ours } = await bothRects(await pageWith((ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Line', L: [100, 100, 160, 140], Rect: [0, 0, 10, 10], C: [0, 0, 0], Border: [0, 0, 3] })));
+    ours.forEach((v, k) => expect(v).toBeCloseTo(theirs[k], 3));
+  });
+
+  it('for an annotation with an appearance, its own /Rect', async () => {
+    const { pdfjs: theirs, ours } = await bothRects(await pageWith((ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Highlight', QuadPoints: QUAD, Rect: [202, 522, 98, 498], C: [1, 1, 0], AP: appearance(ctx) })));
+    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([98, 498, 202, 522]);
+  });
+});
+
+describe('a commit replaces each original exactly once', () => {
+  for (const [subtype, build] of NO_APPEARANCE) {
+    it(`${subtype} with no appearance`, async () => {
+      const source = await pageWith(build);
+      expect(await importAll(source)).toHaveLength(1);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual([subtype]);
+      expect(await subtypes(await commitCycle(once))).toEqual([subtype]);
+    });
+  }
+
+  for (const [label, rect] of [['a null in its /Rect', [500, 700, 520, null]], ['five numbers in its /Rect', [500, 700, 520, 720, 1]], ['no /Rect', null]] as const) {
+    it(`a /Text note with ${label}`, async () => {
+      const source = await pageWith((ctx) => {
+        const note = ctx.obj({ Type: 'Annot', Subtype: 'Text', F: 4 });
+        note.set(PDFName.of('Contents'), PDFHexString.fromText('Check'));
+        if (rect) note.set(PDFName.of('Rect'), ctx.obj([...rect]));
+        return note;
+      });
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual(['Text']);
+      expect(await subtypes(await commitCycle(once))).toEqual(['Text']);
+    });
+  }
+
+  it('a /Subtype written with a lowercase hex escape', async () => {
+    // pdf-lib writes `#` itself as `#23`, so the escape is put into the file
+    // bytes by replacing a placeholder name of the same length.
+    const placeholder = await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'HighZZZight', QuadPoints: QUAD, Rect: [100, 500, 200, 520], C: [1, 1, 0], AP: appearance(ctx),
+    }));
+    const text = Buffer.from(placeholder).toString('latin1');
+    expect(text).toContain('/HighZZZight');
+    const source = new Uint8Array(Buffer.from(text.replace('/HighZZZight', '/High#6cight'), 'latin1'));
+    expect(await subtypes(source)).toEqual(['Highlight']);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Highlight']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Highlight']);
+  });
+});
+
+describe('a name-typed /Contents on a text-bearing annotation', () => {
+  it('is drawn in the re-authored FreeText appearance on the first commit', async () => {
+    const source = await pageWith((ctx) => ctx.obj({
+      Type: 'Annot', Subtype: 'FreeText', Rect: [40, 300, 200, 340], Contents: 'Approved',
+      DA: PDFString.of('0 g /Helv 12 Tf'), AP: appearance(ctx),
+    }));
+    const out = await PDFDocument.load(await commitCycle(source));
+    const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    expect(annots.size()).toBe(1);
+    const freeText = annots.lookup(0, PDFDict);
+    const normal = freeText.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N'));
+    expect(normal).toBeInstanceOf(PDFStream);
+    const bytes = normal instanceof PDFRawStream ? decodePDFRawStream(normal).decode() : (normal as PDFStream).getContents();
+    expect(Buffer.from(bytes).toString('latin1')).toContain('(Approved) Tj');
+  });
+});
+
+/** A Line whose /Rect meets its line: pdf.js reports that /Rect widened by
+ *  the border width, so each case reads the width back. */
+function lineWith(extra: (ctx: PDFContext) => Record<string, unknown>): (ctx: PDFContext) => PDFDict {
+  return (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Line', L: [40, 100, 160, 140], Rect: [36, 96, 164, 144], C: [0, 0, 0], ...extra(ctx) });
+}
+
+describe('the border width a Line is widened by', () => {
+  const cases: [string, (ctx: PDFContext) => Record<string, unknown>, number][] = [
+    ['/BS /W over /Border', () => ({ BS: { W: 3 }, Border: [0, 0, 5] }), 3],
+    ['/BS typed /Border', () => ({ BS: { Type: 'Border', W: 3 } }), 3],
+    ['/BS typed otherwise keeps the default', () => ({ BS: { Type: 'Other', W: 3 } }), 1],
+    ['/BS /W as a name is no border', () => ({ BS: { W: 'Thick' } }), 1],
+    ['/BS that is not a dictionary keeps the default', () => ({ BS: 3 }), 1],
+    ['/BS /W wider than half the rectangle', () => ({ BS: { W: 50 } }), 1],
+    ['/Border width', () => ({ Border: [0, 0, 4] }), 4],
+    ['an empty /Border is no border', () => ({ Border: [] }), 1],
+    ['a /Border of two numbers keeps the default', () => ({ Border: [0, 0] }), 1],
+    ['no /BS and no /Border', () => ({}), 1],
+  ];
+  for (const [label, extra, width] of cases) {
+    it(label, async () => {
+      const { pdfjs: theirs, ours } = await bothRects(await pageWith(lineWith(extra)));
+      ours.forEach((v, k) => expect(v).toBeCloseTo(theirs[k], 3));
+      expect(ours).toEqual([36 - width, 96 - width, 164 + width, 144 + width]);
+    });
+  }
+});
+
+describe('a path whose /Rect meets it keeps its /Rect', () => {
+  const meets: [string, (ctx: PDFContext) => PDFDict][] = [
+    ['Ink', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [90, 90, 160, 160], C: [0, 0, 1] })],
+    ['Polygon', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Polygon', Vertices: [100, 100, 150, 150, 180, 100], Rect: [90, 90, 190, 160], C: [1, 0, 0] })],
+    ['PolyLine', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'PolyLine', Vertices: [100, 100, 150, 150, 180, 100], Rect: [90, 90, 190, 160], C: [1, 0, 0] })],
+  ];
+  for (const [subtype, build] of meets) {
+    it(subtype, async () => {
+      const { pdfjs: theirs, ours } = await bothRects(await pageWith(build));
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual(subtype === 'Ink' ? [90, 90, 160, 160] : [90, 90, 190, 160]);
+    });
+  }
+});
+
+describe('coordinates a 32-bit float cannot hold exactly', () => {
+  it('agree with pdf.js for quadrilaterals and vertices', async () => {
+    const quad = [100.1, 520.3, 200.7, 520.3, 100.1, 500.9, 200.7, 500.9];
+    const highlight = await bothRects(await pageWith((ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Highlight', QuadPoints: quad, Rect: [0, 0, 1, 1], C: [1, 1, 0] })));
+    highlight.ours.forEach((v, k) => expect(v).toBeCloseTo(highlight.pdfjs[k], 4));
+    const polygon = await bothRects(await pageWith((ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Polygon', Vertices: [100.1, 100.3, 150.7, 150.9], Rect: [0, 0, 1, 1], C: [1, 0, 0] })));
+    polygon.ours.forEach((v, k) => expect(v).toBeCloseTo(polygon.pdfjs[k], 4));
+  });
+});
+
+describe('markups and ink seen at the [0 0 0 0] fallback', () => {
+  const fallback: [string, string, (ctx: PDFContext) => PDFDict][] = [
+    ['a Highlight with an appearance and no /Rect', 'Highlight', (ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Highlight', QuadPoints: QUAD, C: [1, 1, 0], AP: appearance(ctx) })],
+    ['an Ink with an appearance and no /Rect', 'Ink', (ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], C: [0, 0, 1], AP: appearance(ctx) })],
+    ['an Ink with no appearance whose stroke box meets the origin', 'Ink', (ctx) =>
+      ctx.obj({ Type: 'Annot', Subtype: 'Ink', InkList: [[1, 1, 50, 50]], C: [0, 0, 1] })],
+  ];
+  for (const [label, subtype, build] of fallback) {
+    it(`${label} commits to exactly one annotation`, async () => {
+      const source = await pageWith(build);
+      const { pdfjs: theirs, ours } = await bothRects(source);
+      ours.forEach((v, k) => expect(v).toBeCloseTo(theirs[k], 3));
+      expect(await importAll(source)).toHaveLength(1);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual([subtype]);
+      expect(await subtypes(await commitCycle(once))).toEqual([subtype]);
+    });
+  }
+});
+
+describe('shapes with an appearance and no readable /Rect', () => {
+  // pdf.js reports each at [0 0 0 0]. The importer makes nothing of a
+  // zero-size shape, so no fingerprint names it: the original is neither
+  // stripped nor duplicated.
+  const shapes: [string, (ctx: PDFContext) => PDFDict][] = [
+    ['Line', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Line', L: [40, 100, 160, 140], C: [0, 0, 0], AP: appearance(ctx) })],
+    ['Polygon', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Polygon', Vertices: [100, 100, 150, 150, 180, 100], Rect: [10, 10, 50], C: [1, 0, 0], AP: appearance(ctx) })],
+    ['PolyLine', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'PolyLine', Vertices: [100, 100, 150, 150, 180, 100], C: [1, 0, 0], AP: appearance(ctx) })],
+    ['Square', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Square', Rect: [10, 10, 50, null], C: [1, 0, 0], AP: appearance(ctx) })],
+    ['Circle', (ctx) => ctx.obj({ Type: 'Annot', Subtype: 'Circle', C: [1, 0, 0], AP: appearance(ctx) })],
+  ];
+  for (const [subtype, build] of shapes) {
+    it(`${subtype} stays exactly one annotation through two commits`, async () => {
+      const source = await pageWith(build);
+      const { pdfjs: theirs, ours } = await bothRects(source);
+      expect(ours).toEqual(theirs);
+      expect(ours).toEqual([0, 0, 0, 0]);
+      const once = await commitCycle(source);
+      expect(await subtypes(once)).toEqual([subtype]);
+      expect(await subtypes(await commitCycle(once))).toEqual([subtype]);
+    });
+  }
+});

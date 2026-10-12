@@ -5,6 +5,7 @@ import { PDFHexString, PDFName, PDFString } from 'pdf-lib';
 import {
   PDF_DOC_DIFFERENCES,
   decodePdfTextString,
+  pdfNameKey,
   pdfNameText,
   pdfStringCodes,
 } from '../src/renderer/lib/pdf-text-string';
@@ -54,6 +55,10 @@ describe('name text', () => {
   it('decodes a lowercase #xx escape the parser left in place', () => {
     expect(pdfNameText(PDFName.of('#c3#a9'))).toBe(chars(0xe9));
     expect(pdfNameText(PDFName.of('caf#C3#a9'))).toBe(`caf${chars(0xe9)}`);
+  });
+
+  it('spells a name with a lowercase escape the way pdf.js does', () => {
+    expect(pdfNameKey(PDFName.of('High#6cight'))).toBe('Highlight');
   });
 
   it('reads bytes that are not UTF-8 one for one', () => {

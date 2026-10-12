@@ -3547,6 +3547,13 @@ export async function a11ySnapshot(): Promise<A11ySnapshot | null> {
   });
 }
 
+/** Empty the accessibility panel's status line. */
+export async function a11yClearStatus(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.a11yClearStatus();
+  });
+}
+
 export async function a11yRecheck(): Promise<void> {
   await browser.executeAsync<void, []>(function (done) {
     (window as any).__SPECTRA_TEST__.a11yRecheck().then(() => done(undefined as any));

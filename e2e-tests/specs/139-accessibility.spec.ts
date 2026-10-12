@@ -30,9 +30,14 @@ import {
   a11yFix,
   a11yAuthoredFix,
   a11yArtifactRest,
+  a11yClearStatus,
   a11yFindingsOnPage,
   tagsSelectedPath,
   waitForDisplayedSelector,
+  deleteCanvasPagesAndWait,
+  commandEnabled,
+  waitForActiveCanvasPageIds,
+  getSelectedCanvasPageIds,
 } from '../support/harness.js';
 
 const UNTAGGED_TEXT = 'This paragraph is tagged by nothing at all.';
@@ -526,5 +531,73 @@ describe('the accessibility report', () => {
     // …and redoing it is the fix again, so the document is not left broken.
     expect(await a11yArtifactRest('tagged_content')).toBe('');
     await waitForVerdict('tagged_content', ['pass', 'not_applicable']);
+  });
+});
+
+describe('an accessibility fix over a pending page edit', () => {
+  let tmp: string;
+  let source: string;
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-a11y-pending-'));
+    source = resolve(tmp, 'two-pages.pdf');
+    // The failing page, then a second page whose only text is untagged: the
+    // report names an untagged run on each page.
+    await buildFailingPdf(source);
+    const doc = await PDFDocument.load(readFileSync(source));
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([612, 792]).drawText('Untagged text on the second page.', { x: 72, y: 700, size: 11, font });
+    writeFileSync(source, await doc.save());
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([source]);
+    await setView('canvas');
+    await focusTab({ doc: source });
+    expect(await invokeAppCommand('tools.panel.accessibility')).toBe(true);
+    await browser.waitUntil(
+      async () => ((await a11ySnapshot())?.checks.find((c) => c.id === 'tagged_content')?.findings ?? 0) >= 2,
+      { timeout: 30_000, interval: 200, timeoutMsg: 'the report never named an untagged run on both pages' },
+    );
+  });
+
+  after(async () => {
+    await closeAllFiles();
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('refuses a page-addressed fix by name and tags nothing', async () => {
+    // Deleting page 1 renumbers page 2 as page 1, and the report still says 2.
+    // The canvas registers its pages after the panel's report arrives, so the
+    // ids are read once they have settled, and page 1 is selected first.
+    const [first] = await waitForActiveCanvasPageIds();
+    await selectCanvasPages([first]);
+    await browser.waitUntil(
+      async () => JSON.stringify(await getSelectedCanvasPageIds()) === JSON.stringify([first]),
+      { timeoutMsg: 'page 1 was never selected' },
+    );
+    await deleteCanvasPagesAndWait([first]);
+    // The deletion is pending and nothing has been written yet.
+    expect(await commandEnabled('document.applyPageEdits')).toBe(true);
+    expect((await getState()).activeFile?.dirty).toBe(false);
+    const notice = 'The document changed after this tool read it.';
+    const refused = 'the report no longer addresses the live pages';
+    const noticeShown = () => browser.execute((text: string) => document.body.innerText.includes(text), notice);
+
+    // Each refusal is named by its own call, and each call puts the notice on
+    // a screen that did not show it before.
+    expect(await noticeShown()).toBe(false);
+    expect(await a11yArtifactRest('tagged_content')).toContain(`a11yArtifactRest: ${refused}`);
+    expect(await noticeShown()).toBe(true);
+
+    await a11yClearStatus();
+    await browser.waitUntil(async () => !(await noticeShown()), { timeoutMsg: 'the notice never cleared' });
+    expect(await a11yAuthoredFix('tagged_content', 1, 'Artifact')).toContain(`a11yAuthoredFix: ${refused}`);
+    expect(await noticeShown()).toBe(true);
+
+    // Neither fix reached the file. Any engine fix would first commit the
+    // pending deletion through its gate and then write: the deletion is still
+    // pending and the file is unchanged.
+    expect(await commandEnabled('document.applyPageEdits')).toBe(true);
+    expect((await getState()).activeFile?.dirty).toBe(false);
   });
 });

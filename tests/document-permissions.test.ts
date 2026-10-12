@@ -1,9 +1,9 @@
 // ISO 32000-2 7.6.4.1: a document opened with its user password allows only
 // what its /P bits grant. The permission model, its one check per capability,
 // the open loop, the close path, and where the typed password may live.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ts from 'typescript';
 import {
   PERMISSION_NAMES,
@@ -37,6 +37,13 @@ import { releaseStageCredential, setStageCredentialCaller, shareStageCredential 
 import { opCapability } from '../src/renderer/lib/op-edit-class';
 import { copyBlock } from '../src/renderer/lib/copy-permission';
 import { tChrome } from '../src/renderer/i18n';
+import {
+  RENDERER_ROOT,
+  listSources,
+  walkBudgetMs,
+  parseSources,
+  type ParsedSource,
+} from './helpers/source-walk';
 
 const PATH = 'C:/docs/locked.pdf';
 const USER_PASSWORD = 'reader-pw-7c1';
@@ -456,6 +463,12 @@ describe('the close path', () => {
 });
 
 describe('where the typed password may live', () => {
+  const paths = listSources(RENDERER_ROOT);
+  let sources: ParsedSource[] = [];
+  beforeAll(() => {
+    sources = parseSources(RENDERER_ROOT, paths);
+  }, walkBudgetMs(paths.length));
+
   it('never reaches application state', () => {
     const next = appReducer(initialState, {
       type: 'OPEN_FILE', path: PATH, workingPath: `${PATH}.working`, name: 'locked.pdf', pageCount: 2,
@@ -469,24 +482,15 @@ describe('where the typed password may live', () => {
   });
 
   it('is held by one module, read only by the pdf.js loaders, the health sweep, the open funnel and the close path', () => {
-    const root = join(__dirname, '../src/renderer');
-    const files: string[] = [];
-    const walk = (dir: string): void => {
-      for (const name of readdirSync(dir)) {
-        const full = join(dir, name);
-        if (statSync(full).isDirectory()) walk(full);
-        else if (/\.(ts|tsx)$/.test(name) && !name.includes('.local.')) files.push(full);
-      }
-    };
-    walk(root);
-    const importers = files
-      .filter((f) => importsPasswordStore(f))
-      .map((f) => relative(root, f).replace(/\\/g, '/'))
+    const importers = sources
+      .filter((source) => importsPasswordStore(source.file))
+      .map((source) => source.rel)
       .sort();
     expect(importers).toEqual(['App.tsx', 'hooks/useDocumentHealth.ts', 'lib/credential-release.ts', 'lib/pdfDocCache.ts', 'lib/workspace.ts']);
-    const store = readFileSync(join(root, 'lib/document-passwords.ts'), 'utf8');
+    const store = sources.find((source) => source.rel === 'lib/document-passwords.ts')?.text;
+    expect(store).toBeDefined();
     expect(store).not.toMatch(/localStorage|sessionStorage|indexedDB|console\.|writeBuffer|invoke\(/);
-  });
+  }, walkBudgetMs(paths.length));
 });
 
 // ISO 32000-2 7.6.5.2 and Table 24: a certificate open applies the grants of
@@ -790,11 +794,11 @@ function parse(path: string): ts.SourceFile {
 }
 
 // Static imports, re-exports and dynamic import() calls all count.
-function importsPasswordStore(path: string): boolean {
+function importsPasswordStore(file: ts.SourceFile): boolean {
   const store = (specifier: ts.Node | undefined) =>
     specifier !== undefined && ts.isStringLiteralLike(specifier)
     && /(^|\/)document-passwords(\.tsx?)?$/.test(specifier.text);
-  return nodesIn(parse(path)).some((node) =>
+  return nodesIn(file).some((node) =>
     ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && store(node.moduleSpecifier))
     || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
       && store(node.arguments[0])));

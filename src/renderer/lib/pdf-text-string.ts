@@ -129,12 +129,11 @@ export function decodePdfTextString(codes: ArrayLike<number>): string {
   return withoutEscapes(body, (code) => PDF_DOC_DIFFERENCES.get(code) ?? code);
 }
 
-/** A name's text: its bytes read as UTF-8 (7.3.5), else byte for byte. The
- *  parser decodes only uppercase `#XX` escapes and keeps a lowercase one as
- *  the three characters, so those are decoded here. A name written with `#23`
- *  before two hex digits reads as one escaped byte: the parsed name keeps no
- *  trace of which form the file used. */
-export function pdfNameText(name: PDFName): string {
+/** A name's bytes (7.3.5). The parser decodes only uppercase `#XX` escapes
+ *  and keeps a lowercase one as the three characters, so those are decoded
+ *  here. A name written with `#23` before two hex digits reads as one escaped
+ *  byte: the parsed name keeps no trace of which form the file used. */
+export function pdfNameBytes(name: PDFName): number[] {
   const parsed = name.asBytes();
   const bytes: number[] = [];
   for (let i = 0; i < parsed.length; i++) {
@@ -146,6 +145,18 @@ export function pdfNameText(name: PDFName): string {
       i += 2;
     }
   }
+  return bytes;
+}
+
+/** A name as the importer's pdf.js reading spells it: one character per
+ *  byte, so a subtype or key compares equal on both sides. */
+export function pdfNameKey(name: PDFName): string {
+  return String.fromCharCode(...pdfNameBytes(name));
+}
+
+/** A name's text: its bytes read as UTF-8 (7.3.5), else byte for byte. */
+export function pdfNameText(name: PDFName): string {
+  const bytes = pdfNameBytes(name);
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
   } catch {
