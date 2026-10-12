@@ -11,9 +11,11 @@ import { renderPageToCanvas } from '../lib/pdfRenderer';
 import {
   scaleRegionToDisplay,
   listableVisualPages,
+  visualResultStanding,
   type VisualCompareResult,
   type VisualPagePair,
 } from '../lib/visual-compare';
+import { useReadAppState } from '../state/AppStateProvider';
 import type { OpenFile } from '../state/types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
@@ -45,15 +47,23 @@ interface CompareResult {
 
 type CompareMode = 'text' | 'visual';
 
+/** A visual result and the working copies it compared, as `file_a`/`file_b`. */
+interface VisualComparison {
+  result: VisualCompareResult;
+  workingA: string;
+  workingB: string;
+}
+
 export function ComparePanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, allFiles, openNewFiles } = useActiveFile();
+  const { activeFile, allFiles, openNewFiles, state } = useActiveFile();
+  const readState = useReadAppState();
   const { call } = useEngine();
   const [mode, setMode] = useState<CompareMode>('text');
   const [targetPath, setTargetPath] = useState<string | null>(null);
   const [result, setResult] = useState<CompareResult | null>(null);
-  const [visualResult, setVisualResult] = useState<VisualCompareResult | null>(null);
+  const [visual, setVisual] = useState<VisualComparison | null>(null);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,7 +87,7 @@ export function ComparePanel(): React.ReactElement {
   // A fresh comparison is stale the moment either side changes.
   useEffect(() => {
     setResult(null);
-    setVisualResult(null);
+    setVisual(null);
     setSelectedPage(null);
   }, [activeFile?.path, targetPath]);
 
@@ -85,6 +95,27 @@ export function ComparePanel(): React.ReactElement {
     () => allFiles.find((f) => f.path === targetPath) ?? null,
     [allFiles, targetPath],
   );
+
+  // The regions are drawn over the CURRENT bytes of both documents at the
+  // result's page numbers. A commit or page edit of either one after the read
+  // moves pages under those numbers, so the result is taken down and never
+  // drawn over the newer bytes.
+  const visualStanding = visual
+    ? visualResultStanding(visual.result, state, visual.workingA, visual.workingB)
+    : null;
+  useEffect(() => {
+    if (visualStanding === null || visualStanding === 'live') return;
+    setVisual(null);
+    setSelectedPage(null);
+    // The status bar is shared with text mode, where a hidden visual result
+    // going stale must not overwrite the text diff's status.
+    if (visualStanding === 'stale' && mode === 'visual') setStatus(tChrome('panel.common.documentChanged'));
+  }, [visualStanding, mode]);
+  const visualResult =
+    visual && visualStanding === 'live'
+      && visual.workingA === activeFile?.workingPath && visual.workingB === targetFile?.workingPath
+      ? visual.result
+      : null;
 
   const handleCompare = useCallback(async () => {
     if (!activeFile || !targetFile) return;
@@ -107,14 +138,22 @@ export function ComparePanel(): React.ReactElement {
         })) as unknown as CompareResult;
         setResult(res);
       } else {
-        setVisualResult(null);
+        setVisual(null);
         setSelectedPage(null);
+        const workingA = activeFile.workingPath;
+        const workingB = targetFile.workingPath;
         const res = (await call('compare_visual', {
-          file_a: activeFile.workingPath,
-          file_b: targetFile.workingPath,
+          file_a: workingA,
+          file_b: workingB,
           gs_path: await requireGsPath(),
         })) as unknown as VisualCompareResult;
-        setVisualResult(res);
+        // The engine read reader copies; either document may have been
+        // committed or edited while it ran.
+        if (visualResultStanding(res, readState(), workingA, workingB) !== 'live') {
+          setStatus(tChrome('panel.common.documentChanged'));
+          return;
+        }
+        setVisual({ result: res, workingA, workingB });
         const first = listableVisualPages(res.pages).find((p) => p.only_in == null);
         if (first) setSelectedPage(first.page);
       }
@@ -124,7 +163,7 @@ export function ComparePanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, targetFile, call, mode]);
+  }, [activeFile, targetFile, call, mode, readState]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.compare.open')} />;
 
@@ -474,6 +513,7 @@ function PageWithOverlay({
               return (
                 <div
                   key={i}
+                  data-testid="compare-visual-region"
                   className="absolute border-2 border-red-500 bg-red-500/20 pointer-events-none"
                   style={{ left: r.left, top: r.top, width: r.width, height: r.height }}
                 />
