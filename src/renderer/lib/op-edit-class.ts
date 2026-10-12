@@ -91,6 +91,8 @@ export const OP_EDIT_CLASS = {
 
   // ── Embedded files and portfolios ─────────────────────────────────────
   add_attachment: 'structural',
+  // Attaches the recognized score as a catalog-level associated file.
+  recognize_music_attach: 'structural',
   remove_attachment: 'structural',
   make_portfolio: 'structural',
   update_portfolio_member: 'structural',

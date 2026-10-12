@@ -3,7 +3,9 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { TOOL_DOCK_LIST_WIDTH } from '../state/types';
 import { OPERATION_TITLES, type Operation } from '../commands/operations';
 import { toolForOp } from '../commands/tools';
-import { invokeCommand } from '../commands/context';
+import { commandBlockText, invokeCommand } from '../commands/context';
+import { commandAwaitsProgram, commandPrerequisite } from '../commands/registry';
+import { useAudiverisStatus } from '../hooks/useAudiverisStatus';
 import { ToolsCenter } from './ToolsCenter';
 import { ExtractTextPanel } from '../panels/ExtractTextPanel';
 import { ToolIcon } from './tool-icons';
@@ -33,6 +35,8 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
+  // Re-renders the op switcher when a prerequisite program appears or goes.
+  useAudiverisStatus();
   const width = state.ui.toolDock.width;
   const activeOp = state.ui.activeOp as Operation;
   const owner = toolForOp(activeOp);
@@ -144,7 +148,14 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
               data-testid={`dock-op-${op}`}
               aria-pressed={activeOp === op}
               className={'tool-op' + (activeOp === op ? ' active' : '')}
-              onClick={() => invokeCommand(`tools.panel.${op}`)}
+              title={commandPrerequisite(`tools.panel.${op}`) ? commandBlockText(`tools.panel.${op}`) ?? undefined : undefined}
+              onClick={() => {
+                // A panel waiting for a missing program still opens: the
+                // reason and the set-up control are rendered there.
+                if (!invokeCommand(`tools.panel.${op}`) && commandAwaitsProgram(`tools.panel.${op}`)) {
+                  dispatch({ type: 'UI_SET_ACTIVE_OP', op });
+                }
+              }}
             >
               <ToolIcon op={op} />
               {tOperationTitle(op, OPERATION_TITLES[op])}

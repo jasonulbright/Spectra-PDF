@@ -37,19 +37,24 @@ export const REFUSAL_STRINGS = {
     '{{step}} creates a new document, so this action cannot replace the original files.',
   'refusal.action.exportNotInPlace':
     '{{step}} writes a file of another kind, so this action cannot replace the original files.',
+  'refusal.action.paramInvalid': 'Step {{index}} ({{step}}): {{param}} cannot be read. {{hint}}',
   'refusal.action.paramOneOf': 'Step {{index}} ({{step}}): set {{params}} — exactly one of them.',
   // The step editor's inline cue. Same condition as the two refusals above,
   // shorter and without a step number: it is rendered on the step itself.
   'refusal.action.stepCueMissingParam': 'This step needs {{param}} before it can run.',
   'refusal.action.stepCueMissingOneOf': 'This step needs one of {{params}} before it can run.',
+  'refusal.action.stepCueInvalidParam': 'This step cannot read {{param}}. {{hint}}',
   'refusal.action.stepCueConflictOneOf': 'Set only one of {{params}} — this step cannot run with two.',
   'refusal.action.runParamRequired': '{{step}}: {{param}} is required.',
+  'refusal.action.runParamInvalid': '{{step}}: {{param}} cannot be read. {{hint}}',
   'refusal.action.runParamOneOf': '{{step}}: set {{params}} — exactly one of them.',
   'refusal.action.encryptNeedsPassword': 'Encrypt: set an open or an owner password.',
   'refusal.action.needsGhostscript':
     '{{steps}} need a working Ghostscript, and none is available. Check Preferences ▸ Engine, or take those steps out of this action.',
   'refusal.action.needsGhostscriptOne':
     '{{steps}} needs a working Ghostscript, and none is available. Check Preferences ▸ Engine, or take that step out of this action.',
+  'refusal.action.needsAudiveris':
+    '{{step}} needs Audiveris, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Preferences ▸ Engine, or take that step out of this action.',
 
   // ── Guided actions: importing an action FILE ─────────────────────────
   'refusal.actionFile.notJson': 'Not a valid JSON file.',

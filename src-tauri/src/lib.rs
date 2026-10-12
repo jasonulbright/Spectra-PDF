@@ -60,6 +60,7 @@ pub mod engine_writes;
 pub mod health_engine;
 pub mod net;
 pub mod gs;
+pub mod audiveris;
 #[cfg(windows)]
 mod printers;
 #[cfg(target_os = "linux")]
@@ -414,6 +415,11 @@ pub fn run() {
             commands::open_portfolio_member_file,
             commands::gs_capability,
             commands::refresh_gs_capability,
+            audiveris::audiveris_status,
+            audiveris::audiveris_set_path,
+            audiveris::audiveris_recheck,
+            audiveris::audiveris_open_releases,
+            audiveris::audiveris_open_project,
             commands::get_app_version,
             commands::open_third_party_licenses,
             commands::reveal_in_file_manager,

@@ -261,17 +261,30 @@ pub async fn open_files_dialog(
     }
 }
 
+/// The save dialog's file type, from the default name's extension. A score
+/// name under the PDF filter would be given `.pdf` by the Windows dialog.
+fn save_filter(default_path: Option<&str>) -> (&'static str, &'static [&'static str]) {
+    let extension = default_path
+        .and_then(|path| Path::new(path).extension())
+        .map(|ext| ext.to_string_lossy().to_lowercase());
+    match extension.as_deref() {
+        Some("mxl" | "musicxml") => ("MusicXML", &["mxl", "musicxml"]),
+        _ => ("PDF Files", &["pdf", "pdfx"]),
+    }
+}
+
 #[tauri::command]
 pub async fn save_file_dialog(
     app: AppHandle,
     window: tauri::WebviewWindow,
     default_path: Option<String>,
 ) -> Result<Option<String>, String> {
+    let (filter, extensions) = save_filter(default_path.as_deref());
     let mut builder = app
         .dialog()
         .file()
         .set_parent(&window)
-        .add_filter("PDF Files", &["pdf", "pdfx"]);
+        .add_filter(filter, extensions);
     if let Some(ref path) = default_path {
         builder = builder.set_file_name(path);
     }
@@ -1907,6 +1920,8 @@ enum EngineOutputTarget {
         folder: String,
         outputs: Vec<String>,
     },
+    /// Exact files, and nothing around them.
+    Files(Vec<String>),
 }
 
 fn engine_output_path(
@@ -1915,6 +1930,11 @@ fn engine_output_path(
     let Some(params) = request.get("params") else {
         return Ok(None);
     };
+    // A publication's files are known only from its run; `send_to_engine`
+    // reserves them by name through `audiveris::publish_targets`.
+    if request.get("method").and_then(serde_json::Value::as_str) == Some("recognize_music_publish") {
+        return Ok(None);
+    }
 
     let output_dir = params.get("output_dir");
     let folder_split =
@@ -2079,7 +2099,23 @@ pub async fn send_to_engine(
     let mut request = request;
     let label = window.label().to_string();
     require_source_tree_authority(&app, &label, &mut request)?;
-    let output_reservation = if let Some(target) = engine_output_path(&request)? {
+    let audiveris = if crate::audiveris::wants_answer(&request) {
+        Some(
+            tauri::async_runtime::spawn_blocking(crate::audiveris::status)
+                .await
+                .map_err(|error| error.to_string())?,
+        )
+    } else {
+        None
+    };
+    crate::audiveris::stamp_request(&label, &mut request, audiveris);
+    let target = if request.get("method").and_then(serde_json::Value::as_str) == Some("recognize_music_publish") {
+        let params = request.get("params").cloned().unwrap_or_default();
+        Some(EngineOutputTarget::Files(crate::audiveris::publish_targets(&label, &params)?))
+    } else {
+        engine_output_path(&request)?
+    };
+    let output_reservation = if let Some(target) = target {
         let claim_app = app.clone();
         let claim_label = label.clone();
         Some(
@@ -2098,6 +2134,12 @@ pub async fn send_to_engine(
                             .map(|path| canonical_path(&path))
                             .collect::<Vec<_>>();
                         claims.claim_engine_output_split(&folder, &outputs, &claim_label)
+                    }
+                    EngineOutputTarget::Files(paths) => {
+                        let paths = paths.iter()
+                            .map(|path| canonical_path_or_parent(path))
+                            .collect::<Vec<_>>();
+                        claims.claim_engine_output_files(&paths, &claim_label)
                     }
                 }
             })
@@ -3170,6 +3212,47 @@ mod tests {
         assert!(engine_output_path(&relative_folder).unwrap_err().contains("absolute"));
         let absent = serde_json::json!({"id": 7, "params": {"file": native(r"C:\in.pdf")}});
         assert_eq!(engine_output_path(&absent).unwrap(), None);
+    }
+
+    #[test]
+    fn a_score_name_saves_under_the_music_xml_filter() {
+        assert_eq!(super::save_filter(Some(r"C:\music\song.mxl")).0, "MusicXML");
+        assert_eq!(super::save_filter(Some("song.MUSICXML")).0, "MusicXML");
+        assert_eq!(super::save_filter(Some("doc.pdf")).0, "PDF Files");
+        assert_eq!(super::save_filter(Some("doc")).0, "PDF Files");
+        assert_eq!(super::save_filter(None).0, "PDF Files");
+    }
+
+    #[test]
+    fn recognize_music_reserves_only_the_attach_output_here() {
+        let publish = serde_json::json!({
+            "id": 8,
+            "method": "recognize_music_publish",
+            "params": {"token": "1-a", "output_dir": native(r"C:\music"), "base_name": "song"}
+        });
+        assert_eq!(engine_output_path(&publish).unwrap(), None);
+        let attach = serde_json::json!({
+            "id": 9,
+            "method": "recognize_music_attach",
+            "params": {
+                "file": native(r"C:\music\book.pdf"), "output": native(r"C:\other\open.pdf"),
+                "score_path": native(r"C:\music\book.mxl")
+            }
+        });
+        assert_eq!(
+            engine_output_path(&attach).unwrap(),
+            Some(EngineOutputTarget::File(native(r"C:\other\open.pdf").to_string()))
+        );
+        let relative = serde_json::json!({
+            "id": 10,
+            "method": "recognize_music_attach",
+            "params": {"file": native(r"C:\music\book.pdf"), "output": "open.pdf", "score_path": "s.mxl"}
+        });
+        assert!(engine_output_path(&relative).unwrap_err().contains("absolute"));
+        for method in ["recognize_music_prepare", "recognize_music_run", "recognize_music_discard"] {
+            let request = serde_json::json!({"id": 11, "method": method, "params": {"file": native(r"C:\music\book.pdf"), "token": "1-a"}});
+            assert_eq!(engine_output_path(&request).unwrap(), None, "{method}");
+        }
     }
 
     #[test]

@@ -442,9 +442,13 @@ class JsonRpcServer:
         except Exception as exc:
             if not has_id:
                 return None
+            error: dict[str, Any] = {"code": -32000, "message": str(exc)}
+            data = getattr(exc, "rpc_data", None)
+            if isinstance(data, dict):
+                error["data"] = data
             return {
                 "jsonrpc": "2.0",
-                "error": {"code": -32000, "message": str(exc)},
+                "error": error,
                 "id": response_id,
             }
 

@@ -180,12 +180,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     id: 'ocr',
     title: 'Scan & OCR',
     description:
-      'Scan pages from a scanner, straighten and clean them, then make them searchable.',
+      'Scan pages, straighten and clean them, make them searchable, or turn printed music into MusicXML.',
     // Its FIRST op. Opening the tool still lands the reader on the document
     // with Find's "Make searchable" open (`registry.ts` keeps that); seating
     // the pane on `scanenhance` is what puts the enhancement one dock click
     // away instead of nowhere.
-    ops: ['scanenhance'],
+    ops: ['scanenhance', 'omr'],
   },
   {
     id: 'compare',

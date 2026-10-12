@@ -47,6 +47,19 @@ export const PANEL_STRINGS = {
   'panel.common.gsTooOld':
     'The Ghostscript in use is older than this version needs. Install a newer one, then choose it in Preferences ▸ Engine.',
   'panel.common.gsSetUp': 'Set up Ghostscript',
+  // The Audiveris prerequisite: the shared explanation for each unusable
+  // state, and the disclosure when Audiveris has no OCR languages.
+  'panel.common.audiverisRequired':
+    'This needs Audiveris, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Preferences ▸ Engine.',
+  'panel.common.audiverisNotExecutable':
+    'The Audiveris set in Preferences ▸ Engine cannot be run. Choose the program again.',
+  'panel.common.audiverisProbeFailed':
+    'Audiveris did not pass its check. Check the installation, then try again in Preferences ▸ Engine.',
+  'panel.common.audiverisTooOld':
+    'This Audiveris is older than version {{version}}. Install a newer one, then choose it in Preferences ▸ Engine.',
+  'panel.common.audiverisSetUp': 'Set up Audiveris',
+  'panel.common.audiverisNoOcrLanguages':
+    'Audiveris has no OCR languages installed, so it skips titles, lyrics and text marks. You can install languages from inside Audiveris.',
   // The ONE explanation every bundled-colour-profile surface renders while the
   // profiles' separate licence is unaccepted. Three surfaces depend on them:
   // the destination of a CMYK conversion, a PDF/X output intent's embedded
@@ -1635,6 +1648,56 @@ export const PANEL_STRINGS = {
   'panel.spelling.customWords': 'Words in your dictionary: {{count}}',
   'panel.spelling.removeWord': 'Remove {{word}} from your dictionary',
 
+  'panel.omr.open': 'Open a PDF to recognize its printed music',
+  'panel.omr.blurb':
+    'Turn printed sheet music on the chosen pages into a MusicXML file that a notation editor can open.',
+  'panel.omr.pagesLabel': 'Pages',
+  'panel.omr.pagesHint': 'A list such as 1-3,5 — or all.',
+  'panel.omr.pagesProblem': 'Enter pages such as 1-3,5, or all.',
+  'panel.omr.useSelection': 'Use the selected pages',
+  'panel.omr.formatLabel': 'Format',
+  'panel.omr.formatMxl': 'Compressed MusicXML (.mxl)',
+  'panel.omr.formatMusicxml': 'Uncompressed MusicXML (.musicxml)',
+  'panel.omr.dpiLabel': 'Resolution (dpi)',
+  'panel.omr.dpiHint': 'From {{min}} to {{max}} dpi. Use {{small}} dpi for small notation.',
+  'panel.omr.dpiProblem': 'The resolution must be between {{min}} and {{max}} dpi.',
+  'panel.omr.ocrLabel': 'OCR languages',
+  'panel.omr.ocrHint':
+    'Used for titles, lyrics and text marks. With none selected, Audiveris uses its own default.',
+  'panel.omr.keepProject': 'Keep the Audiveris project',
+  'panel.omr.keepProjectHint':
+    'Saves the project beside the score, so that you can correct the recognition in Audiveris.',
+  'panel.omr.attach': 'Attach the score to this PDF',
+  'panel.omr.attachHint': 'Embeds the MusicXML file in the document as a supplement to the printed music.',
+  'panel.omr.run': 'Recognize music',
+  'panel.omr.preparing': 'Preparing the pages…',
+  'panel.omr.running': 'Recognizing music…',
+  'panel.omr.publishing': 'Saving the score…',
+  'panel.omr.consentTitle': 'These files already exist. Replace them with the recognized score?',
+  'panel.omr.consentKeep': 'Keep the existing files',
+  'panel.omr.consentDropped': 'The document changed, so the recognized score was discarded. Run the recognition again.',
+  'panel.omr.attachDeclined': 'The score was saved beside the document but not attached.',
+  'panel.omr.attachSkippedChanged':
+    'The document changed during the recognition, so the score was saved beside it but not attached.',
+  'panel.omr.stop': 'Stop',
+  'panel.omr.stopped': 'Music recognition stopped.',
+  'panel.omr.replace': 'Replace the existing files',
+  'panel.omr.wrote': 'Wrote {{names}}.',
+  'panel.omr.projectKept': 'Kept the Audiveris project {{name}}.',
+  'panel.omr.attached': 'The score is attached to this PDF.',
+  'panel.omr.skipped': 'No music was recognized on pages {{pages}}.',
+  'panel.omr.notExact': 'Music recognition is not exact. Check the score before you rely on it.',
+  'panel.omr.openFolder': 'Open folder',
+  'panel.omr.openInAudiveris': 'Open in Audiveris',
+  'panel.omr.openLog': 'Show the Audiveris log',
+  'panel.omr.unrestored': 'Not restored: {{target}} (its previous content is in {{backup}})',
+  'panel.omr.unrestoredNew': 'Not removed: {{target}} (it did not exist before this run)',
+  'panel.omr.untied': 'The score is not tied to the tag structure on pages {{pages}}: each of them needs exactly one figure.',
+  'panel.omr.openProjectNotProject': 'The Audiveris project is not there any more.',
+  'panel.omr.openProjectPathUnreadable':
+    'Audiveris cannot open this project: its folder path uses characters outside the system code page.',
+  'panel.omr.openProjectNoAudiveris':
+    'Audiveris is not set up. Set it up in Preferences ▸ Engine, then try again.',
   'panel.scanEnhance.open': 'Open a PDF to enhance its scanned pages',
   'panel.scanEnhance.blurb':
     'A scan carries the defects of the machine that made it. Each correction is measured on the page first and reported here before anything is rewritten. Only pages that are scans are touched; a page drawn from text is left exactly as it is.',
@@ -2620,6 +2683,27 @@ export const PANEL_STRINGS = {
   'panel.settings.gsPromptOnLaunch': 'Tell me at startup when Ghostscript is missing',
   'panel.settings.gsPromptOnLaunchHint':
     'Shown once per startup, and only when no Ghostscript is found on this PC. Turning it off changes nothing else — the features that need Ghostscript still say so where they are used.',
+  'panel.settings.audiverisEngine': 'Audiveris',
+  'panel.settings.audiverisStatusReady': 'Ready',
+  'panel.settings.audiverisStatusMissing': 'Not set up',
+  'panel.settings.audiverisChecking': 'Checking…',
+  'panel.settings.audiverisPathLabel': 'Program',
+  'panel.settings.audiverisNonePath': 'None found',
+  'panel.settings.audiverisDiscovered': 'Found on this PC',
+  'panel.settings.audiverisChosen': 'Chosen by you',
+  'panel.settings.audiverisFlatpak': 'Installed as a Flatpak app',
+  'panel.settings.audiverisBrowse': 'Choose Audiveris…',
+  'panel.settings.audiverisUseDiscovered': 'Use the Audiveris found on this PC',
+  'panel.settings.audiverisRecheck': 'Check again',
+  'panel.settings.audiverisDetail': 'Details: {{detail}}',
+  'panel.settings.audiverisOcrLanguages': 'OCR languages installed in Audiveris: {{languages}}',
+  'panel.settings.audiverisUsedFor':
+    'Used by Recognize Music (Scan & OCR) to turn printed sheet music into MusicXML.',
+  'panel.settings.audiverisLicense':
+    'Audiveris is not part of Spectra PDF. It is a separate program under its own license (GNU AGPL-3.0), which you install yourself. Spectra PDF runs it as a separate program and ships no copy of it.',
+  'panel.settings.audiverisWhereToGet':
+    'Audiveris is available from its official releases page: github.com/Audiveris/audiveris/releases.',
+  'panel.settings.audiverisOpenReleases': 'Open the releases page',
   'panel.settings.categoriesAria': 'Preferences categories',
   'panel.settings.version': 'Version {{version}}',
   'panel.settings.vendor': 'Vendor: {{vendor}}',

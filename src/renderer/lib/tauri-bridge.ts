@@ -831,6 +831,33 @@ export const file = {
     invoke<RecentPathStatus[]>('classify_recent_paths', { paths }),
 };
 
+// ── Audiveris ─────────────────────────────────────────────────────────────
+
+/** `src-tauri/src/audiveris.rs` status answer. `kind` is a named state,
+ * never a sentence to match on. A flatpak launcher has no `path`. */
+export interface AudiverisStatusAnswer {
+  kind: 'ready' | 'not-configured' | 'not-executable' | 'probe-failed' | 'version-below-minimum';
+  path: string | null;
+  launcher: 'exe' | 'flatpak' | null;
+  version: string | null;
+  source: 'preferences' | 'env' | 'registry' | 'default' | 'path' | 'opt' | 'flatpak' | null;
+  ocrLanguages: string[];
+  detail: string | null;
+}
+
+export const audiveris = {
+  status: () => invoke<unknown>('audiveris_status'),
+  /** Stores the Preferences path; `null` returns to discovery. */
+  setPath: (path: string | null) => invoke<unknown>('audiveris_set_path', { path }),
+  /** Drops the probe cache and probes again. */
+  recheck: () => invoke<unknown>('audiveris_recheck'),
+  /** The releases page address is compiled into the Rust command. */
+  openReleases: () => invoke<void>('audiveris_open_releases'),
+  /** Launches the user's Audiveris on a kept project, named by the id its
+   * publish returned; Rust resolves the path. */
+  openProject: (projectId: string) => invoke<void>('audiveris_open_project', { projectId }),
+};
+
 // ── App ───────────────────────────────────────────────────────────────────
 
 /** `src-tauri/src/gs.rs` `GsAnswer` — one validated answer about one path.

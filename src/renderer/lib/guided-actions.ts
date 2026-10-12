@@ -14,11 +14,13 @@ import { OCR_LANGUAGES } from '../ocr/languages';
 // through the catalog. That is the one non-pure import here — i18n is
 // itself a data module (catalogs + i18next), so the helpers below stay
 // unit-testable with no DOM.
-import { tChrome, tStepParam, tStepTitle } from '../i18n';
+import { tChrome, tStepHint, tStepParam, tStepTitle } from '../i18n';
 // The export targets' table is the one declaration of what each target takes;
 // a second list here would drift from the engine's own refusals.
 import { EXPORT_TARGETS, exportParams, type ExportFormat } from './export-targets';
 import { pagesParam } from './page-scope';
+import { parsePageScopeField } from './page-range';
+import { OMR_DPI_DEFAULT, OMR_DPI_MAX, OMR_DPI_MIN, ocrLangParam } from './recognize-music';
 // The watermark step's Direction resolves through the SAME helper the
 // Watermark panel uses, so the two surfaces cannot disagree about what a mode
 // on a non-text source means or about a horizontal stamp sending no key.
@@ -47,6 +49,7 @@ export type GuidedStepOp =
   | 'watermark'
   | 'ocr_file'
   | 'enhance_scan'
+  | 'omr'
   | 'add_header_footer'
   | 'encrypt'
   | 'create_pdf_folders'
@@ -85,6 +88,9 @@ export interface StepParamDef {
   min?: number;
   max?: number;
   step?: number;
+  /** The value is a page field (`1-3,5` or `all`); one that does not parse
+   * is a configuration problem, never a silent `all`. */
+  pageScope?: true;
 }
 
 export interface StepDef {
@@ -106,6 +112,12 @@ export interface StepDef {
   /** The step writes a NEW file picked at run time instead of the working
    * copy (encrypt); must be the LAST step and never mutates the open doc. */
   terminalOutput?: boolean;
+  /** The step writes files beside the document and leaves the document
+   * itself unchanged, so the runner calls it without a publication. */
+  besideOutput?: boolean;
+  /** The step runs the user-installed Audiveris; a run refuses at plan time
+   * when none is usable. */
+  needsAudiveris?: boolean;
   /**
    * The step PRODUCES the document the rest of the action works on
    * (`create_pdf`) rather than transforming one.
@@ -765,6 +777,81 @@ export const STEP_CATALOG: readonly StepDef[] = [
     }),
   },
   {
+    // Printed music on the pages becomes MusicXML beside the document. The
+    // runner names the folder and the base name after the document.
+    op: 'omr',
+    title: 'Recognize Music',
+    engineMethod: 'recognize_music_prepare',
+    besideOutput: true,
+    needsAudiveris: true,
+    params: [
+      {
+        key: 'pages',
+        label: 'Pages',
+        kind: 'text',
+        defaultValue: 'all',
+        hint: 'A list such as 1-3,5 — or all.',
+        pageScope: true,
+      },
+      {
+        key: 'format',
+        label: 'Format',
+        kind: 'select',
+        options: [
+          { value: 'mxl', label: 'Compressed MusicXML (.mxl)' },
+          { value: 'musicxml', label: 'Uncompressed MusicXML (.musicxml)' },
+        ],
+        defaultValue: 'mxl',
+      },
+      {
+        key: 'dpi',
+        label: 'Resolution (dpi)',
+        kind: 'number',
+        defaultValue: OMR_DPI_DEFAULT,
+        min: OMR_DPI_MIN,
+        max: OMR_DPI_MAX,
+        step: 10,
+        hint: 'Use 400 for small notation.',
+      },
+      {
+        key: 'ocr_lang',
+        label: 'OCR languages',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Audiveris language codes joined by +. Empty uses the Audiveris default.',
+        placeholder: 'eng+deu',
+      },
+      {
+        key: 'keep_project',
+        label: 'Audiveris project',
+        kind: 'select',
+        options: [
+          { value: 'no', label: 'Do not keep the project' },
+          { value: 'yes', label: 'Keep the project beside the score' },
+        ],
+        defaultValue: 'no',
+      },
+      {
+        key: 'overwrite',
+        label: 'Existing files',
+        kind: 'select',
+        options: [
+          { value: 'no', label: 'Stop when a score file exists' },
+          { value: 'yes', label: 'Replace existing score files' },
+        ],
+        defaultValue: 'no',
+      },
+    ],
+    mapParams: (params) => ({
+      pages: parsePageScopeField(String(params.pages ?? '')) ?? String(params.pages ?? ''),
+      format: String(params.format) === 'musicxml' ? 'musicxml' : 'mxl',
+      dpi: Math.round(Number(params.dpi ?? OMR_DPI_DEFAULT)),
+      ocr_lang: ocrLangParam(String(params.ocr_lang ?? '')),
+      keep_project: String(params.keep_project ?? 'no') === 'yes',
+      overwrite: String(params.overwrite ?? 'no') === 'yes',
+    }),
+  },
+  {
     op: 'add_header_footer',
     title: 'Header & Footer',
     needsFontDir: true,
@@ -1208,6 +1295,7 @@ export function buildStepParams(
  */
 export type StepConfigProblem =
   | { kind: 'missingParam'; param: string }
+  | { kind: 'invalidParam'; param: string }
   | { kind: 'missingOneOf'; params: readonly string[] }
   | { kind: 'conflictOneOf'; params: readonly string[] };
 
@@ -1221,6 +1309,10 @@ export function stepConfigProblem(step: GuidedStep): StepConfigProblem | null {
   for (const p of def.params) {
     if (p.required && !asked.has(p.key) && !String(step.params[p.key] ?? '').trim()) {
       return { kind: 'missingParam', param: p.key };
+    }
+    if (p.pageScope && !asked.has(p.key)
+        && parsePageScopeField(String(step.params[p.key] ?? p.defaultValue)) === null) {
+      return { kind: 'invalidParam', param: p.key };
     }
   }
   if (def.requireOneOf) {
@@ -1236,6 +1328,12 @@ export function stepConfigProblem(step: GuidedStep): StepConfigProblem | null {
   return null;
 }
 
+/** A param's hint in the UI language, or empty when it has none. */
+function paramHint(def: StepDef, key: string): string {
+  const hint = def.params.find((p) => p.key === key)?.hint;
+  return hint ? tStepHint(def.op, key, hint) : '';
+}
+
 /** The step editor's inline cue for an incomplete step, or null. Shorter than
  * the save refusal and carrying no step number, because it is rendered ON the
  * step; the CONDITION is `stepConfigProblem`, which the save path also reads. */
@@ -1247,6 +1345,12 @@ export function stepConfigCue(step: GuidedStep): string | null {
     tStepParam(def.op, key, def.params.find((p) => p.key === key)?.label ?? key);
   if (problem.kind === 'missingParam') {
     return tChrome('refusal.action.stepCueMissingParam', { param: name(problem.param) });
+  }
+  if (problem.kind === 'invalidParam') {
+    return tChrome('refusal.action.stepCueInvalidParam', {
+      param: name(problem.param),
+      hint: paramHint(def, problem.param),
+    });
   }
   const params = problem.params.map(name).join(' / ');
   return tChrome(
@@ -1281,6 +1385,14 @@ export function validateAction(action: GuidedAction): string | null {
         index: i + 1,
         step: tStepTitle(def.op, def.title),
         param: tStepParam(def.op, p.key, p.label),
+      });
+    }
+    if (problem?.kind === 'invalidParam') {
+      return tChrome('refusal.action.paramInvalid', {
+        index: i + 1,
+        step: tStepTitle(def.op, def.title),
+        param: tStepParam(def.op, problem.param, def.params.find((p) => p.key === problem.param)?.label ?? problem.param),
+        hint: paramHint(def, problem.param),
       });
     }
     if (problem) {
@@ -1409,6 +1521,23 @@ export function gsRequiredSteps(plan: GsPlan): GuidedStepOp[] {
 }
 
 /**
+ * Why a run of `action` cannot start without Audiveris, or null when it can.
+ *
+ * Decided before the first step, like the Ghostscript refusal: a step that
+ * would refuse mid-run must not let the steps ahead of it rewrite the
+ * document first. `blocked` is the shared `audiverisBlocked` answer.
+ */
+export function audiverisBlocker(action: GuidedAction, blocked: boolean): string | null {
+  if (!blocked) return null;
+  const ops = [...new Set(action.steps.map((step) => step.op))]
+    .filter((op) => stepDefFor(op).needsAudiveris === true);
+  if (ops.length === 0) return null;
+  return tChrome('refusal.action.needsAudiveris', {
+    step: ops.map((op) => tStepTitle(op, stepDefFor(op).title)).join(', '),
+  });
+}
+
+/**
  * Why a planned run cannot start without Ghostscript, or null when it can.
  *
  * A saved action is a promise about a whole sequence, so a run that dies at
@@ -1478,6 +1607,13 @@ export function validateRunValues(
       return tChrome('refusal.action.runParamRequired', {
         step: tStepTitle(def.op, def.title),
         param: tStepParam(def.op, p.key, p.label),
+      });
+    }
+    if (p.pageScope && parsePageScopeField(String(values[key] ?? '')) === null) {
+      return tChrome('refusal.action.runParamInvalid', {
+        step: tStepTitle(def.op, def.title),
+        param: tStepParam(def.op, p.key, p.label),
+        hint: paramHint(def, p.key),
       });
     }
   }

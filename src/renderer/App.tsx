@@ -95,6 +95,8 @@ import { SanitizePanel } from './panels/SanitizePanel';
 import { PrepareFormPanel } from './panels/PrepareFormPanel';
 import { TableReviewPanel } from './panels/TableReviewPanel';
 import { ScanEnhancePanel } from './panels/ScanEnhancePanel';
+import { RecognizeMusicPanel } from './panels/RecognizeMusicPanel';
+import { ensureAudiverisStatus, registerAudiverisSetupOpener } from './lib/audiveris-status';
 import { SpellingPanel } from './panels/SpellingPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
@@ -304,6 +306,7 @@ const panels: Record<Operation, React.ComponentType> = {
   sanitize: SanitizePanel,
   tablereview: TableReviewPanel,
   scanenhance: ScanEnhancePanel,
+  omr: RecognizeMusicPanel,
   spelling: SpellingPanel,
 };
 
@@ -353,6 +356,11 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     registerGsSetupOpener(() => setShowSettings('engine'));
     return () => registerGsSetupOpener(null);
+  }, []);
+  useEffect(() => {
+    registerAudiverisSetupOpener(() => setShowSettings('engine'));
+    void ensureAudiverisStatus();
+    return () => registerAudiverisSetupOpener(null);
   }, []);
   // The Ghostscript launch offer. Once per launch, on the PRIMARY window
   // alone: a second window is a second workspace, not a second install, and

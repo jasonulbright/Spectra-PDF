@@ -197,13 +197,16 @@ export function rawEngineMessage(err: unknown): string {
  */
 export class EngineError extends Error {
   readonly raw: string;
+  /** The JSON-RPC `error.data` the engine attached, unread and untrusted. */
+  readonly data: unknown;
 
-  constructor(raw: string) {
+  constructor(raw: string, data?: unknown) {
     // No argument: `Error(undefined)` defines no own `message`, leaving the
     // accessor below as the only one. Passing `raw` here would install an own
     // data property that shadows it.
     super();
     this.raw = raw;
+    this.data = data;
     this.name = 'EngineError';
     Object.defineProperty(this, 'message', {
       get: () => localizeEngineMessage(raw),
