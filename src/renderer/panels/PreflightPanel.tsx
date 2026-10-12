@@ -6,8 +6,8 @@ import { useOperations } from '../hooks/useOperations';
 import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { useAppDispatch, useReadAppState } from '../state/AppStateProvider';
-import { readsLiveRevision } from '../lib/reader-copy';
 import { runCommitGate } from '../lib/commit-gate';
+import { liveOrRefuse } from '../lib/live-report';
 import { latestRun } from '../lib/latest-run';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -19,6 +19,7 @@ import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { tChrome, tChromeCount } from '../i18n';
 import { writeFailureText } from '../lib/save-failure';
 import { TEST_HARNESS_ENABLED, registerPreflight } from '../testHarness';
+import { findingKey, liveFindingFor } from '../lib/a11y-findings';
 import type { PlaceableFinding } from '../lib/a11y-findings';
 import {
   DEFAULT_PROFILE_ID,
@@ -146,18 +147,19 @@ const MAX_LISTED_FINDINGS = 200;
 /** The findings of `check` that have a place on a page. */
 function placeable(check: Check): PlaceableFinding[] {
   const out: PlaceableFinding[] = [];
-  for (const finding of check.findings) {
-    if (finding.address.kind !== 'content') continue;
+  check.findings.forEach((finding, index) => {
+    if (finding.address.kind !== 'content') return;
     const page = finding.address.page;
-    if (typeof page !== 'number' || !finding.rect) continue;
+    if (typeof page !== 'number' || !finding.rect) return;
     out.push({
+      key: findingKey(check.id, index),
       page,
       rect: finding.rect,
       checkId: check.id,
       detailKey: finding.detail_key,
       preview: finding.preview,
     });
-  }
+  });
   return out;
 }
 
@@ -494,10 +496,7 @@ export function PreflightPanel(): React.ReactElement {
         setShownCheck(null);
         return;
       }
-      if (!readsLiveRevision(report, readState(), workingPath ?? '')) {
-        setStatus(tChrome('panel.common.documentChanged'));
-        return;
-      }
+      if (!liveOrRefuse(report, readState(), workingPath, setStatus)) return;
       const { shown } = await services.a11yFindings.publish(path, placeable(check));
       setShownCheck(shown > 0 ? check.id : null);
       if (shown === 0) setStatus(tChrome('panel.preflight.nothingToShow'));
@@ -515,21 +514,16 @@ export function PreflightPanel(): React.ReactElement {
           setStatus(tChrome('panel.preflight.noCanvas'));
           return;
         }
+        // An already-shown check is no exception: a pending page edit leaves
+        // the drawn set in place while the report's page numbers go stale.
+        if (!liveOrRefuse(report, readState(), workingPath, setStatus)) return;
         if (shownCheck !== check.id) {
-          if (!readsLiveRevision(report, readState(), workingPath ?? '')) {
-            setStatus(tChrome('panel.common.documentChanged'));
-            return;
-          }
           const { shown } = await services.a11yFindings.publish(path, placeable(check));
           setShownCheck(shown > 0 ? check.id : null);
         }
-        // The published set is this check's content findings in order, so the
-        // clicked row's position within THAT list is what addresses it.
-        const at =
-          check.findings.slice(0, index + 1).filter((f) => f.address.kind === 'content')
-            .length - 1;
-        const target = services.a11yFindings.list()[at];
+        const target = liveFindingFor(services.a11yFindings.list(), path, findingKey(check.id, index));
         if (target) services.a11yFindings.focus(target.id);
+        else setStatus(tChrome('panel.preflight.nothingToShow'));
         return;
       }
       const op = OWNING_OP[check.id];

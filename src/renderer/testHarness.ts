@@ -2041,10 +2041,13 @@ export interface TestHarness {
   /** The findings drawn on the pages right now. */
   a11yFindingsOnPage: () => {
     id: string;
+    /** The report row it was placed from. */
+    key: string;
     page: number;
     checkId: string;
     detailKey: string;
     preview: string;
+    selected: boolean;
   }[];
   /** What the Tags panel has selected (the `struct` jump's landing). */
   tagsSelectedPath: () => number[] | null;
@@ -3645,14 +3648,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
-    a11yFindingsOnPage: () =>
-      (getCanvasServices()?.a11yFindings.list() ?? []).map((f) => ({
+    a11yFindingsOnPage: () => {
+      const findings = getCanvasServices()?.a11yFindings;
+      const selected = findings?.selected() ?? null;
+      return (findings?.list() ?? []).map((f) => ({
         id: f.id,
+        key: f.key,
         page: f.page,
         checkId: f.checkId,
         detailKey: f.detailKey,
         preview: f.preview,
-      })),
+        selected: f.id === selected,
+      }));
+    },
     tagsSelectedPath: () => tagsPanel?.selectedPath() ?? null,
     folderCreatePdfSetFolders: async (source, dest) => {
       if (!folderCreatePdf) {

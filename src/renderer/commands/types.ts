@@ -448,6 +448,8 @@ export interface CanvasServices {
     ): Promise<{ shown: number; skipped: number }>;
     /** The live set, pruned to pages that still exist. */
     list(): import('../lib/a11y-findings').A11yFinding[];
+    /** The id of the finding selected on the page, if any. */
+    selected(): string | null;
     clear(): void;
     /** Bring a finding's page into view and select its overlay. */
     focus(findingId: string): void;

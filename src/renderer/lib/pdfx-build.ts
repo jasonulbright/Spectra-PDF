@@ -1,4 +1,4 @@
-import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFObject, PDFObjectCopier, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFNumber, PDFObject, PDFObjectCopier, PDFPage, PDFRef, PDFStream, PDFString, degrees } from 'pdf-lib';
 
 import { tChrome } from '../i18n';
 import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
@@ -16,6 +16,7 @@ import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
+import { decodePdfTextString, pdfNameText, pdfStringCodes } from './pdf-text-string';
 import {
   LEGEND_FONT_SIZE,
   LEGEND_PAD,
@@ -250,8 +251,10 @@ function stripImportedOriginals(
   copied: import('pdf-lib').PDFPage,
   annotations: ExportAnnotation[],
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
-): Map<ExportAnnotation, PDFObject> {
+): StrippedOriginals {
   const layerGates = new Map<ExportAnnotation, PDFObject>();
+  const nameContents = new Map<ExportAnnotation, string>();
+  const stripped = { layerGates, nameContents };
   // Two sources of fingerprints to strip-on-match: annotations being
   // re-appended (live, possibly edited) and ones the user REMOVED (tombstones
   // — matched and stripped same as any other, just never re-appended after).
@@ -262,9 +265,9 @@ function stripImportedOriginals(
     ? [{ fingerprint: annotation.importedOriginal, annotation: annotation as ExportAnnotation | undefined }] : []);
   originals.push(...removedImportedOriginals.map(fingerprint => ({ fingerprint, annotation: undefined })));
   const fingerprints = originals.map(original => original.fingerprint);
-  if (fingerprints.length === 0) return layerGates;
+  if (fingerprints.length === 0) return stripped;
   const annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
-  if (!annots) return layerGates;
+  if (!annots) return stripped;
   const consumed = new Set<number>(); // indices into `fingerprints` already matched
   // Iterate back-to-front: PDFArray.remove(index) shifts later indices, which
   // would desync a forward loop's remaining indices mid-iteration.
@@ -275,18 +278,30 @@ function stripImportedOriginals(
     } catch {
       continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
     }
-    const subtype = dict.lookupMaybe(PDFName.of('Subtype'), PDFName)?.decodeText();
+    // Typed lookups throw on a value of the wrong type. A key whose value
+    // breaks Table 166's typing (ISO 32000-2 12.5.2) reads as absent here,
+    // which is how the importer's pdf.js reading sees it too, so both sides
+    // fingerprint alike. A strict read fails the whole commit over one
+    // malformed annotation.
+    const subtypeObj = dict.lookup(PDFName.of('Subtype'));
+    const subtype = subtypeObj instanceof PDFName ? subtypeObj.decodeText() : undefined;
     const STRIPPABLE = new Set([
       'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
       // The imported drawing shapes re-append like everything else.
       'Circle', 'Line', 'Polygon', 'PolyLine',
     ]);
     if (!subtype || !STRIPPABLE.has(subtype)) continue;
-    const rectArr = dict.lookupMaybe(PDFName.of('Rect'), PDFArray);
-    if (!rectArr || rectArr.size() !== 4) continue;
-    const rect = [0, 1, 2, 3].map((j) => rectArr.lookup(j) as import('pdf-lib').PDFNumber).map((n) => n.asNumber());
-    const contentsObj = dict.lookupMaybe(PDFName.of('Contents'), PDFString, PDFHexString);
-    const contents = contentsObj?.decodeText();
+    const rectArr = dict.lookup(PDFName.of('Rect'));
+    if (!(rectArr instanceof PDFArray) || rectArr.size() !== 4) continue;
+    const rectObjs = [0, 1, 2, 3].map((j) => rectArr.lookup(j));
+    if (!rectObjs.every((n): n is PDFNumber => n instanceof PDFNumber)) continue;
+    // Any two opposite corners make a rectangle (7.9.5); the import side's
+    // rect is normalised, so this one is too.
+    const [ax, ay, bx, by] = rectObjs.map((n) => n.asNumber());
+    const rect = [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
+    const contentsObj = dict.lookup(PDFName.of('Contents'));
+    const contents = contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
+      ? decodePdfTextString(pdfStringCodes(contentsObj)) : undefined;
     const matchIndex = fingerprints.findIndex(
       (fp, idx) =>
         !consumed.has(idx) &&
@@ -305,9 +320,19 @@ function stripImportedOriginals(
     // Its reference is already in the output context and configured by the
     // optional-content carry, so the replacement uses that exact identity.
     if (annotation && layer !== undefined) layerGates.set(annotation, layer);
+    if (annotation && contentsObj instanceof PDFName) nameContents.set(annotation, pdfNameText(contentsObj));
     annots.remove(i);
   }
-  return layerGates;
+  return stripped;
+}
+
+interface StrippedOriginals {
+  /** The matched original's /OC, which its replacement carries. */
+  layerGates: Map<ExportAnnotation, PDFObject>;
+  /** The matched original's /Contents when the file wrote it as a name. The
+   *  importer reads that value as no text, so it is carried only into a
+   *  replacement whose note is empty. */
+  nameContents: Map<ExportAnnotation, string>;
 }
 
 /** The stroke width every dimension annotation is drawn at. */
@@ -332,7 +357,7 @@ function addAnnotations(
   stampImages: Map<string, import('pdf-lib').PDFImage>,
   signatureFonts: Map<string, import('pdf-lib').PDFFont>,
 ): void {
-  const layerGates = stripImportedOriginals(copied, annotations, removedImportedOriginals);
+  const { layerGates, nameContents } = stripImportedOriginals(copied, annotations, removedImportedOriginals);
   const context = output.context;
   // CropBox (defaults to MediaBox when absent, so byte-identical for the
   // common case) — must match what annotation-import.ts reads via pdf.js's
@@ -1220,6 +1245,8 @@ function addAnnotations(
     }
     const layer = layerGates.get(a);
     if (layer !== undefined) annot.set(PDFName.of('OC'), layer);
+    const carried = nameContents.get(a);
+    if (carried !== undefined && !a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(carried));
     const ref = context.register(annot);
     let annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
     if (!annots) {
@@ -1611,9 +1638,11 @@ async function assemblePages(
     // of that leaf. Bind existing backpointers to the page actually inserted;
     // otherwise even a comment/rotation makes incremental preservation refuse.
     // Leave optional, absent /P entries absent (no invented annotation delta).
+    // An /Annots entry that names a missing object or null is the null
+    // object (ISO 32000-2 7.3.10) and has no backpointer to rebind.
     for (const ref of copied.node.Annots()?.asArray() ?? []) {
-      const annotation = output.context.lookup(ref, PDFDict);
-      if (annotation.has(PDFName.of('P'))) annotation.set(PDFName.of('P'), copied.ref);
+      const annotation = output.context.lookup(ref);
+      if (annotation instanceof PDFDict && annotation.has(PDFName.of('P'))) annotation.set(PDFName.of('P'), copied.ref);
     }
     src.contribution.copiedPages.push(copied);
     let pairs = pairsByKey.get(page.sourceKey);

@@ -122,6 +122,20 @@ export function readsLiveRevision(
     && read.buffer === live.buffer && read.editRevision === live.editRevision;
 }
 
+/** Records the revision a read that ran outside a reader copy was taken at.
+ * `before` and `after` bracket the read; a document that moved between them
+ * gets no record, and its result never reads as live. */
+export function recordReadRevision<T>(
+  result: T,
+  workingPath: string,
+  before: ReaderRevision | undefined,
+  after: ReaderRevision | undefined,
+): T {
+  const steady = before !== undefined && after !== undefined && before.buffer === after.buffer
+    && before.editRevision === after.editRevision && before.pageDirty === after.pageDirty;
+  return steady ? stamped(result, new Map([[workingPath, before]])) : result;
+}
+
 function stamped<T>(value: T, revisions: ReadonlyMap<string, ReaderRevision>): T {
   if (revisions.size && value !== null && typeof value === 'object') readRevisions.set(value, revisions);
   return value;
