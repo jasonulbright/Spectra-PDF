@@ -377,6 +377,32 @@ describe('an edit made after a commit lands and before its reindex lands', () =>
     expect(s.pageEditRefusals).toBe(0);
   });
 
+  it('a publication of an unrelated file in the window keeps the pending edit, and the reindex carries it', () => {
+    const a = file('a.pdf', [5], 1);
+    const start = pendingTurn();
+    const withA: AppState = {
+      ...start,
+      files: new Map(start.files).set('a.pdf', a),
+      workspace: { documents: [...start.workspace.documents, doc(a, 'a#0', [page('a.pdf', 0)])] },
+    };
+    const c = commit(withA);
+    const published = [5, 1];
+    const read = [doc({ ...a, buffer: published }, 'a#g2#0', [page('a.pdf', 0, { id: 'a.pdf#g2#p0' })])];
+    const edited = run(c.state, TURN, {
+      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 1, buffer: published, snapshotPath: 'a.snap', documents: read,
+    });
+    expect(edited.pageUndoStack).toHaveLength(1);
+    expect(edited.pageDirtyPaths).toEqual(['b.pdf']);
+    const s = land(c, edited, 'b.pdf');
+    expect(pageById(s, 'b.pdf#p4').rotation).toBe(90);
+    expect(s.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(s.pageEditRefusals).toBe(0);
+    expect(pagesOf(s, 'a.pdf').map((p) => p.id)).toEqual(['a.pdf#g2#p0']);
+    const undone = appReducer(s, { type: 'UNDO_PAGE_OP' });
+    expect(pageById(undone, 'b.pdf#p4').rotation).toBe(0);
+    expect(undone.workspace.documents.filter((d) => d.path === 'a.pdf').map((d) => d.buffer)).toEqual([published]);
+  });
+
   it('a selected page the read-back could not carry is pruned wherever it sat', () => {
     // b.pdf's read-back does not adopt the commit's ids; a page moved out of
     // its composed documents meanwhile sits in a.pdf's document.

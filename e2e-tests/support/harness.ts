@@ -236,6 +236,31 @@ export async function invokeAppCommand(id: string): Promise<boolean> {
   );
 }
 
+/** A point in a hand-off to another window where a spec can hold it:
+ * `committed` after the page tier came to rest, before the reservation;
+ * `sealed` after the file was written and sealed, before the hand-over. */
+export type HandOffStage = 'committed' | 'sealed';
+
+/** Hold every hand-off of this window at `stage` until `releaseHandOff`. */
+export async function holdHandOff(stage: HandOffStage): Promise<void> {
+  await browser.execute(function (s) {
+    (window as any).__SPECTRA_TEST__.holdHandOff(s);
+  }, stage);
+}
+
+export async function releaseHandOff(stage: HandOffStage): Promise<void> {
+  await browser.execute(function (s) {
+    (window as any).__SPECTRA_TEST__.releaseHandOff(s);
+  }, stage);
+}
+
+/** How many hand-offs of this window are held at `stage` now. */
+export async function handOffsWaiting(stage: HandOffStage): Promise<number> {
+  return await browser.execute(function (s) {
+    return (window as any).__SPECTRA_TEST__.handOffsWaiting(s) as number;
+  }, stage);
+}
+
 /** The last error a harness call recorded in the app, or null. */
 export async function harnessLastError(): Promise<string | null> {
   return await browser.execute(function () {

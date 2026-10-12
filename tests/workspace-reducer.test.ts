@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { appReducer, initialState, rotateAnnotationRect } from '../src/renderer/state/reducer';
+import { appReducer, initialState, pageTierIndependentOfPath, rotateAnnotationRect } from '../src/renderer/state/reducer';
 import { committedDocuments } from '../src/renderer/lib/workspace-commit';
-import type { AppState, OpenDocument, OpenFile, PageAnnotation, PageRef } from '../src/renderer/state/types';
+import { editsSincePlan } from '../src/renderer/state/page-tier';
+import type { AppAction, AppState, OpenDocument, OpenFile, PageAnnotation, PageRef } from '../src/renderer/state/types';
 import { documentsRead } from './helpers/published-bytes';
 
 function makeFile(path: string, pageCount: number, name?: string): OpenFile {
@@ -571,6 +572,197 @@ describe('UPDATE_FILE with a non-empty page tier (bypassed-gate hardening)', () 
     expect(next.workspace.documents).toEqual(read);
     expect(next.workspace.documents[0].buffer).toBe(next.files.get('a.pdf')!.buffer);
     expect(next.files.get('a.pdf')?.undoStack).toEqual(['snap1']);
+  });
+});
+
+describe('new bytes for a path the page tier is independent of', () => {
+  /** b.pdf with two pages turned, the second turn undone; a.pdf and c.pdf clean. */
+  const historyOfB = (): AppState => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const c = makeFile('c.pdf', 2);
+    const state = stateWith(
+      [a, b, c],
+      [
+        makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)),
+        makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2)),
+        makeDoc(c, 'c.pdf#0', makePages('c.pdf', 2)),
+      ],
+    );
+    const actions: AppAction[] = [
+      { type: 'ROTATE_PAGE_REF', docId: 'b.pdf#0', pageId: 'b.pdf#p0', rotation: 90 },
+      { type: 'ROTATE_PAGE_REF', docId: 'b.pdf#0', pageId: 'b.pdf#p1', rotation: 180 },
+      { type: 'UNDO_PAGE_OP' },
+    ];
+    const edited = actions.reduce(appReducer, state);
+    return {
+      ...edited,
+      ui: { ...edited.ui, selectedPageIds: new Set(['a.pdf#p0', 'b.pdf#p0']), selectionAnchor: 'b.pdf#p0' },
+    };
+  };
+  const rotations = (s: AppState, path: string) =>
+    s.workspace.documents.filter((d) => d.path === path).flatMap((d) => d.pages.map((p) => p.rotation));
+  const recordedFor = (s: AppState, path: string) =>
+    [...s.pageUndoStack, ...s.pageRedoStack].map((entry) => entry.documents.filter((d) => d.path === path));
+
+  it.each(['UPDATE_FILE', 'REFRESH_BUFFER'] as const)('%s keeps both stacks and the dirty paths, and every recorded composition reads the new bytes', (type) => {
+    const edited = historyOfB();
+    expect(pageTierIndependentOfPath(edited, 'a.pdf')).toBe(true);
+    const buffer = [9, 9];
+    const read = documentsRead(edited.files.get('a.pdf')!, buffer, 2);
+    const next = appReducer(edited, type === 'UPDATE_FILE'
+      ? { type, path: 'a.pdf', pageCount: 2, buffer, snapshotPath: 'snap1', documents: read }
+      : { type, path: 'a.pdf', pageCount: 2, buffer, documents: read });
+    expect(next.files.get('a.pdf')!.buffer).toBe(buffer);
+    expect(next.pageUndoStack.map((e) => e.action)).toEqual(edited.pageUndoStack.map((e) => e.action));
+    expect(next.pageRedoStack.map((e) => e.action)).toEqual(edited.pageRedoStack.map((e) => e.action));
+    expect(next.pageDirtyPaths).toBe(edited.pageDirtyPaths);
+    expect(next.pageDirtyPaths).toEqual(['b.pdf']);
+    // The path's documents are the ones read from the new bytes, live and in
+    // every recorded composition; the other files' are untouched.
+    expect(next.workspace.documents.map((d) => d.id)).toEqual([read[0].id, 'b.pdf#0', 'c.pdf#0']);
+    expect(recordedFor(next, 'a.pdf')).toEqual([read, read]);
+    expect(recordedFor(next, 'a.pdf').flat().every((d) => d === read[0])).toBe(true);
+    expect(recordedFor(next, 'b.pdf')).toEqual(recordedFor(edited, 'b.pdf'));
+    // The path's selection goes with its old ids; another file's stays.
+    expect([...next.ui.selectedPageIds]).toEqual(['b.pdf#p0']);
+    expect(next.ui.selectionAnchor).toBe('b.pdf#p0');
+    // Undo restores B's edit, not A's old bytes; redo brings back the undone turn.
+    const undone = appReducer(next, { type: 'UNDO_PAGE_OP' });
+    expect(rotations(undone, 'b.pdf')).toEqual([0, 0]);
+    expect(undone.pageDirtyPaths).toEqual([]);
+    expect(undone.workspace.documents.filter((d) => d.path === 'a.pdf')).toEqual(read);
+    expect(undone.files.get('a.pdf')!.editRevision).toBe(next.files.get('a.pdf')!.editRevision);
+    const redone = appReducer(appReducer(undone, { type: 'REDO_PAGE_OP' }), { type: 'REDO_PAGE_OP' });
+    expect(rotations(redone, 'b.pdf')).toEqual([90, 180]);
+    expect(redone.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(redone.workspace.documents.filter((d) => d.path === 'a.pdf')).toEqual(read);
+  });
+
+  it('keeps the stacks the same arrays when no recorded composition holds the path', () => {
+    const edited = historyOfB();
+    const d = makeFile('d.pdf', 1);
+    const opened: AppState = { ...edited, files: new Map(edited.files).set('d.pdf', d) };
+    const buffer = [8];
+    const read = documentsRead(d, buffer, 1);
+    const next = appReducer(opened, {
+      type: 'UPDATE_FILE', path: 'd.pdf', pageCount: 1, buffer, snapshotPath: 'snap1', documents: read,
+    });
+    expect(next.pageUndoStack).toBe(opened.pageUndoStack);
+    expect(next.pageRedoStack).toBe(opened.pageRedoStack);
+    expect(next.workspace.documents.at(-1)).toBe(read[0]);
+  });
+
+  it('a page of the path copied into another document tangles the tier: it resets', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))],
+    );
+    const imported = appReducer(state, {
+      type: 'IMPORT_PAGES', toDocId: 'b.pdf#0', toIndex: 0,
+      pages: [{ ...makePages('a.pdf', 1)[0], id: 'b.pdf#copy0' }],
+      sources: [{ path: 'a.pdf', buffer: a.buffer! }],
+    });
+    expect(imported.pageDirtyPaths).toEqual(['b.pdf']);
+    expect(pageTierIndependentOfPath(imported, 'a.pdf')).toBe(false);
+    const buffer = [9];
+    const read = documentsRead(a, buffer, 3);
+    const next = appReducer(imported, {
+      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer, snapshotPath: 'snap1', documents: read,
+    });
+    expect(next.pageUndoStack).toEqual([]);
+    expect(next.pageDirtyPaths).toEqual([]);
+    expect(next.workspace.documents.map((d) => d.id)).toEqual([read[0].id]);
+  });
+
+  it('a recorded edit that names the path tangles the tier even when nothing is dirty: it resets', () => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const state = stateWith(
+      [a, b],
+      [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)), makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2))],
+    );
+    const actions: AppAction[] = [
+      { type: 'MOVE_PAGE', fromDocId: 'b.pdf#0', toDocId: 'a.pdf#0', pageId: 'b.pdf#p0', toIndex: 0 },
+      { type: 'UNDO_PAGE_OP' },
+    ];
+    const undone = actions.reduce(appReducer, state);
+    expect(undone.pageDirtyPaths).toEqual([]);
+    expect(undone.pageRedoStack).toHaveLength(1);
+    expect(pageTierIndependentOfPath(undone, 'a.pdf')).toBe(false);
+    const buffer = [9];
+    const next = appReducer(undone, {
+      type: 'REFRESH_BUFFER', path: 'a.pdf', pageCount: 3, buffer, documents: documentsRead(a, buffer, 3),
+    });
+    expect(next.pageRedoStack).toEqual([]);
+    expect(next.pageUndoStack).toEqual([]);
+  });
+
+  it.each([
+    ['a page deleted', { type: 'DELETE_PAGE_REF', docId: 'b.pdf#0', pageId: 'b.pdf#p1' }],
+    ['a page moved to another file', { type: 'MOVE_PAGE', fromDocId: 'b.pdf#0', toDocId: 'c.pdf#0', pageId: 'b.pdf#p1', toIndex: 0 }],
+  ] as const)('%s and the edit undone is classified against the composition it applies to: the redo survives', (_name, edit) => {
+    const a = makeFile('a.pdf', 3);
+    const b = makeFile('b.pdf', 2);
+    const c = makeFile('c.pdf', 2);
+    const state = stateWith(
+      [a, b, c],
+      [
+        makeDoc(a, 'a.pdf#0', makePages('a.pdf', 3)),
+        makeDoc(b, 'b.pdf#0', makePages('b.pdf', 2)),
+        makeDoc(c, 'c.pdf#0', makePages('c.pdf', 2)),
+      ],
+    );
+    const actions: AppAction[] = [edit as AppAction, { type: 'UNDO_PAGE_OP' }];
+    const undone = actions.reduce(appReducer, state);
+    expect(undone.pageRedoStack).toHaveLength(1);
+    expect(pageTierIndependentOfPath(undone, 'a.pdf')).toBe(true);
+    expect(pageTierIndependentOfPath(undone, 'b.pdf')).toBe(false);
+    const buffer = [9];
+    const read = documentsRead(a, buffer, 3);
+    const next = appReducer(undone, {
+      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 3, buffer, snapshotPath: 'snap1', documents: read,
+    });
+    expect(next.pageRedoStack.map((e) => e.action)).toEqual([edit]);
+    const redone = appReducer(next, { type: 'REDO_PAGE_OP' });
+    expect(redone.workspace.documents.find((d) => d.id === 'b.pdf#0')!.pages.map((p) => p.id)).toEqual(['b.pdf#p0']);
+    expect(redone.workspace.documents.filter((d) => d.path === 'a.pdf')).toEqual(read);
+  });
+
+  it('a publication of the path between a commit\'s plan and its landing leaves the plan current, and the commit lands', () => {
+    const edited = appReducer(historyOfB(), { type: 'REDO_PAGE_OP' });
+    const planned = { pageUndoStack: edited.pageUndoStack, pageRedoStack: edited.pageRedoStack };
+    const planB = edited.workspace.documents.filter((d) => d.path === 'b.pdf');
+    const buffer = [9, 9];
+    const read = documentsRead(edited.files.get('a.pdf')!, buffer, 2);
+    const published = appReducer(edited, {
+      type: 'UPDATE_FILE', path: 'a.pdf', pageCount: 2, buffer, snapshotPath: 'snapA', documents: read,
+    });
+    expect(published.pageUndoStack).not.toBe(edited.pageUndoStack);
+    expect(editsSincePlan(published, planned)).toEqual([]);
+    const bufferB = [7];
+    const landed = appReducer(published, {
+      type: 'COMMIT_PAGE_EDITS',
+      updates: [{
+        path: 'b.pdf', pageCount: 2, buffer: bufferB, snapshotPath: 'snapB',
+        authored: { pages: ['b.pdf#p0', 'b.pdf#p1'], documents: [{ id: 'b.pdf#0', name: 'b' }] },
+        documents: committedDocuments(planB, bufferB),
+      }],
+      planned,
+    });
+    expect(landed.pageEditRefusals).toBe(published.pageEditRefusals);
+    expect(landed.pageUndoStack).toEqual([]);
+    expect(landed.pageDirtyPaths).toEqual([]);
+    expect(landed.files.get('b.pdf')!.undoStack).toEqual(['snapB']);
+    expect(landed.workspace.documents.filter((d) => d.path === 'a.pdf')).toEqual(read);
+    expect(landed.workspace.documents.find((d) => d.path === 'b.pdf')!.buffer).toBe(bufferB);
+  });
+
+  it('an empty tier is independent of every path', () => {
+    const a = makeFile('a.pdf', 1);
+    expect(pageTierIndependentOfPath(stateWith([a], [makeDoc(a, 'a.pdf#0', makePages('a.pdf', 1))]), 'a.pdf')).toBe(true);
   });
 });
 

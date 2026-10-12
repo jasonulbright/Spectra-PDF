@@ -63,7 +63,7 @@ describe('owned workspace mutation gesture', () => {
     const f = fixture(), run = f.runs.begin(f.file)!;
     if (kind === 'session') f.update({ files: new Map([['source', { ...f.file, workingPath: 'new-work' }]]) });
     if (kind === 'revision') f.update({ files: new Map([['source', { ...f.file, buffer: new Uint8Array([2]) }]]) });
-    if (kind === 'pending') f.update({ pageUndoStack: [] });
+    if (kind === 'pending') f.update({ pageUndoStack: [{ documents: [], dirtyPaths: ['source'], action: { type: 'NOTE_EDIT_REFUSED' } } as never] });
     const operation = vi.fn<PerformOperation>();
     await expect(run.perform(operation, 'rotate', {})).rejects.toThrow();
     expect(operation).not.toHaveBeenCalled();

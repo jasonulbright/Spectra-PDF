@@ -57,7 +57,8 @@ describe('redaction of committed page positions', () => {
       throw new Error('must not reach write');
     };
     await expect(writeRedactionMarks('a', [f.mark], f.seen, 'redact', () => state, perform, geometry, async () => {
-      state = { ...state, pageUndoStack: [...state.pageUndoStack] };
+      state = { ...state, pageUndoStack: [...state.pageUndoStack,
+        { documents: [], dirtyPaths: ['a'], action: { type: 'NOTE_EDIT_REFUSED' } } as never] };
       return 'gs';
     })).rejects.toThrow('document or history changed');
     expect(geometry).not.toHaveBeenCalled();
