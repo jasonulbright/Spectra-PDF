@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
+import { showableDoc } from '../state/selectors';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { FieldLockControl } from '../components/FieldLockControl';
@@ -224,11 +225,11 @@ export function PrepareFormPanel(): React.ReactElement {
         tesseract_path: tesseract,
         gs_path: gsPath,
       })) as unknown as DetectionResult;
-      // A detection that lands after its document stopped being the active
+      // A detection that lands after its document stopped being the shown
       // one is dropped: its rows and its refusal belong to that document, and
       // the panel and the canvas now show another. The same document at
       // another working copy is refused below: the revision it read is gone.
-      if (readState().activeFileId !== path) return;
+      if (showableDoc(readState()) !== path) return;
       // The candidates of an earlier detection go with the refusal: this
       // detection was asked for in their place.
       const refuse = () => {
@@ -246,14 +247,10 @@ export function PrepareFormPanel(): React.ReactElement {
         setError(tChrome('panel.prepareForm.noCanvas'));
         return;
       }
-      const { shown } = await services.formCandidates.publish(path, detection);
-      if (readState().activeFileId !== path) {
-        // Only this detection's own candidates are taken back.
-        if (services.formCandidates.list().every((candidate) => candidate.path === path)) {
-          services.formCandidates.clear();
-        }
-        return;
-      }
+      // A tab switch during placement drops the result the same way: the
+      // canvas then placed nothing, and the switch already cleared this panel.
+      const placed = await services.formCandidates.publish(path, detection);
+      if (placed.stale || showableDoc(readState()) !== path) return;
       // Placing the candidates reads page geometry asynchronously; a commit
       // in that time leaves them on pages of the previous revision.
       if (!readsLiveRevision(detection, readState(), workingPath)) {
@@ -261,13 +258,13 @@ export function PrepareFormPanel(): React.ReactElement {
         return;
       }
       setStatus(
-        shown === 0
+        placed.shown === 0
           ? tChrome('panel.prepareForm.foundNone')
-          : tChromeCount('panel.prepareForm.found', shown),
+          : tChromeCount('panel.prepareForm.found', placed.shown),
       );
     } catch (err) {
       // Another document's panel does not show this document's failure.
-      if (readState().activeFileId === path) setError(err instanceof Error ? err.message : String(err));
+      if (showableDoc(readState()) === path) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }

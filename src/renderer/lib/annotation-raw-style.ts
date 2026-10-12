@@ -9,6 +9,8 @@
 // imported blind — faithful-or-untouched.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
+import { importedRect } from './annotation-fingerprint';
+import { pdfNameKey } from './pdf-text-string';
 
 export interface RawAnnotStyle {
   subtype: string;
@@ -141,9 +143,12 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           } catch {
             continue;
           }
-          const subtype = nameOf(dict.lookupMaybe(PDFName.of('Subtype'), PDFName));
-          const rect = numArray(dict.lookupMaybe(PDFName.of('Rect'), PDFArray));
-          if (!subtype || !rect || rect.length !== 4) continue;
+          const subtypeObj = dict.lookup(PDFName.of('Subtype'));
+          const subtype = subtypeObj instanceof PDFName ? pdfNameKey(subtypeObj) : undefined;
+          if (!subtype) continue;
+          // Keyed by the rectangle pdf.js reports, which the strip compares too:
+          // an annotation with no appearance is reported at the box pdf.js draws.
+          const rect = importedRect(dict, subtype);
           const bs = dict.lookupMaybe(PDFName.of('BS'), PDFDict);
           const be = dict.lookupMaybe(PDFName.of('BE'), PDFDict);
           // /LE is legitimately an ARRAY on Line/PolyLine and a NAME on

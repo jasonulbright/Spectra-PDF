@@ -184,6 +184,13 @@ export function authoredCall(
   }
 }
 
+/** Whether a call names something by the report's own addresses: a page and
+ * run, or a structure path. Those address the document the report was read
+ * from, and after a page edit they name different content. */
+export function namesReportAddress(call: AuthoredCall): boolean {
+  return 'page' in call.params || 'path' in call.params;
+}
+
 /** The draft key one editor writes under. Check-scope fixes have one editor
  * for the whole check; finding-scope fixes have one per row. */
 export function draftKey(checkId: string, findingIndex: number | null): string {
