@@ -212,6 +212,11 @@ pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("enhance_scan", ProcessClass::Job),
     ("batch_ocr", ProcessClass::Run),
     ("ocr_file", ProcessClass::Job),
+    ("recognize_music_prepare", ProcessClass::Window),
+    ("recognize_music_run", ProcessClass::Run),
+    ("recognize_music_publish", ProcessClass::Window),
+    ("recognize_music_attach", ProcessClass::Window),
+    ("recognize_music_discard", ProcessClass::Window),
     ("remove_empty_folders", ProcessClass::Window),
     ("run_action", ProcessClass::Run),
     ("autotag", ProcessClass::Window),
@@ -1864,6 +1869,7 @@ fn route_response<R: Runtime>(
         let worker = worker.clone();
         tauri::async_runtime::spawn(async move { finish_run(&worker, generation).await });
     }
+    crate::audiveris::observe_result(&route.label, &json);
     if let Some(obj) = json.as_object_mut() {
         obj.insert("id".to_string(), route.inner);
     }
@@ -3465,14 +3471,16 @@ mod concurrency_tests {
             assert!(seen.insert(*method), "{method} is classified twice");
         }
         let count = |class: ProcessClass| METHOD_CLASSES.iter().filter(|(_, c)| *c == class).count();
-        assert_eq!(count(ProcessClass::Window), 179);
+        assert_eq!(count(ProcessClass::Window), 183);
         assert_eq!(count(ProcessClass::Job), 34);
-        assert_eq!(count(ProcessClass::Run), 4);
+        assert_eq!(count(ProcessClass::Run), 5);
         assert_eq!(count(ProcessClass::Health), 4);
         for (method, class) in METHOD_CLASSES {
             assert_eq!(process_class(method), *class, "{method}");
         }
         assert_eq!(process_class("distill"), ProcessClass::Job);
+        assert_eq!(process_class("recognize_music_run"), ProcessClass::Run, "a whole-score Audiveris run");
+        assert_eq!(process_class("recognize_music_prepare"), ProcessClass::Window);
         assert_eq!(process_class("preflight"), ProcessClass::Job, "its coverage check renders with Ghostscript");
         assert_eq!(process_class("batch_ocr"), ProcessClass::Run);
         assert_eq!(process_class("get_page_count"), ProcessClass::Window);

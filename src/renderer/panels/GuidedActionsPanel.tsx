@@ -9,6 +9,11 @@ import { getSettings } from '../lib/app-settings';
 import { claimOutputRoots, writtenRoots, type OutputRootClaim } from '../lib/output-root-claim';
 import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
+import { useAudiverisStatus } from '../hooks/useAudiverisStatus';
+import { audiverisReady } from '../lib/audiveris-status';
+import { guidedRecognitionRequest, runUnattendedRecognition } from '../lib/recognize-music-flow';
+import { useOperationQueue } from '../hooks/useOperationQueue';
+import { runCommitGate } from '../lib/commit-gate';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -20,6 +25,7 @@ import {
   buildStepParams,
   editorParams,
   engineMethodFor,
+  audiverisBlocker,
   gsBlocker,
   gsPathFor,
   inPlaceBlocker,
@@ -109,6 +115,27 @@ export function GuidedActionsPanel(): React.ReactElement {
   const [runStatuses, setRunStatuses] = useState<StepStatus[]>([]);
   const [running, setRunning] = useState(false);
   const gs = useGsCapability();
+  const audiverisStatus = useAudiverisStatus();
+  const { track } = useOperationQueue();
+  // The omr step's four engine calls. Only prepare reads the document, after
+  // the gate; the run holds no lock on it.
+  const recognizeBeside = useCallback(
+    async (documentPath: string, workingPath: string, params: Record<string, unknown>) => {
+      const { request, replaceExisting } = guidedRecognitionRequest(params, documentPath);
+      await runCommitGate([workingPath]);
+      await runUnattendedRecognition({
+        prepare: (p) => call('recognize_music_prepare', { file: workingPath, ...p }),
+        run: (p, signal) => track('recognize_music_run', { file: documentPath, pages: request.pages },
+          () => callRaw('recognize_music_run', p, { signal })) as Promise<unknown>,
+        publish: (p) => call('recognize_music_publish', p),
+        attach: () => Promise.reject(new Error('recognize_music_attach')),
+        discard: (token) => {
+          void callRaw('recognize_music_discard', { token }).catch(() => {});
+        },
+      }, request, replaceExisting);
+    },
+    [call, callRaw, track],
+  );
   // The run callbacks are memoised on their own inputs; a ref keeps the
   // plan-time check reading the CURRENT answer without making every run
   // handler depend on it.
@@ -191,6 +218,11 @@ export function GuidedActionsPanel(): React.ReactElement {
         let gsPaths: (string | undefined)[];
         let refusedAt = 0;
         try {
+          const missingAudiveris = audiverisBlocker(action, !audiverisReady());
+          if (missingAudiveris !== null) {
+            refusedAt = Math.max(0, action.steps.findIndex((s) => stepDefFor(s.op).needsAudiveris));
+            throw new Error(missingAudiveris);
+          }
           const plan = await planAction(planRequest, action, values);
           refusedAt = Math.max(0, plan.steps.findIndex((s) => s.gs === 'required'));
           const blocked = gsBlocker(plan, !gsBlocked(gsRef.current));
@@ -214,7 +246,9 @@ export function GuidedActionsPanel(): React.ReactElement {
             if (def.needsIccDir) extras.icc_dir = await app.getIccPath();
             if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
             if (def.needsSoffice) extras.soffice_path = await app.getSofficePath();
-            if (def.terminalOutput) {
+            if (def.besideOutput) {
+              await recognizeBeside(activeFile.path, workingPath, buildStepParams(step, values[i]));
+            } else if (def.terminalOutput) {
               // Writes the picked file; the open document is untouched, so
               // there is nothing to snapshot or reload.
               await call(engineMethodFor(step.op), {
@@ -245,7 +279,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         setRunning(false);
       }
     },
-    [activeFile, running, call, performOperation, saveFile, planRequest],
+    [activeFile, running, call, performOperation, saveFile, planRequest, recognizeBeside],
   );
 
   /** Run entry: collect ask-at-run values first when any step wants them. */
@@ -261,6 +295,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       // interpreter must refuse before its first step has rewritten the
       // document three times.
       if (listedGsBlocker(plansRef.current, action, !gsBlocked(gsRef.current)) !== null) return;
+      if (audiverisBlocker(action, !audiverisReady()) !== null) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
       if (anyAsked) {
         setView({ kind: 'prerun', action, values: {}, error: null });
@@ -340,6 +375,7 @@ export function GuidedActionsPanel(): React.ReactElement {
     async (action: GuidedAction) => {
       if (running) return;
       if (listedGsBlocker(plansRef.current, action, !gsBlocked(gsRef.current)) !== null) return;
+      if (audiverisBlocker(action, !audiverisReady()) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickSource'));
       if (!source) return;
       const dest = await dialog.pickFolder(tChrome('panel.ga.pickDest'));
@@ -364,6 +400,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       // opens for a run that cannot happen.
       if (inPlaceBlocker(action) !== null) return;
       if (listedGsBlocker(plansRef.current, action, !gsBlocked(gsRef.current)) !== null) return;
+      if (audiverisBlocker(action, !audiverisReady()) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickInPlace'));
       if (!source) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
@@ -966,6 +1003,8 @@ export function GuidedActionsPanel(): React.ReactElement {
             const openBlocked = openDocumentBlocker(a);
             const inPlaceBlocked = inPlaceBlocker(a);
             const gsBlockedMsg = listedGsBlocker(plans, a, !gsBlocked(gs));
+            const audiverisMsg = audiverisBlocker(a, !audiverisReady(audiverisStatus));
+            const prerequisiteMsg = gsBlockedMsg ?? audiverisMsg;
             return (
             <div
               key={a.id}
@@ -979,6 +1018,11 @@ export function GuidedActionsPanel(): React.ReactElement {
                     {gsBlockedMsg}
                   </div>
                 )}
+                {audiverisMsg !== null && !audiverisStatus.pending && (
+                  <div className="text-xs text-amber-300" data-testid={`action-audiveris-${a.id}`}>
+                    {audiverisMsg}
+                  </div>
+                )}
                 <div className="text-xs text-neutral-500">
                   {a.steps.map((s) => tStepTitle(s.op, stepDefFor(s.op).title)).join(' → ')}
                 </div>
@@ -990,8 +1034,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                 <button
                   type="button"
                   data-testid={`action-run-${a.id}`}
-                  disabled={!activeFile || running || openBlocked !== null || gsBlockedMsg !== null}
-                  title={openBlocked ?? gsBlockedMsg ?? undefined}
+                  disabled={!activeFile || running || openBlocked !== null || prerequisiteMsg !== null}
+                  title={openBlocked ?? prerequisiteMsg ?? undefined}
                   onClick={() => void runAction(a)}
                   className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
                 >
@@ -1000,8 +1044,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                 <button
                   type="button"
                   data-testid={`action-folder-${a.id}`}
-                  disabled={running || gsBlockedMsg !== null}
-                  title={gsBlockedMsg ?? tChrome('panel.ga.folderTitle')}
+                  disabled={running || prerequisiteMsg !== null}
+                  title={prerequisiteMsg ?? tChrome('panel.ga.folderTitle')}
                   onClick={() => void runActionOnFolder(a)}
                   className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                 >
@@ -1036,8 +1080,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                   <button
                     type="button"
                     data-testid={`action-inplace-${a.id}`}
-                    disabled={running || inPlaceBlocked !== null || gsBlockedMsg !== null}
-                    title={inPlaceBlocked ?? gsBlockedMsg ?? tChrome('panel.ga.inPlaceTitle')}
+                    disabled={running || inPlaceBlocked !== null || prerequisiteMsg !== null}
+                    title={inPlaceBlocked ?? prerequisiteMsg ?? tChrome('panel.ga.inPlaceTitle')}
                     onClick={() => setConfirmInPlace(a.id)}
                     className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >

@@ -16,7 +16,7 @@ import { isOpMethod, opCapability, sequenceEditClass } from '../src/renderer/lib
 import { capabilityBlock } from '../src/renderer/lib/document-permissions';
 import { PermissionRefusal } from '../src/renderer/lib/document-permission-text';
 import { documentPermissions } from '../src/renderer/state/selectors';
-import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep, planAction, gsBlocker, gsPathFor } from '../src/renderer/lib/guided-actions';
+import { STEP_CATALOG, stepDefFor, engineMethodFor, buildStepParams, newStep, planAction, gsBlocker, gsPathFor, audiverisBlocker } from '../src/renderer/lib/guided-actions';
 import { writtenRoots } from '../src/renderer/lib/output-root-claim';
 import { replaceRange, wordAt } from '../src/renderer/lib/spellcheck';
 import { createArticleDrafts } from '../src/renderer/lib/article-drafts';
@@ -156,6 +156,7 @@ async function fixture() {
     setRunStatuses: (value: unknown[] | ((s: unknown[]) => unknown[])) => { result.statuses = typeof value === 'function' ? value(result.statuses) : value; },
     stepDefFor, engineMethodFor, buildStepParams, saveFile: async () => 'export', terminalOutputName: () => 'export',
     planAction, gsBlocker, gsPathFor, gsBlocked: () => false, gsRef: { current: null },
+    audiverisBlocker, audiverisReady: () => true, recognizeBeside: async () => {},
     planRequest: async (params: { steps: { op: string }[] }) =>
       ({ gs: 'never', steps: params.steps.map((s) => ({ op: s.op, gs: 'never' })) }),
     GS_LOOKUP: { require: async () => 'gs', ifAvailable: async () => 'gs' },
@@ -354,6 +355,6 @@ describe('actual panel publication callbacks', () => {
     expect(f.store.getState().files.get('source')).toBe(f.open); expect(f.calls).toEqual([]);
   });
   it('every in-place Guided Actions method belongs to the consent/publication roster', () => {
-    for (const def of STEP_CATALOG.filter(d => !d.sourceStep && !d.terminalOutput)) expect(isOpMethod(engineMethodFor(def.op)), def.op).toBe(true);
+    for (const def of STEP_CATALOG.filter(d => !d.sourceStep && !d.terminalOutput && !d.besideOutput)) expect(isOpMethod(engineMethodFor(def.op)), def.op).toBe(true);
   });
 });

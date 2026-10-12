@@ -501,6 +501,7 @@ describe('all flags true reproduces the unfiltered model', () => {
         "tools.panel.sanitize",
         "tools.panel.tablereview",
         "tools.panel.scanenhance",
+        "tools.panel.omr",
         "tools.panel.spelling",
         "tools.open.organize",
         "tools.open.comment",

@@ -1015,6 +1015,74 @@ impl ClaimState {
         ))
     }
 
+    /// Reserve exact output files, and nothing around them: each must be
+    /// open nowhere and written by no other operation, and each takes the
+    /// cross-process lease a single engine output takes. The folder that holds
+    /// them stays open to documents and other writers.
+    pub(crate) fn claim_engine_output_files(
+        &self,
+        paths: &[String],
+        label: &str,
+    ) -> Result<EngineOutputReservation, String> {
+        if paths.is_empty() {
+            return Err("An output reservation must name at least one file.".to_string());
+        }
+        let _identity_claim = self
+            .identity_claim
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut seen = HashSet::new();
+        for path in paths {
+            if !seen.insert(path_comparison_key(path)) {
+                return Err(format!("Output {path} was listed more than once."));
+            }
+            let alias_owner = self
+                .claimed_alias(path)
+                .and_then(|alias| self.open_holder(&alias, None));
+            if let Some(owner) = self.open_holder(path, None).or(alias_owner) {
+                return Err(format!(
+                    "Cannot write the output {path} because it is open in {owner}."
+                ));
+            }
+        }
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        if runs.held.iter().any(|run| {
+            run.kind == RunClaimKind::EngineOutput
+                && run.roots.iter().any(|held| {
+                    paths.iter().any(|path| {
+                        roots_conflict(held, path) || same_file::is_same_file(held, path).unwrap_or(false)
+                    })
+                })
+        }) {
+            return Err("Cannot write the output because another operation is writing it.".to_string());
+        }
+        let outcome = self.claim_roots_locked(
+            paths,
+            label,
+            &mut runs,
+            RunClaimKind::EngineOutput,
+            true,
+            None,
+        )?;
+        if outcome.granted {
+            let token = outcome
+                .token
+                .expect("a granted output reservation has a token");
+            return Ok(EngineOutputReservation {
+                runs: self.runs.clone(),
+                token,
+                label: label.to_string(),
+            });
+        }
+        if !outcome.document.is_empty() {
+            return Err(format!(
+                "Cannot write the output because {} is open in {}.",
+                outcome.document, outcome.owner
+            ));
+        }
+        Err(format!("Cannot write the output; {} is busy.", outcome.folder))
+    }
+
     /// Reserve a folder split while allowing unrelated documents to remain
     /// open inside it. The selected folder still blocks new opens and other
     /// folder operations; exact output roots catch open-document and hard-link

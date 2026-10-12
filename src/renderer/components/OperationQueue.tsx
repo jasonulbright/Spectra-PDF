@@ -53,7 +53,11 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
   if (items.length === 0) return null;
 
   return (
-    <div className="border-t border-neutral-800 bg-neutral-850 shrink-0">
+    <div
+      className="border-t border-neutral-800 bg-neutral-850 shrink-0"
+      data-testid="opqueue"
+      data-running={items.filter((item) => item.status === 'running').length}
+    >
       <div
         className="flex items-center justify-between px-4 py-1.5 cursor-default select-none"
         onClick={() => setCollapsed((prev) => !prev)}
@@ -81,7 +85,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
           aria-label={tChrome('dialog.opqueue.aria')}
         >
           {items.map((item) => (
-            <div key={item.id} className="flex items-start gap-3 text-xs">
+            <div key={item.id} className="flex items-start gap-3 text-xs" data-testid="opqueue-item" data-status={item.status}>
               <span className={`status-dot w-1.5 h-1.5 mt-1.5 rounded-full shrink-0 ${
                 item.status === 'running' ? 'bg-blue-500 animate-pulse' :
                 item.status === 'done' ? 'bg-emerald-500' : 'bg-red-500'

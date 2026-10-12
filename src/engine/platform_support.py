@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import NamedTuple
 from pathlib import Path
 
 IS_WINDOWS = os.name == "nt"
@@ -399,9 +400,230 @@ def private_cache_dir(name: str) -> Path:
     return folder
 
 
+SYSTEM_SID = "S-1-5-18"
+ADMINISTRATORS_SID = "S-1-5-32-544"
+OWNER_RIGHTS_SID = "S-1-3-4"
+CREATOR_OWNER_SID = "S-1-3-0"
+
+#: `GetVolumeInformationW` file-system flag of a volume that stores ACLs.
+#: FAT and exFAT lack it; on them `GetNamedSecurityInfoW` succeeds with a
+#: synthesized owner and a NULL DACL, which name no account at all.
+_FILE_PERSISTENT_ACLS = 0x00000008
+
+
+class _Security(NamedTuple):
+    """What a Windows entry records about who owns it and who may use it.
+    `status` is the Win32 error of the query (0 on success). `allowed` holds
+    the SIDs of every access-allowed entry, inherit-only ones included (they
+    govern every file created inside), or None when the DACL is absent or
+    holds an entry this reading does not interpret (which grants access to
+    anyone the reading cannot name)."""
+
+    status: int
+    owner: str | None = None
+    allowed: frozenset | None = None
+
+
+def _volume_keeps_acls(path) -> bool | None:
+    """Whether the volume holding `path` stores ACLs, or None when the volume
+    cannot be read."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetVolumePathNameW.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    kernel.GetVolumePathNameW.restype = wintypes.BOOL
+    kernel.GetVolumeInformationW.argtypes = (
+        wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD), wintypes.LPWSTR, wintypes.DWORD,
+    )
+    kernel.GetVolumeInformationW.restype = wintypes.BOOL
+    root = ctypes.create_unicode_buffer(32768)
+    if not kernel.GetVolumePathNameW(str(path), root, len(root)):
+        return None
+    flags = wintypes.DWORD()
+    if not kernel.GetVolumeInformationW(root.value, None, 0, None, None, ctypes.byref(flags), None, 0):
+        return None
+    return bool(flags.value & _FILE_PERSISTENT_ACLS)
+
+
+class _Token(NamedTuple):
+    user: str
+    owner: str
+
+
+def _sid_text(advapi, kernel, sid) -> str | None:
+    import ctypes
+    from ctypes import wintypes
+
+    text = wintypes.LPWSTR()
+    if not advapi.ConvertSidToStringSidW(ctypes.c_void_p(sid), ctypes.byref(text)):
+        return None
+    try:
+        return text.value
+    finally:
+        kernel.LocalFree(text)
+
+
+def _windows_api():
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi.GetNamedSecurityInfoW.argtypes = (
+        wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+    )
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR))
+    advapi.ConvertSidToStringSidW.restype = wintypes.BOOL
+    advapi.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
+    advapi.OpenProcessToken.restype = wintypes.BOOL
+    advapi.GetTokenInformation.argtypes = (
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+    )
+    advapi.GetTokenInformation.restype = wintypes.BOOL
+    advapi.GetAce.argtypes = (ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p))
+    advapi.GetAce.restype = wintypes.BOOL
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel.LocalFree.argtypes = (ctypes.c_void_p,)
+    return advapi, kernel
+
+
+def _windows_security(path) -> _Security:
+    """The owner and the allowed SIDs recorded on `path`."""
+    import ctypes
+
+    advapi, kernel = _windows_api()
+    owner = ctypes.c_void_p()
+    dacl = ctypes.c_void_p()
+    descriptor = ctypes.c_void_p()
+    # SE_FILE_OBJECT = 1; OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION = 1 | 4
+    status = advapi.GetNamedSecurityInfoW(
+        str(path), 1, 5, ctypes.byref(owner), None, ctypes.byref(dacl), None, ctypes.byref(descriptor)
+    )
+    if status != 0:
+        return _Security(status)
+    try:
+        owner_text = _sid_text(advapi, kernel, owner.value) if owner.value else None
+        if not dacl.value:
+            return _Security(0, owner_text, None)
+        # ACL header: revision byte, Sbz1 byte, AclSize word, AceCount word.
+        count = ctypes.c_uint16.from_address(dacl.value + 4).value
+        allowed = set()
+        for index in range(count):
+            ace = ctypes.c_void_p()
+            if not advapi.GetAce(dacl, index, ctypes.byref(ace)):
+                return _Security(0, owner_text, None)
+            kind = ctypes.c_uint8.from_address(ace.value).value
+            if kind == 1:  # ACCESS_DENIED_ACE_TYPE narrows access
+                continue
+            if kind != 0:  # anything but ACCESS_ALLOWED_ACE_TYPE is not read here
+                return _Security(0, owner_text, None)
+            # ACCESS_ALLOWED_ACE: header (4 bytes), Mask (4 bytes), SidStart.
+            sid = _sid_text(advapi, kernel, ace.value + 8)
+            if sid is None:
+                return _Security(0, owner_text, None)
+            allowed.add(sid)
+        return _Security(0, owner_text, frozenset(allowed))
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def _windows_token() -> _Token | None:
+    """This process's user SID and the default owner of what it creates."""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi, kernel = _windows_api()
+    token = wintypes.HANDLE()
+    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+        return None
+    try:
+        found = []
+        # TokenUser = 1, TokenOwner = 4: each starts with a pointer to a SID.
+        for information in (1, 4):
+            size = wintypes.DWORD()
+            advapi.GetTokenInformation(token, information, None, 0, ctypes.byref(size))
+            buffer = ctypes.create_string_buffer(max(size.value, 1))
+            if not size.value or not advapi.GetTokenInformation(
+                token, information, buffer, size, ctypes.byref(size)
+            ):
+                return None
+            sid = ctypes.c_void_p.from_buffer(buffer).value
+            text = _sid_text(advapi, kernel, sid) if sid else None
+            if text is None:
+                return None
+            found.append(text)
+        return _Token(user=found[0], owner=found[1])
+    finally:
+        kernel.CloseHandle(token)
+
+
+def owner_acceptable(security: _Security, token: _Token | None) -> bool:
+    """Whether an entry with `security` is this process's own.
+
+    Its owner is this process's user or its token's default owner. An entry
+    owned by Administrators is also accepted when its DACL lets only this
+    user, SYSTEM and Administrators in: an elevated token creates objects
+    owned by Administrators, and a later standard token of the same user must
+    still find its own caches and stages. OWNER RIGHTS names the owner itself
+    and CREATOR OWNER the owner of each file created inside."""
+    if security.status != 0 or token is None or security.owner is None:
+        return False
+    if security.owner in (token.user, token.owner):
+        return True
+    if security.owner == ADMINISTRATORS_SID and security.allowed is not None:
+        return security.allowed <= {
+            token.user, SYSTEM_SID, ADMINISTRATORS_SID, OWNER_RIGHTS_SID, CREATOR_OWNER_SID,
+        }
+    return False
+
+
+def _windows_owner_is_this_process(path) -> bool:
+    """On a volume that stores no ACLs (FAT, exFAT) no account can own an
+    entry, so the caller's lstat and reparse checks decide alone. Anything
+    that cannot be read refuses."""
+    try:
+        keeps = _volume_keeps_acls(path)
+        if keeps is None:
+            return False
+        if not keeps:
+            return True
+        return owner_acceptable(_windows_security(path), _windows_token())
+    except OSError:
+        return False
+
+
+def dacl_grants_only(path, sid: str) -> bool:
+    """Whether the DACL recorded on `path` lets `sid` in and nobody else."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        security = _windows_security(path)
+    except OSError:
+        return False
+    return security.status == 0 and security.allowed == frozenset({sid})
+
+
+def windows_user_sid() -> str | None:
+    if not IS_WINDOWS:
+        return None
+    try:
+        token = _windows_token()
+    except OSError:
+        return None
+    return token.user if token is not None else None
+
+
 def owned_entry(path: Path, *, directory: bool) -> bool:
     """Whether `path` is a real folder (or regular file) this user owns, never
-    a link. Under the per-user Windows temp directory the kind decides."""
+    a link or another reparse point. On Windows the owner recorded on the
+    entry must be this process's user or its token's default owner."""
     import stat
 
     try:
@@ -411,4 +633,8 @@ def owned_entry(path: Path, *, directory: bool) -> bool:
     kind = stat.S_ISDIR if directory else stat.S_ISREG
     if not kind(meta.st_mode):
         return False
-    return IS_WINDOWS or _owned_by_this_user(meta)
+    if IS_WINDOWS:
+        if getattr(meta, "st_file_attributes", 0) & 0x400:  # FILE_ATTRIBUTE_REPARSE_POINT
+            return False
+        return _windows_owner_is_this_process(path)
+    return _owned_by_this_user(meta)

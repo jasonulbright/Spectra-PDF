@@ -45,6 +45,8 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   compare_visual: 'Compare (visual)',
   apply_ocr_layer: 'Apply OCR Text',
   enhance_scan: 'Enhance Scans',
+  recognize_music_run: 'Recognize Music',
+  recognize_music_attach: 'Attach Score',
   set_page_boxes: 'Crop Pages',
   content_crop: 'Crop to Content',
   delete_page_image: 'Delete Image',
@@ -220,6 +222,10 @@ export const DOCUMENTLESS_METHODS = [
 // e2e): every read of the PDF version — the Optimize pane's, and now the
 // Properties dialog's — was queuing as an operation and gating a commit.
 const INTERNAL_METHODS = new Set([
+  // The short steps around a music recognition; the run is the queue line.
+  'recognize_music_prepare',
+  'recognize_music_publish',
+  'recognize_music_discard',
   'get_page_count',
   'get_page_info',
   'check_encrypted',
@@ -528,6 +534,7 @@ export function describeOperation(
       break;
     case 'delete':
     case 'extract_text':
+    case 'recognize_music_run':
       l.pages = pageList(params.pages);
       break;
     case 'print':
@@ -587,6 +594,7 @@ export function formatQueueLabel(l: QueueLabel, lng?: string): string {
     }
     case 'delete':
     case 'extract_text':
+    case 'recognize_music_run':
       return tChrome('dialog.opqueue.pages', { op, pages, file }, lng);
     case 'print':
       return Number(l.copies) > 1

@@ -87,6 +87,12 @@ PUBLIC_EXCEPTIONS = frozenset(
         "CscError",
         # Ghostscript cannot be handed the stored user password.
         "GhostscriptPasswordUnsupported",
+        # A music recognition run that produced no usable score; it carries
+        # the run's log beside its message.
+        "MusicRecognitionFailed",
+        # A publication that would replace files without consent; it carries
+        # their names beside its message.
+        "TargetsExist",
     }
 )
 
