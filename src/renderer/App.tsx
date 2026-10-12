@@ -4285,6 +4285,27 @@ function AppContent(): React.ReactElement {
           ...(options ?? {}),
         });
       },
+      refreshActiveBuffer: () => {
+        const now = readState();
+        const path = now.activeFileId;
+        const current = path ? now.files.get(path) : undefined;
+        if (!path || !current?.buffer) throw new Error('refreshActiveBuffer: no active file');
+        // Pending page edits would be dropped from history while the documents
+        // still show them.
+        if (now.pageDirtyPaths.includes(path)) {
+          throw new Error('refreshActiveBuffer: the file has uncommitted page edits');
+        }
+        const buffer = current.buffer instanceof ArrayBuffer
+          ? new Uint8Array(current.buffer.slice(0)) : Uint8Array.from(current.buffer);
+        // Equal bytes describe equal documents; only the buffer they name moves.
+        const documents = now.workspace.documents
+          .filter((d) => d.path === path)
+          .map((d) => ({ ...d, buffer }));
+        dispatch({ type: 'REFRESH_BUFFER', path, buffer, pageCount: current.pageCount, documents });
+        if (readState().files.get(path)?.buffer !== buffer) {
+          throw new Error('refreshActiveBuffer: the reducer refused the refresh');
+        }
+      },
     });
   }, [openByPaths, dispatch, importFilesIntoDoc, dropOntoDoc, harnessSetView, setActiveOp, call, readState, subscribeState, pathInUse]);
 

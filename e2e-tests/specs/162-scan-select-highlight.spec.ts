@@ -17,6 +17,8 @@ import {
   getActiveDocPages,
   selectCanvasPages,
   rotateSelectedCanvasPages,
+  refreshActiveBuffer,
+  recognitionRuns,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -112,6 +114,44 @@ async function spanBoxes(): Promise<{ left: number; top: number; width: number }
   });
 }
 
+/** The layer's native build count, and the build its recognition arm last
+ *  settled for. Equal means nothing is left to decide for the current build. */
+async function layerBuilds(): Promise<{ text: number; ocr: number }> {
+  return await browser.execute(function () {
+    const el = document.querySelector('[data-testid="text-layer"]') as HTMLElement | null;
+    return {
+      text: Number(el?.dataset.textBuild ?? -1),
+      ocr: Number(el?.dataset.ocrBuild ?? -2),
+    };
+  });
+}
+
+/** The live selection's text, and whether both its ends lie in a text layer. */
+async function selectionState(): Promise<{ text: string; inLayer: boolean }> {
+  return await browser.execute(function () {
+    const sel = window.getSelection();
+    const layerOf = (node: Node | null): Element | null =>
+      (node instanceof Element ? node : node?.parentElement ?? null)?.closest(
+        '[data-testid="text-layer"]',
+      ) ?? null;
+    return {
+      text: sel ? sel.toString() : '',
+      inLayer: !!sel && sel.rangeCount > 0 && !!layerOf(sel.anchorNode) && !!layerOf(sel.focusNode),
+    };
+  });
+}
+
+async function openRecognisedScan(): Promise<void> {
+  await closeAllFiles();
+  await openByPaths([SCANNED]);
+  await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+  await waitForRecognition();
+  await $('[data-testid="text-layer"][data-ocr-status="ready"]').waitForExist({
+    timeout: OCR_TIMEOUT,
+    timeoutMsg: 'the recognised page never reported ready',
+  });
+}
+
 async function waitForRecognition(): Promise<void> {
   await browser.waitUntil(async () => (await beginSelectionGesture()) && (await spanCount()) > 0, {
     timeout: OCR_TIMEOUT,
@@ -194,6 +234,80 @@ describe('selecting and highlighting text on a scanned page', () => {
     const content = await (await pdf.getPage(1)).getTextContent();
     await pdf.loadingTask.destroy();
     expect(content.items.length).toBe(0);
+  });
+
+  it('a new document for the same bytes keeps the boxes and the selection', async function () {
+    this.timeout(OCR_TIMEOUT * 3);
+    // A new pdf.js document over unchanged bytes carries the same content key,
+    // so the recognised boxes stay mounted, the selection over them stays, and
+    // the recognizer is not asked again.
+    await openRecognisedScan();
+    const boxes = await spanBoxes();
+    const text = await selectFirstSpan();
+    expect(text.length).toBeGreaterThan(2);
+    await $('[data-testid="text-selection-menu"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'no markup bar for the recognised selection',
+    });
+    const runs = await recognitionRuns();
+    const before = await layerBuilds();
+
+    await refreshActiveBuffer();
+    // The new document's own build, and its recognition arm's decision on it.
+    await browser.waitUntil(
+      async () => {
+        const now = await layerBuilds();
+        return now.text > before.text && now.ocr === now.text;
+      },
+      { timeout: 30_000, timeoutMsg: 'the layer never rebuilt for the refreshed buffer' },
+    );
+
+    expect(await recognitionRuns()).toBe(runs);
+    expect(await $('[data-testid="text-layer"][data-ocr-status="ready"]').isExisting()).toBe(true);
+    expect(await spanBoxes()).toEqual(boxes);
+    const selection = await selectionState();
+    expect(selection.text).toBe(text);
+    expect(selection.inLayer).toBe(true);
+    expect(await $('[data-testid="text-selection-menu"]').isDisplayed()).toBe(true);
+  });
+
+  it('a new document for other bytes recognises again', async function () {
+    this.timeout(OCR_TIMEOUT * 4);
+    // A page turned and committed is other bytes: the boxes recognised from
+    // the old bytes are not served for them.
+    await openRecognisedScan();
+    const upright = await recognitionRuns();
+    const pages = await getActiveDocPages();
+    await selectCanvasPages([pages[0].id]);
+    await rotateSelectedCanvasPages(90);
+    // The turned page is recognised at its new orientation first, so the
+    // count below moves for the commit alone.
+    await browser.waitUntil(
+      async () => {
+        await beginSelectionGesture();
+        const now = await layerBuilds();
+        return (await recognitionRuns()) > upright && now.ocr === now.text && (await spanCount()) > 0;
+      },
+      { timeout: OCR_TIMEOUT, interval: 1_000, timeoutMsg: 'the turned page was never recognised' },
+    );
+    const turned = await recognitionRuns();
+
+    await commitPendingEdits();
+    await browser.waitUntil(
+      async () => {
+        await beginSelectionGesture();
+        return (await recognitionRuns()) > turned;
+      },
+      { timeout: OCR_TIMEOUT, interval: 1_000, timeoutMsg: 'the committed bytes were never recognised' },
+    );
+    await $('[data-testid="text-layer"][data-ocr-status="ready"]').waitForExist({
+      timeout: OCR_TIMEOUT,
+      timeoutMsg: 'the recognised page never reported ready after the commit',
+    });
+    await browser.waitUntil(async () => (await spanCount()) > 0, {
+      timeout: 15_000,
+      timeoutMsg: 'no recognised spans after the commit',
+    });
   });
 
   it('a page-tier rotate re-recognises rather than serving transposed boxes', async function () {

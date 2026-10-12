@@ -4007,6 +4007,7 @@
   "panel.comments.summaryUnreadable": "コメントリストを読み取れなかったページ: {{pages}}",
   "panel.comments.summary_other": "{{count}} 件の注釈",
   "panel.common.error": "エラー：{{message}}",
+  "panel.common.documentChanged": "このツールが読み取った後に文書が変更されました。もう一度実行してください。",
   "panel.common.folderRouteHint": "これは開いている文書に対して行われます。フォルダー内のすべての文書に同じ手順を適用するには、アクションを作成してください。",
   "panel.common.folderRouteOpen": "ガイド付きアクションを開く",
   "panel.common.gsNotExecutable": "環境設定 ▸ エンジン で設定された Ghostscript はもう存在しません。プログラムを選び直してください。",

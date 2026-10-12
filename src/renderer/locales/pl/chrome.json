@@ -4247,6 +4247,7 @@
   "panel.comments.summary_one": "{{count}} komentarz",
   "panel.comments.summary_other": "{{count}} komentarza",
   "panel.common.error": "Błąd: {{message}}",
+  "panel.common.documentChanged": "Dokument zmienił się po odczytaniu go przez to narzędzie. Uruchom je ponownie.",
   "panel.common.folderRouteHint": "To działa na otwartym dokumencie. Aby wykonać te same kroki na każdym dokumencie w folderze, utwórz akcję.",
   "panel.common.folderRouteOpen": "Otwórz akcje krok po kroku",
   "panel.common.gsNotExecutable": "Ghostscript ustawiony w „Preferencje ▸ Silnik” już nie istnieje. Wybierz program ponownie.",

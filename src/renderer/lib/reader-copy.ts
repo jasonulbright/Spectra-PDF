@@ -18,10 +18,21 @@
  * claims are held: a commit that claims two working paths in one step between
  * the two claims would wait for the call while the call waits for it.
  *
+ * Copies are all or nothing. When one copy cannot be made or lent its
+ * credential, the copies already made are removed and the whole call reads
+ * the working copies under their shared locks: a call that read one input
+ * from a copy and another from its working copy could read two revisions.
+ *
  * The queue label and the log read the caller's parameters. The result and the
  * refusal text name the working path, never the copy. The copy is removed and
  * the loan returned when the call settles, whatever the outcome; a copy still
- * held open is removed by Rust when the window is destroyed.
+ * held open is removed by Rust after the window's engine processes stop.
+ *
+ * A copy outlives the commits it lets through, so page numbers in a result can
+ * name pages the live document no longer has at that position. The result
+ * records the revision each input was read at (`readsLiveRevision`); a
+ * consumer that maps page numbers or indexes onto the live document applies
+ * them only while that revision is still live.
  *
  * A member keeps no state that names its input past the call. A method whose
  * cache or result keeps the input path (the separation plate cache, the print
@@ -30,7 +41,7 @@
  */
 import { withFileLock, type LockClaim } from './engine-lock';
 import { EngineError } from './engine-messages';
-import type { OpenFile } from '../state/types';
+import type { AppState, OpenFile } from '../state/types';
 
 /** Each member -> the parameters that carry a working path. */
 export const READER_COPY_METHODS: Readonly<Record<string, readonly string[]>> = {
@@ -61,6 +72,61 @@ export function isReaderCopyMethod(method: string): boolean {
 
 export type ReaderCopyFile = Pick<OpenFile, 'workingPath' | 'security'>;
 
+/** One moment of a live document: its bytes and its page tier. Every commit
+ * replaces the buffer, and every page-tier edit advances `editRevision`. */
+export interface ReaderRevision {
+  buffer: unknown;
+  editRevision: number;
+  /** Uncommitted page edits: the page list is not the bytes' page order. */
+  pageDirty: boolean;
+}
+
+/** The revision of the open, non-import-only document whose working copy is `workingPath`. */
+export function readerRevisionIn(
+  state: Pick<AppState, 'files' | 'pageDirtyPaths'>,
+  workingPath: string,
+): ReaderRevision | undefined {
+  for (const file of state.files.values()) {
+    if (file.workingPath !== workingPath || file.importOnly) continue;
+    return {
+      buffer: file.buffer,
+      editRevision: file.editRevision ?? 0,
+      pageDirty: state.pageDirtyPaths.includes(file.path),
+    };
+  }
+  return undefined;
+}
+
+/** Result object -> working path -> the revision that input was read at. */
+const readRevisions = new WeakMap<object, ReadonlyMap<string, ReaderRevision>>();
+
+/** The revision of `workingPath` that a member call's `result` was read from. */
+export function readerRevisionOf(result: unknown, workingPath: string): ReaderRevision | undefined {
+  return result !== null && typeof result === 'object' ? readRevisions.get(result)?.get(workingPath) : undefined;
+}
+
+/**
+ * Whether page numbers and indexes in `result` still address the live
+ * document at `workingPath`: the input was read with no page edit pending,
+ * and neither a commit nor a page edit has happened since. A result with no
+ * recorded revision does not.
+ */
+export function readsLiveRevision(
+  result: unknown,
+  state: Pick<AppState, 'files' | 'pageDirtyPaths'>,
+  workingPath: string,
+): boolean {
+  const read = readerRevisionOf(result, workingPath);
+  const live = readerRevisionIn(state, workingPath);
+  return read !== undefined && live !== undefined && !read.pageDirty && !live.pageDirty
+    && read.buffer === live.buffer && read.editRevision === live.editRevision;
+}
+
+function stamped<T>(value: T, revisions: ReadonlyMap<string, ReaderRevision>): T {
+  if (revisions.size && value !== null && typeof value === 'object') readRevisions.set(value, revisions);
+  return value;
+}
+
 export interface ReaderCopyIo {
   /** The open, non-import-only file of this window whose working copy is `workingPath`. */
   fileAt: (workingPath: string) => ReaderCopyFile | undefined;
@@ -72,6 +138,8 @@ export interface ReaderCopyIo {
   lend: (file: ReaderCopyFile, copy: string) => Promise<boolean>;
   /** Engine `close_document(copy)`. */
   giveBack: (copy: string) => Promise<void>;
+  /** The live revision of the document whose working copy is `workingPath`. */
+  revision: (workingPath: string) => ReaderRevision | undefined;
 }
 
 /** Runs the engine step of a call. A call on a copy passes it through the hold seam. */
@@ -180,8 +248,9 @@ function remapError(error: unknown, pairs: readonly [string, string][]): unknown
  * for the method names it, the call claims it shared, and it is the working
  * copy of an open file of this window. A call that copies nothing, and every
  * non-member, reaches `run` synchronously with its own parameters and claims.
- * A copy that cannot be made or cannot be lent its credential leaves that path
- * to the shared-lock read.
+ * A copy that cannot be made or cannot be lent its credential leaves every
+ * path of the call to the shared-lock read. The result of a call that copied
+ * or could have copied records the revision each input was read at.
  */
 export function withReaderCopies<T>(
   method: string,
@@ -217,6 +286,24 @@ async function runOnCopies<T>(
   const made: string[] = [];
   const lent = new Set<string>();
   const copies = new Map<string, string>();
+  const revisions = new Map<string, ReaderRevision>();
+  const record = () => {
+    for (const path of working) {
+      const revision = io.revision(path);
+      if (revision) revisions.set(path, revision);
+    }
+  };
+  const release = async () => {
+    while (made.length) {
+      const copy = made.shift()!;
+      try {
+        await io.remove(copy);
+      } catch (error) {
+        console.info(`[reader-copy] ${method} left ${copy}: ${errorText(error)}`);
+      }
+      if (lent.delete(copy)) await io.giveBack(copy).catch(() => {});
+    }
+  };
   try {
     // One claim of the read keys and nothing else held: see the module comment.
     await withFileLock(working.map(key => ({ key, mode: 'shared' as const })), async () => {
@@ -227,20 +314,32 @@ async function runOnCopies<T>(
           copies.set(path, copy);
         } catch (error) {
           fallback(path, error);
+          copies.clear();
+          return;
         }
       }
+      // The copies hold the bytes of the buffers of this moment: no commit
+      // lands while the shared claim is held.
+      record();
     });
-    for (const [path, copy] of [...copies]) {
+    for (const [path, copy] of copies) {
       try {
         const file = io.fileAt(path);
         if (!file) throw new Error('the document is no longer open');
         if (await io.lend(file, copy)) lent.add(copy);
       } catch (error) {
-        copies.delete(path);
         fallback(path, error);
+        copies.clear();
+        break;
       }
     }
-    if (!copies.size) return await run(params, claims, direct);
+    if (!copies.size) {
+      await release();
+      revisions.clear();
+      // Recorded inside the call's own locks, as its engine step starts.
+      const locked: ReaderDispatch = send => { record(); return send(); };
+      return stamped(await run(params, claims, locked), revisions);
+    }
     const readParams: Record<string, unknown> = { ...params };
     for (const param of declared) {
       const value = params[param];
@@ -253,18 +352,11 @@ async function runOnCopies<T>(
     });
     const pairs = replacements(copies);
     try {
-      return remapValue(await run(readParams, readClaims, heldDispatch), pairs) as T;
+      return stamped(remapValue(await run(readParams, readClaims, heldDispatch), pairs) as T, revisions);
     } catch (error) {
       throw remapError(error, pairs);
     }
   } finally {
-    for (const copy of made) {
-      try {
-        await io.remove(copy);
-      } catch (error) {
-        console.info(`[reader-copy] ${method} left ${copy}: ${errorText(error)}`);
-      }
-      if (lent.has(copy)) await io.giveBack(copy).catch(() => {});
-    }
+    await release();
   }
 }

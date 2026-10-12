@@ -43,6 +43,8 @@ import {
   releaseReaderCopies,
   readerCopiesWaiting,
   readerFolders,
+  addAnnotation,
+  commandEnabled,
 } from '../support/harness.js';
 
 /**
@@ -469,5 +471,67 @@ describe('Print preflight', () => {
     expect(contone.params.min_dpi).toBe(50);
     expect(contone.status).toBe('warn');
     expect(snapshot.profiles).toContain('house_rule');
+  });
+
+  // Its own suite, declared after the fixup pass and so run after it: it
+  // opens another document, and the suites above read the first one.
+  describe('a pending page edit', () => {
+    async function recheckIdle(): Promise<boolean> {
+      return browser.execute(() => {
+        const button = document.querySelector('[data-testid="preflight-recheck"]') as HTMLButtonElement | null;
+        return !!button && !button.disabled;
+      });
+    }
+
+    /** One page with a hairline, drawn through pdf-lib's own content writer. */
+    async function buildHairlinePdf(path: string): Promise<void> {
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const page = doc.addPage([612, 792]);
+      page.drawText('Hairline fixture', { x: 40, y: 700, size: 14, font });
+      page.drawLine({ start: { x: 40, y: 560 }, end: { x: 400, y: 560 }, thickness: 0.05 });
+      writeFileSync(path, await doc.save());
+    }
+
+    it('is committed before the check reads, so its findings show on the page', async () => {
+      const edited = resolve(dir, 'hairline-annotated.pdf');
+      await buildHairlinePdf(edited);
+      await closeAllFiles();
+      await openByPaths([edited]);
+      await setView('canvas');
+      await browser.waitUntil(async () => (await getState()).activeFile?.path === edited,
+        { timeoutMsg: 'the annotated document never became active' });
+      expect(await invokeAppCommand('tools.panel.preflight')).toBe(true);
+      await browser.waitUntil(async () => (await preflightSnapshot()) !== null && await recheckIdle(),
+        { timeout: 30000, timeoutMsg: 'the first check of the annotated document never settled' });
+
+      // A highlight is a page-tier edit: Save is offered, the file's own flag
+      // stays unset until the edit commits. The report on screen was read
+      // before it.
+      await addAnnotation({ kind: 'highlight', x: 0.1, y: 0.1, w: 0.2, h: 0.05, color: '#ffd54a' });
+      await browser.waitUntil(async () => await commandEnabled('file.save'),
+        { timeoutMsg: 'the highlight never offered Save' });
+      expect((await getState()).activeFile?.dirty).toBe(false);
+
+      // Re-check: its gate commits the highlight, and the check reads the
+      // committed bytes.
+      await browser.execute(() => {
+        (document.querySelector('[data-testid="preflight-recheck"]') as HTMLButtonElement).click();
+      });
+      await browser.waitUntil(
+        async () => (await getState()).activeFile?.dirty === true && await recheckIdle(),
+        { timeout: 30000, timeoutMsg: 'the re-check never committed the highlight and settled' },
+      );
+
+      await preflightShow('hairlines_absent');
+      await browser.waitUntil(
+        async () => (await a11yFindingsOnPage())[0]?.checkId === 'hairlines_absent',
+        { timeout: 15000, timeoutMsg: 'the hairline of the annotated document never reached the page' },
+      );
+      const refused = await browser.execute(
+        () => document.body.innerText.includes('The document changed after this tool read it.'),
+      );
+      expect(refused).toBe(false);
+    });
   });
 });

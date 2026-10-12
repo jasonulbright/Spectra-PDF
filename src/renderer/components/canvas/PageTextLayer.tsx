@@ -10,12 +10,14 @@ import { textLayerScaleVars } from '../../lib/text-layer-scale';
 import { applyReadingOrder } from '../../lib/text-layer-order';
 import { clearTextLayer, swapTextLayer } from '../../lib/text-layer-selection';
 import { subscribeTextLayerRebuild, textLayerRebuildRevision } from '../../lib/text-layer-rebuild';
+import { contentKeyOf, replacementOf } from '../../lib/pdfDocCache';
 import {
   peekSelectionCache,
   rasterScaleFor,
   recognizeForSelection,
   releaseOcrSelection,
   wordSpanBox,
+  type OcrSelectPage,
   type OcrSelectStatus,
 } from '../../lib/ocr-selection';
 
@@ -128,15 +130,59 @@ export function PageTextLayer({
   // "did pdf.js find text" has to be remembered rather than re-observed.
   const [native, setNative] = useState<{ version: number; hasText: boolean } | null>(null);
   const nativeVersionRef = useRef(0);
-  // The page, rotation and size the spans in the container were laid out for.
-  // Spans of an older proxy stand only while the build for the new one runs:
-  // its swap replaces them, and its failure removes them.
-  const builtRef = useRef<{ pageNumber: number; rotation: number; w: number; h: number } | null>(null);
+  // The page, rotation and size the spans in the container were laid out for,
+  // the content key of the bytes they came from, and, for recognised word
+  // boxes, the cache answer they were laid out from. Spans of an older proxy
+  // stand only while the build for the new one runs: its swap replaces them,
+  // and its failure removes them. Word boxes over equal bytes stay, because
+  // the build of a scan finds no text to replace them with.
+  const builtRef = useRef<{
+    /** The document the shown spans were built or kept from. */
+    pdf: PDFDocumentProxy;
+    pageNumber: number;
+    rotation: number;
+    w: number;
+    h: number;
+    key: string | null;
+    ocr: OcrSelectPage | null;
+  } | null>(null);
   const revision = useSyncExternalStore(subscribeTextLayerRebuild, textLayerRebuildRevision, textLayerRebuildRevision);
+  // The content key of `pdf`'s bytes, once its hash is done. Null while it is
+  // pending: a new proxy says nothing about its bytes until then.
+  const [keyed, setKeyed] = useState<{ pdf: PDFDocumentProxy; key: string } | null>(null);
+  useEffect(() => {
+    const pending = pdf ? contentKeyOf(pdf) : null;
+    if (!pdf || !pending) return;
+    let cancelled = false;
+    void pending.then((key) => {
+      if (!cancelled) setKeyed({ pdf, key });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf]);
+  const contentKey = keyed !== null && keyed.pdf === pdf ? keyed.key : null;
   // Has a selection gesture actually begun on THIS page? See the OCR arm below
-  // — this is the trigger, not the armed tool.
-  const [gestured, setGestured] = useState(false);
-  useEffect(() => setGestured(false), [pdf, pageNumber]);
+  // — this is the trigger, not the armed tool. The gesture is recorded with
+  // the page and the bytes it was made over, so it holds for a new proxy over
+  // equal bytes and never for other bytes or another page, including in the
+  // render that first sees them.
+  const [gesture, setGesture] = useState<{
+    pageNumber: number;
+    key: string | null;
+    pdf: PDFDocumentProxy | null;
+  } | null>(null);
+  const gestured = gesture !== null && gesture.pageNumber === pageNumber
+    && ((gesture.key !== null && gesture.key === contentKey) || gesture.pdf === pdf);
+  // Other bytes end the gesture: bytes that later return to its key (an undo)
+  // were not gestured over since, and their recognition was released.
+  useEffect(() => {
+    if (contentKey === null) return;
+    setGesture((g) => {
+      if (g === null || g.key === contentKey) return g;
+      return g.key === null && g.pdf === pdf ? { ...g, key: contentKey } : null;
+    });
+  }, [contentKey, pdf]);
 
   // Rebuilding is EXPENSIVE - a worker round-trip (`getTextContent`) plus a
   // full span rebuild, per mounted page. Zoom changes arrive as a burst (OS key
@@ -159,19 +205,46 @@ export function PageTextLayer({
     // A new proxy over the same page geometry keeps the spans it finds until
     // the new ones are built, and the swap carries the selection across. Spans
     // laid out for another page, rotation or size select the wrong glyphs and
-    // go at once, as do recognised word boxes, which the OCR arm reinstalls.
+    // go at once.
     const built = builtRef.current;
     const sameGeometry = built !== null && built.pageNumber === pageNumber && built.rotation === rotation
-      && built.w === layoutW && built.h === layoutH && container.dataset.ocrLayer !== 'true';
-    const usable = pdf !== null && layoutW > 0 && layoutH > 0;
-    if (!usable || !sameGeometry) {
+      && built.w === layoutW && built.h === layoutH;
+    const sized = layoutW > 0 && layoutH > 0;
+    if (!sized || !sameGeometry) {
       clearTextLayer(container);
       delete container.dataset.ocrLayer;
       builtRef.current = null;
     }
-    if (!pdf || !usable) return;
+    if (!sized) return;
     let cancelled = false;
+    if (!pdf) {
+      // A file whose buffer changed shows no document until the new bytes
+      // load. The spans stand over that gap, so a selection reaches the new
+      // document's build; a failed load of the new bytes takes them down.
+      const shown = builtRef.current;
+      if (!shown) return;
+      // A load superseded by a newer one rejects (pdf.js aborts it), so a
+      // rejection clears only when no newer load stands behind it.
+      const watch = (load: Promise<PDFDocumentProxy>): Promise<void> => load.then(() => {}, () => {
+        if (cancelled || builtRef.current !== shown) return;
+        const newer = replacementOf(shown.pdf);
+        if (newer && newer !== load) return watch(newer);
+        clearTextLayer(container);
+        delete container.dataset.ocrLayer;
+        builtRef.current = null;
+      });
+      // The replacing load is requested by the canvas's own effect, which runs
+      // after this one in the same flush.
+      void Promise.resolve().then(() => {
+        const next = cancelled ? null : replacementOf(shown.pdf);
+        return next ? watch(next) : undefined;
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     let layer: TextLayer | null = null;
+    const keyOfBuild = contentKeyOf(pdf) ?? Promise.resolve(null);
 
     void (async () => {
       try {
@@ -222,12 +295,23 @@ export function PageTextLayer({
           br.setAttribute('role', 'presentation');
           return br;
         });
-        swapTextLayer(container, staged);
-        builtRef.current = { pageNumber, rotation, w: layoutW, h: layoutH };
-        setNative({
-          version: ++nativeVersionRef.current,
-          hasText: (container.textContent ?? '').trim().length > 0,
-        });
+        const key = await keyOfBuild;
+        if (cancelled) return;
+        const hasText = (staged.textContent ?? '').trim().length > 0;
+        const shown = builtRef.current;
+        // The build of a scan finds no text. Word boxes recognised from equal
+        // bytes over this geometry are still true of the page; swapping the
+        // empty layer in would drop them and the selection over them.
+        const keepBoxes = !hasText && key !== null && shown !== null && shown.ocr !== null
+          && shown.key === key && shown.pageNumber === pageNumber && shown.rotation === rotation
+          && shown.w === layoutW && shown.h === layoutH;
+        if (!keepBoxes) {
+          swapTextLayer(container, staged);
+          builtRef.current = { pdf, pageNumber, rotation, w: layoutW, h: layoutH, key, ocr: null };
+        } else {
+          builtRef.current = { ...shown, pdf };
+        }
+        setNative({ version: ++nativeVersionRef.current, hasText });
       } catch (e) {
         if (cancelled) return;
         // Kept spans may spell bytes the page no longer holds.
@@ -259,20 +343,29 @@ export function PageTextLayer({
     // Disarming the tool (or turning the preference off) must not leave a busy
     // badge standing over a page nothing is working on any more.
     if (!pdf || !container || !ocrSelection || !active || !native || native.hasText) {
+      // Boxes standing between two loads of the file keep their status.
+      if (!pdf && ocrSelection && container?.dataset.ocrLayer === 'true') return;
       setOcrStatus(null);
       // The preference going OFF is the one case that must also take back what
       // is already on screen; disarming the tool leaves the page alone.
       if (!ocrSelection && container) {
-        releaseOcrSelection(pdf, {
+        releaseOcrSelection(contentKey, {
           hasOcrSpans: container.dataset.ocrLayer === 'true',
           clear: () => {
-            container.replaceChildren();
+            clearTextLayer(container);
             delete container.dataset.ocrLayer;
+            const shown = builtRef.current;
+            if (shown) builtRef.current = { ...shown, ocr: null };
           },
         });
       }
       return;
     }
+    // The cache is keyed by the bytes; until their key is known there is
+    // nothing to look up, and the page on screen stays as it is.
+    if (contentKey === null) return;
+    const key = contentKey;
+    const build = native.version;
     let cancelled = false;
 
     void (async () => {
@@ -288,14 +381,17 @@ export function PageTextLayer({
         }
         if (cancelled) return;
         const spin = (page.rotate + rotation) % 360;
-        const known = peekSelectionCache(pdf, pageNumber, spin, ocrSelection.lang);
+        const known = peekSelectionCache(key, pageNumber, spin, ocrSelection.lang);
         // No answer yet and no gesture yet: stay out of the recognizer.
-        if (!known && !gestured) return;
+        if (!known && !gestured) {
+          setOcrStatus(null);
+          return;
+        }
         // Nothing already known means work is about to start; a cached answer
         // resolves without ever flashing a busy badge.
         if (!known) setOcrStatus('pending');
         const recognised = await recognizeForSelection(
-          pdf,
+          key,
           pageNumber,
           spin,
           ocrSelection.lang,
@@ -308,12 +404,22 @@ export function PageTextLayer({
         if (cancelled) return;
         setOcrStatus(recognised.status);
         if (recognised.status !== 'ready') return;
-        // pdf.js's rotation CSS keys off `data-main-rotation`, which its
-        // constructor stamped on the container. These boxes are already in the
-        // displayed frame, so that rule would rotate them a second time.
-        container.removeAttribute('data-main-rotation');
-        container.replaceChildren();
-        container.dataset.ocrLayer = 'true';
+        const shown = builtRef.current;
+        // The same cache answer over the same bytes and geometry is already
+        // on screen: reinstalling it would only replace the spans under the
+        // selection.
+        if (shown !== null && shown.ocr === recognised && shown.key === key
+            && shown.pageNumber === pageNumber && shown.rotation === rotation
+            && shown.w === layoutW && shown.h === layoutH && container.dataset.ocrLayer === 'true') return;
+        // Staged inside the live layer (as a box-less `markedContent`) so each
+        // span measures in the layer's own font and frame, then moved out
+        // before the swap; no paint falls between.
+        // The staged div carries no `data-main-rotation`, so the swap removes
+        // pdf.js's rotation rule, which would turn these displayed-frame
+        // boxes a second time.
+        const staged = document.createElement('div');
+        staged.className = 'markedContent';
+        container.append(staged);
         for (const word of recognised.words) {
           const box = wordSpanBox(word, layoutW, layoutH);
           const span = document.createElement('span');
@@ -321,7 +427,7 @@ export function PageTextLayer({
           span.style.cssText =
             'position:absolute;white-space:pre;transform-origin:0 0;' +
             `left:${box.left}px;top:${box.top}px;font-size:${box.fontSize}px;line-height:1;`;
-          container.append(span);
+          staged.append(span);
           // Measure, then squeeze the glyph run onto the recognised box -
           // pdf.js's own trick. Without it a word whose face is wider than the
           // scan's overhangs its box and a mid-word selection lands past the
@@ -329,19 +435,26 @@ export function PageTextLayer({
           const natural = span.offsetWidth;
           if (natural > 0) span.style.transform = `scaleX(${box.width / natural})`;
         }
+        staged.remove();
+        swapTextLayer(container, staged);
+        container.dataset.ocrLayer = 'true';
+        builtRef.current = { pdf, pageNumber, rotation, w: layoutW, h: layoutH, key, ocr: recognised };
       } catch (e) {
         // A failed recognition is a QUIET fallback to freehand, never an error
         // dialog: the user asked to select text, and the honest answer is that
         // this page has none to snap to.
         if (!cancelled) setOcrStatus('failed');
         logRenderError(`Recognition for selection failed on page ${pageNumber}`)(e);
+      } finally {
+        // The native build this arm last settled for, whatever it decided.
+        if (!cancelled) container.dataset.ocrBuild = String(build);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [pdf, pageNumber, rotation, layoutW, layoutH, ocrSelection, active, native, gestured]);
+  }, [pdf, contentKey, pageNumber, rotation, layoutW, layoutH, ocrSelection, active, native, gestured]);
 
   return (
     <>
@@ -354,7 +467,7 @@ export function PageTextLayer({
         // The selection gesture's own first event, and the OCR arm's trigger.
         // The layer is inert unless `active`, so this can only fire while the
         // Select tool is armed.
-        onPointerDown={() => setGestured(true)}
+        onPointerDown={() => setGesture({ pageNumber, key: contentKey, pdf })}
         // Only the Select tool selects text. Every other tool draws on the page
         // (annotate/redact/sign rubber-bands, form widgets), and a layer that ate
         // those pointers would break them — so it stays inert unless selecting.

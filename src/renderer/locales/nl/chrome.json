@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} opmerking",
   "panel.comments.summary_other": "{{count}} opmerkingen",
   "panel.common.error": "Fout: {{message}}",
+  "panel.common.documentChanged": "Het document is gewijzigd nadat dit hulpmiddel het heeft gelezen. Voer het opnieuw uit.",
   "panel.common.folderRouteHint": "Dit werkt op het geopende document. Wilt u dezelfde stappen op elk document in een map toepassen, maak dan een actie.",
   "panel.common.folderRouteOpen": "Begeleide acties openen",
   "panel.common.gsNotExecutable": "De Ghostscript die is ingesteld bij Voorkeuren ▸ Engine is er niet meer. Kies het programma opnieuw.",

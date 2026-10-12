@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} Kommentar",
   "panel.comments.summary_other": "{{count}} Kommentare",
   "panel.common.error": "Fehler: {{message}}",
+  "panel.common.documentChanged": "Das Dokument wurde geändert, nachdem dieses Werkzeug es gelesen hat. Führen Sie es erneut aus.",
   "panel.common.folderRouteHint": "Dies wirkt auf das geöffnete Dokument. Um dieselben Schritte auf jedes Dokument eines Ordners anzuwenden, legen Sie eine Aktion an.",
   "panel.common.folderRouteOpen": "Geführte Aktionen öffnen",
   "panel.common.gsNotExecutable": "Das unter Einstellungen ▸ Engine festgelegte Ghostscript ist nicht mehr vorhanden. Wählen Sie das Programm erneut.",

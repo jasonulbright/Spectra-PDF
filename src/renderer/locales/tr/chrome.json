@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} yorum",
   "panel.comments.summary_other": "{{count}} yorum",
   "panel.common.error": "Hata: {{message}}",
+  "panel.common.documentChanged": "Bu araç belgeyi okuduktan sonra belge değişti. Aracı yeniden çalıştırın.",
   "panel.common.folderRouteHint": "Bu, açık belge üzerinde çalışır. Aynı adımları bir klasördeki her belgeye uygulamak için bir eylem oluşturun.",
   "panel.common.folderRouteOpen": "Yönlendirmeli Eylemler’i aç",
   "panel.common.gsNotExecutable": "Tercihler ▸ Motor bölümünde ayarlanan Ghostscript artık orada değil. Programı yeniden seçin.",

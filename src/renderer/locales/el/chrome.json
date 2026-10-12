@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} σχόλιο",
   "panel.comments.summary_other": "{{count}} σχόλια",
   "panel.common.error": "Σφάλμα: {{message}}",
+  "panel.common.documentChanged": "Το έγγραφο άλλαξε αφού το διάβασε αυτό το εργαλείο. Εκτελέστε το ξανά.",
   "panel.common.folderRouteHint": "Αυτό ενεργεί στο ανοιχτό έγγραφο. Για να εκτελέσετε τα ίδια βήματα σε κάθε έγγραφο ενός φακέλου, δημιουργήστε μια ενέργεια.",
   "panel.common.folderRouteOpen": "Άνοιγμα Καθοδηγούμενων ενεργειών",
   "panel.common.gsNotExecutable": "Το Ghostscript που έχει οριστεί στις Προτιμήσεις ▸ Μηχανή δεν υπάρχει πια. Επιλέξτε ξανά το πρόγραμμα.",

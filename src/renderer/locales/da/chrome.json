@@ -4087,6 +4087,7 @@
   "panel.comments.summary_one": "{{count}} kommentar",
   "panel.comments.summary_other": "{{count}} kommentarer",
   "panel.common.error": "Fejl: {{message}}",
+  "panel.common.documentChanged": "Dokumentet blev ændret, efter at dette værktøj læste det. Kør det igen.",
   "panel.common.folderRouteHint": "Dette virker på det åbne dokument. Vil du køre de samme trin på hvert dokument i en mappe, så lav en handling.",
   "panel.common.folderRouteOpen": "Åbn Guidede handlinger",
   "panel.common.gsNotExecutable": "Den Ghostscript, der er angivet under Indstillinger ▸ Motor, findes ikke længere. Vælg programmet igen.",

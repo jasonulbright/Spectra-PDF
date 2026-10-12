@@ -292,6 +292,27 @@ export async function rebuildTextLayers(): Promise<void> {
   });
 }
 
+/** Replace the active file's buffer with a copy of its own bytes, so every
+ * page is drawn from a new pdf.js document for unchanged bytes. */
+export async function refreshActiveBuffer(): Promise<void> {
+  const error = await browser.execute(function () {
+    try {
+      (window as any).__SPECTRA_TEST__.refreshActiveBuffer();
+      return null;
+    } catch (err) {
+      return String(err);
+    }
+  });
+  if (error !== null) throw new Error(`refreshActiveBuffer failed: ${error}`);
+}
+
+/** How many recognitions for selection have started in the window. */
+export async function recognitionRuns(): Promise<number> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.recognitionRuns() as number;
+  });
+}
+
 /** The reader folders (`r<pid>-<hex>`) in the working folder of
  * `workingPath`. A working folder that is gone holds none. */
 export function readerFolders(workingPath: string): string[] {

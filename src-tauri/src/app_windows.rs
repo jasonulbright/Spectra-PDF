@@ -1884,8 +1884,9 @@ pub fn on_window_focused(app: &AppHandle, label: &str) {
 /// the claims below are released, and released first it is unrecoverable.
 /// Calling the sweep here leaves no separate call order to get wrong.
 ///
-/// The reader copies go after the engine retirement: a copy the window's job
-/// process still reads cannot be removed until that process stops.
+/// The window's reader copies are closed to new copies at once and removed
+/// only when the engine reports the window's processes stopped: a write the
+/// drain keeps running, or one queued behind it, still opens its copy.
 pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     crate::tabdrag::on_window_destroyed(app, label);
     if !is_app_window(label) {
@@ -1898,8 +1899,11 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     app.state::<ShowGate>().forget(label);
     app.state::<ComposeGate>().forget(label);
     app.state::<WindowRegistry>().forget(label);
-    crate::engine::retire_window(app, label);
-    crate::reader_copy::on_window_destroyed(app, label);
+    crate::reader_copy::on_window_closed(app, label);
+    let stopped = (app.clone(), label.to_string());
+    crate::engine::retire_window_then(app, label, move || {
+        crate::reader_copy::on_processes_stopped(&stopped.0, &stopped.1);
+    });
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────

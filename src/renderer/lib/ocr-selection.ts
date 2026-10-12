@@ -174,31 +174,57 @@ export function wordSpanBox(word: OcrWord, layoutW: number, layoutH: number): Wo
 }
 
 // ── The cache ───────────────────────────────────────────────────────────────
-// Keyed on BUFFER IDENTITY, which is what the pdf.js proxy already is: one
-// proxy per file per buffer (lib/pdfDocCache), replaced the moment the bytes
-// change. So a commit, an undo or a refresh retires the proxy, the entries
-// keyed on it become unreachable, and the next gesture recognises the page
-// that is actually on screen. A cache keyed on path plus page index would
-// instead hand the NEW bytes the OLD page's boxes.
+// Keyed on the CONTENT KEY of the bytes (lib/pdfDocCache: SHA-256 of the
+// buffer). A commit or an undo that changes the bytes changes the key, and the
+// next gesture recognises the page that is actually on screen; a cache keyed
+// on path plus page index would instead hand the NEW bytes the OLD page's
+// boxes. A new pdf.js document over EQUAL bytes keeps the key, so its boxes
+// and the selection over them survive the swap of document objects.
 //
-// A WeakMap because the key IS the lifetime: nothing here should keep a
-// destroyed document's raster geometry alive.
+// Lifetime: each cached document holds its key from load to eviction; the
+// entry goes when the last document for its bytes is evicted.
 
 // The ROTATION is part of the entry key, not just the page number. A page-tier
-// quarter-turn changes no bytes, so the proxy is unchanged and the page number
-// is unchanged, while the raster the boxes were measured against has swapped
+// quarter-turn changes no bytes, so the content key and the page number are
+// unchanged, while the raster the boxes were measured against has swapped
 // dimensions. Serving the pre-rotation boxes transposes every hit-box: the
 // sweep selects a different word than the pointer is over, and the /Highlight
 // quads it authors land on the wrong part of the page.
 //
 // The effective LANGUAGE is part of it for the identical reason, one step
 // further out: the recognition language changes the words and their boxes
-// while leaving the buffer, the page number and the rotation untouched. Pinning
+// while leaving the bytes, the page number and the rotation untouched. Pinning
 // a model in Preferences must re-recognise the page on screen, and without the
 // language in the key it would instead serve the boxes the previous model
-// produced for as long as the buffer lived.
+// produced for as long as the bytes stayed open.
 
-const cache = new WeakMap<object, Map<string, Promise<OcrSelectPage>>>();
+interface KeyEntry {
+  documents: number;
+  pages: Map<string, Promise<OcrSelectPage>>;
+}
+
+const cache = new Map<string, KeyEntry>();
+let runs = 0;
+
+/** A document over the bytes `key` names was loaded. */
+export function retainSelectionCache(key: string): void {
+  const entry = cache.get(key);
+  if (entry) entry.documents++;
+  else cache.set(key, { documents: 1, pages: new Map() });
+}
+
+/** A document over the bytes `key` names was evicted. The last one takes the
+ * recognition of those bytes with it. */
+export function releaseSelectionCache(key: string): void {
+  const entry = cache.get(key);
+  if (!entry) return;
+  if (--entry.documents <= 0) cache.delete(key);
+}
+
+/** How many recognitions have started since the module loaded. */
+export function recognitionRunCount(): number {
+  return runs;
+}
 
 /** Page, absolute display rotation normalised to one of 0/90/180/270, and the
  *  '+'-joined model string the boxes were produced by. */
@@ -225,52 +251,55 @@ async function withSlot<T>(job: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Recognise one page once per buffer per rotation per language. `key` is the
- * buffer-identity object (the pdf.js proxy); `run` produces a raw result and
- * is called at most once per (key, page, spin, lang), and only once a
- * concurrency slot is free.
+ * Recognise one page once per content key per rotation per language. `run`
+ * produces a raw result and is called at most once per (key, page, spin,
+ * lang) while a document holds the key, and only once a concurrency slot is
+ * free. A key no document holds caches nothing: its entry would never be
+ * released.
  *
  * A failure is CACHED as 'failed' rather than left to retry: a recognizer that
  * refused this page will refuse it again, and re-running Tesseract on every
  * pointer-down would turn one quiet fallback into a stutter.
  */
 export function recognizeForSelection(
-  key: object,
+  key: string,
   pageNumber: number,
   spin: number,
   lang: string,
   run: () => Promise<OcrResult | null>,
 ): Promise<OcrSelectPage> {
-  let pages = cache.get(key);
-  if (!pages) cache.set(key, (pages = new Map()));
+  const pages = cache.get(key)?.pages;
   const id = entryKey(pageNumber, spin, lang);
-  const existing = pages.get(id);
+  const existing = pages?.get(id);
   if (existing) return existing;
-  const started = withSlot(run).then(gateRecognition, () => ({
+  const started = withSlot(() => {
+    runs++;
+    return run();
+  }).then(gateRecognition, () => ({
     status: 'failed' as const,
     words: EMPTY,
   }));
-  pages.set(id, started);
+  pages?.set(id, started);
   return started;
 }
 
 /** What the cache already knows, without starting anything. */
 export function peekSelectionCache(
-  key: object,
+  key: string,
   pageNumber: number,
   spin: number,
   lang: string,
 ): Promise<OcrSelectPage> | null {
-  return cache.get(key)?.get(entryKey(pageNumber, spin, lang)) ?? null;
+  return cache.get(key)?.pages.get(entryKey(pageNumber, spin, lang)) ?? null;
 }
 
 /**
- * Forget one buffer's recognition. Not needed for correctness — a retired
- * proxy is unreachable — but the OCR preference turning OFF should not leave
- * a page that gets it back showing boxes recognised under the old setting.
+ * Forget the recognition of one content key, keeping its document count. The
+ * OCR preference turning OFF must not leave a page that gets it back showing
+ * boxes recognised under the old setting.
  */
-export function forgetSelectionCache(key: object): void {
-  cache.delete(key);
+export function forgetSelectionCache(key: string): void {
+  cache.get(key)?.pages.clear();
 }
 
 /** The mounted OCR spans, as much of them as this module needs to see. */
@@ -289,7 +318,7 @@ export interface OcrLayerHost {
  * behaviour exactly" would be true only after an unrelated gesture. Returns
  * whether anything was unmounted.
  */
-export function releaseOcrSelection(key: object | null, host: OcrLayerHost): boolean {
+export function releaseOcrSelection(key: string | null, host: OcrLayerHost): boolean {
   if (key) forgetSelectionCache(key);
   if (!host.hasOcrSpans) return false;
   host.clear();

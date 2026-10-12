@@ -4007,6 +4007,7 @@
   "panel.comments.summaryUnreadable": "註解清單無法讀取的頁：{{pages}}",
   "panel.comments.summary_other": "{{count}} 則註解",
   "panel.common.error": "錯誤：{{message}}",
+  "panel.common.documentChanged": "此工具讀取文件後，文件已變更。請重新執行。",
   "panel.common.folderRouteHint": "這只作用於目前開啟的文件。若要把同樣的步驟套用到某個資料夾裡的所有文件，請建立一個動作。",
   "panel.common.folderRouteOpen": "開啟指引動作",
   "panel.common.gsNotExecutable": "在「偏好設定 ▸ 引擎」中設定的 Ghostscript 已不存在。請重新選擇該程式。",

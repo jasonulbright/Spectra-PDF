@@ -16,8 +16,11 @@ import {
   gateRecognition,
   peekSelectionCache,
   rasterScaleFor,
+  recognitionRunCount,
   recognizeForSelection,
   releaseOcrSelection,
+  releaseSelectionCache,
+  retainSelectionCache,
   wordSpanBox,
 } from '../src/renderer/lib/ocr-selection';
 import type { OcrResult, OcrWord } from '../src/renderer/ocr/types';
@@ -35,6 +38,14 @@ const result = (words: OcrWord[]): OcrResult => ({ text: words.map((w) => w.text
 
 const confidentPage = (n = PAGE_MIN_WORDS + 2): OcrWord[] =>
   Array.from({ length: n }, (_, i) => word(`w${i}`, 92, i));
+
+// A content key held by one open document, unique to the test that asks.
+let keys = 0;
+const held = (): string => {
+  const key = `bytes-${++keys}`;
+  retainSelectionCache(key);
+  return key;
+};
 
 describe('gateRecognition', () => {
   it('serves a confident page as selection geometry', () => {
@@ -114,8 +125,8 @@ describe('wordSpanBox', () => {
 });
 
 describe('recognizeForSelection', () => {
-  it('recognises a page once per buffer', async () => {
-    const key = {};
+  it('recognises a page once per content key', async () => {
+    const key = held();
     const run = vi.fn(async () => result(confidentPage()));
     const a = await recognizeForSelection(key, 1, 0, 'eng', run);
     const b = await recognizeForSelection(key, 1, 0, 'eng', run);
@@ -124,7 +135,7 @@ describe('recognizeForSelection', () => {
   });
 
   it('keys pages separately', async () => {
-    const key = {};
+    const key = held();
     const run = vi.fn(async () => result(confidentPage()));
     await recognizeForSelection(key, 1, 0, 'eng', run);
     await recognizeForSelection(key, 2, 0, 'eng', run);
@@ -132,12 +143,12 @@ describe('recognizeForSelection', () => {
   });
 
   it('re-recognises after a page-tier ROTATE', async () => {
-    // A quarter-turn changes no bytes, so the proxy and the page number are
-    // both unchanged while the raster the boxes were measured against has
+    // A quarter-turn changes no bytes, so the content key and the page number
+    // are both unchanged while the raster the boxes were measured against has
     // swapped dimensions. Serving the old entry transposes every hit-box: the
     // sweep selects a different word than the pointer is over, and the quads
     // it authors land on the wrong part of the page.
-    const key = {};
+    const key = held();
     const run = vi.fn(async () => result(confidentPage()));
     const upright = await recognizeForSelection(key, 1, 0, 'eng', run);
     const turned = await recognizeForSelection(key, 1, 90, 'eng', run);
@@ -155,11 +166,11 @@ describe('recognizeForSelection', () => {
   });
 
   it('re-recognises when the effective LANGUAGE changes', async () => {
-    // The language changes the words and their boxes while leaving the buffer,
+    // The language changes the words and their boxes while leaving the bytes,
     // the page number and the rotation untouched. Pinning a model in
     // Preferences must re-recognise the page on screen; without the language in
-    // the key the old model's boxes would be served for the buffer's lifetime.
-    const key = {};
+    // the key the old model's boxes would be served while the bytes are open.
+    const key = held();
     const run = vi.fn(async () => result(confidentPage()));
     const english = await recognizeForSelection(key, 1, 0, 'eng', run);
     const french = await recognizeForSelection(key, 1, 0, 'fra', run);
@@ -173,18 +184,64 @@ describe('recognizeForSelection', () => {
     expect(peekSelectionCache(key, 1, 0, 'fra')).not.toBeNull();
   });
 
-  it('re-recognises after the buffer changes', async () => {
-    // The key IS the buffer identity (the pdf.js proxy, one per file per
-    // buffer). A commit retires it, so the next gesture recognises the page
-    // that is actually on screen rather than being handed the old boxes.
+  it('re-recognises when the bytes change', async () => {
+    // A commit that changes the bytes changes the content key, so the next
+    // gesture recognises the page that is actually on screen rather than
+    // being handed the old boxes.
     const run = vi.fn(async () => result(confidentPage()));
-    await recognizeForSelection({}, 1, 0, 'eng', run);
-    await recognizeForSelection({}, 1, 0, 'eng', run);
+    await recognizeForSelection(held(), 1, 0, 'eng', run);
+    await recognizeForSelection(held(), 1, 0, 'eng', run);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
+  it('serves a second document over equal bytes from the same entry', async () => {
+    // A new pdf.js document for unchanged bytes (a buffer refresh) carries
+    // the same content key; recognising again would drop the boxes and the
+    // selection over them.
+    const key = held();
+    retainSelectionCache(key);
+    const run = vi.fn(async () => result(confidentPage()));
+    const first = await recognizeForSelection(key, 1, 0, 'eng', run);
+    releaseSelectionCache(key);
+    expect(peekSelectionCache(key, 1, 0, 'eng')).not.toBeNull();
+    expect(await recognizeForSelection(key, 1, 0, 'eng', run)).toBe(first);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the entry when the last document for its bytes is evicted', async () => {
+    const key = held();
+    retainSelectionCache(key);
+    const run = vi.fn(async () => result(confidentPage()));
+    await recognizeForSelection(key, 1, 0, 'eng', run);
+    releaseSelectionCache(key);
+    releaseSelectionCache(key);
+    expect(peekSelectionCache(key, 1, 0, 'eng')).toBeNull();
+    // Bytes reopened later are recognised afresh.
+    retainSelectionCache(key);
+    await recognizeForSelection(key, 1, 0, 'eng', run);
+    expect(run).toHaveBeenCalledTimes(2);
+    releaseSelectionCache(key);
+  });
+
+  it('caches nothing for a key no document holds', async () => {
+    // Such an entry would never be released.
+    const run = vi.fn(async () => result(confidentPage()));
+    await recognizeForSelection('bytes-nobody-holds', 1, 0, 'eng', run);
+    expect(peekSelectionCache('bytes-nobody-holds', 1, 0, 'eng')).toBeNull();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts the recognitions that start, not the cache hits', async () => {
+    const key = held();
+    const before = recognitionRunCount();
+    const run = vi.fn(async () => result(confidentPage()));
+    await recognizeForSelection(key, 1, 0, 'eng', run);
+    await recognizeForSelection(key, 1, 0, 'eng', run);
+    expect(recognitionRunCount()).toBe(before + 1);
+  });
+
   it('caches a failure instead of retrying on every gesture', async () => {
-    const key = {};
+    const key = held();
     const run = vi.fn(async () => {
       throw new Error('no tesseract');
     });
@@ -194,7 +251,7 @@ describe('recognizeForSelection', () => {
   });
 
   it('peeks without starting work, and forgets on demand', async () => {
-    const key = {};
+    const key = held();
     expect(peekSelectionCache(key, 1, 0, 'eng')).toBeNull();
     const run = vi.fn(async () => result(confidentPage()));
     await recognizeForSelection(key, 1, 0, 'eng', run);
@@ -209,7 +266,7 @@ describe('recognizeForSelection', () => {
     // Each one holds a full-page canvas, a PNG, a base64 copy and an engine
     // subprocess; a reading view with a dozen scanned pages mounted would
     // otherwise start a dozen of those in the same frame.
-    const key = {};
+    const key = held();
     let live = 0;
     let peak = 0;
     const release: (() => void)[] = [];
@@ -259,12 +316,12 @@ describe('rasterScaleFor', () => {
 });
 
 describe('releaseOcrSelection', () => {
-  it('unmounts the spans on the page already on screen, and forgets the buffer', async () => {
+  it('unmounts the spans on the page already on screen, and forgets the bytes', async () => {
     // The preference turning OFF must take back what is on screen; without
     // this the spans stay selectable until an unrelated rebuild (a reopen, a
     // rotate or a zoom), so "off restores the older behaviour" would only be
     // true after a gesture the user did not make for that reason.
-    const key = {};
+    const key = held();
     const run = vi.fn(async () => result(confidentPage()));
     await recognizeForSelection(key, 1, 0, 'eng', run);
     let cleared = 0;

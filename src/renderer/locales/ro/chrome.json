@@ -4167,6 +4167,7 @@
   "panel.comments.summary_one": "{{count}} comentariu",
   "panel.comments.summary_other": "{{count}} de comentarii",
   "panel.common.error": "Eroare: {{message}}",
+  "panel.common.documentChanged": "Documentul s-a modificat după ce acest instrument l-a citit. Rulați-l din nou.",
   "panel.common.folderRouteHint": "Aceasta lucrează pe documentul deschis. Pentru a rula aceiași pași pe fiecare document dintr-un dosar, creează o acțiune.",
   "panel.common.folderRouteOpen": "Deschide Acțiuni ghidate",
   "panel.common.gsNotExecutable": "Ghostscript stabilit în Preferințe ▸ Motor nu mai există. Alegeți din nou programul.",

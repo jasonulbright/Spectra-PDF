@@ -99,6 +99,7 @@ describe('the locked internal call path', () => {
       remove: vi.fn(async () => true),
       lend: vi.fn(async () => false),
       giveBack: vi.fn(async () => {}),
+      revision: () => undefined,
     };
     const e = engine(io);
     const step = deferred();

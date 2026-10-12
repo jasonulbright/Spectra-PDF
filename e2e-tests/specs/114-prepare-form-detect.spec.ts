@@ -4,8 +4,10 @@
 //   · detection writes NOTHING (the document still has zero widgets after it
 //     has found five fields),
 //   · the checkbox decides — an unchecked candidate does not become a field,
-//   · and ONE undo removes the whole accepted batch, which is what proves the
-//     accept is a single operation rather than N.
+//   · ONE undo removes the whole accepted batch, which is what proves the
+//     accept is a single operation rather than N,
+//   · and a detection whose document changed while it ran places nothing:
+//     its page numbers name pages of a revision that is gone.
 import { resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +24,13 @@ import {
   formWidgetCount,
   pressGlobalKey,
   gsRestore,
+  getState,
+  waitForActiveCanvasPageIds,
+  deleteCanvasPagesAndWait,
+  commitPendingEdits,
+  holdReaderCopies,
+  releaseReaderCopies,
+  readerCopiesWaiting,
 } from '../support/harness.js';
 
 // "Date of birth" is here for the carry the detector's format hint earns: it
@@ -61,6 +70,15 @@ async function makeRuledForm(path: string): Promise<void> {
     });
   }
   writeFileSync(path, await doc.save());
+}
+
+/** The ruled form on page 1 and a page of plain prose, with no rule, after it. */
+async function makeRuledFormThenProse(path: string): Promise<void> {
+  await makeRuledForm(path);
+  const ruled = await PDFDocument.load(readFileSync(path));
+  const font = await ruled.embedFont(StandardFonts.Helvetica);
+  ruled.addPage([612, 792]).drawText('Notes for the reader.', { x: 72, y: 700, size: 11, font });
+  writeFileSync(path, await ruled.save());
 }
 
 async function fieldNames(path: string): Promise<string[]> {
@@ -193,6 +211,47 @@ describe('Prepare Form field detection', () => {
       interval: 200,
       timeoutMsg: 'one undo did not remove the whole created batch',
     });
+  });
+
+  it('refuses a detection whose document changed while it ran, and places nothing', async () => {
+    const twoPage = resolve(tmp, 'ruled-then-prose.pdf');
+    await makeRuledFormThenProse(twoPage);
+    await closeAllFiles();
+    await openByPaths([twoPage]);
+    await setView('canvas');
+    await focusTab({ doc: twoPage });
+    const pages = await waitForActiveCanvasPageIds();
+    expect(pages).toHaveLength(2);
+    const working = (await getState()).activeFile!.workingPath;
+    expect(await invokeAppCommand('tools.panel.prepareform')).toBe(true);
+    await $('[data-testid="prepare-form-panel"]').waitForDisplayed({ timeout: 20_000 });
+
+    // Detection reads a copy of both pages. Held before its engine step, the
+    // ruled page is deleted and the deletion committed: the one page left is
+    // the prose page, and the detection's page 1 is not it.
+    await holdReaderCopies();
+    try {
+      await clickEl('[data-testid="prepare-form-detect"]');
+      await browser.waitUntil(async () => (await readerCopiesWaiting()) === 1, {
+        timeout: 30_000,
+        interval: 200,
+        timeoutMsg: 'the detection never reached its engine step on a copy',
+      });
+      await deleteCanvasPagesAndWait([pages[0]]);
+      await commitPendingEdits();
+      expect((await PDFDocument.load(readFileSync(working))).getPageCount()).toBe(1);
+    } finally {
+      await releaseReaderCopies();
+    }
+
+    const refusal = await $('[data-testid="prepare-form-error"]');
+    await refusal.waitForDisplayed({ timeout: 60_000 });
+    expect(await refusal.getText()).toContain('The document changed after this tool read it.');
+    expect(await candidateRowCount()).toBe(0);
+    expect(await overlayCount()).toBe(0);
+    expect(await $('[data-testid="prepare-form-create"]').isExisting()).toBe(false);
+    expect(await formWidgetCount(twoPage)).toBe(0);
+    expect(await PDFDocument.load(readFileSync(working)).then((doc) => doc.getForm().getFields().length)).toBe(0);
   });
 
   it('recovers the same fields from a scan of the same form', async () => {

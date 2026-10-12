@@ -32,6 +32,8 @@ import {
   type LockOptions,
 } from '../lib/signatures';
 import { tChrome, tChromeCount } from '../i18n';
+import { readsLiveRevision } from '../lib/reader-copy';
+import { useReadAppState } from '../state/AppStateProvider';
 import {
   candidateKind,
   checkedCandidates,
@@ -64,7 +66,8 @@ import {
 // The detection call goes through the GATED `call`, not `callRaw`: a
 // candidate's page is a position IN THE FILE and the field it becomes is
 // authored against the committed page order, and those agree only after pending
-// page edits are flushed.
+// page edits are flushed. Detection reads a private copy, so a commit can land
+// while it runs: its pages are placed only while the revision it read is live.
 
 const KIND_KEYS: Record<CandidateKind, 'panel.prepareForm.kindText' | 'panel.prepareForm.kindCheckbox' | 'panel.prepareForm.kindRadio' | 'panel.prepareForm.kindSignature'> = {
   text: 'panel.prepareForm.kindText',
@@ -101,6 +104,7 @@ export function PrepareFormPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const readState = useReadAppState();
 
   const [candidates, setCandidates] = useState<FieldCandidate[]>([]);
   const [result, setResult] = useState<DetectionResult | null>(null);
@@ -220,6 +224,22 @@ export function PrepareFormPanel(): React.ReactElement {
         tesseract_path: tesseract,
         gs_path: gsPath,
       })) as unknown as DetectionResult;
+      // A detection that lands after its document stopped being the active
+      // one is dropped: its rows and its refusal belong to that document, and
+      // the panel and the canvas now show another. The same document at
+      // another working copy is refused below: the revision it read is gone.
+      if (readState().activeFileId !== path) return;
+      // The candidates of an earlier detection go with the refusal: this
+      // detection was asked for in their place.
+      const refuse = () => {
+        getCanvasServices()?.formCandidates.clear();
+        setResult(null);
+        setError(tChrome('panel.common.documentChanged'));
+      };
+      if (!readsLiveRevision(detection, readState(), workingPath)) {
+        refuse();
+        return;
+      }
       setResult(detection);
       const services = getCanvasServices();
       if (!services) {
@@ -227,17 +247,31 @@ export function PrepareFormPanel(): React.ReactElement {
         return;
       }
       const { shown } = await services.formCandidates.publish(path, detection);
+      if (readState().activeFileId !== path) {
+        // Only this detection's own candidates are taken back.
+        if (services.formCandidates.list().every((candidate) => candidate.path === path)) {
+          services.formCandidates.clear();
+        }
+        return;
+      }
+      // Placing the candidates reads page geometry asynchronously; a commit
+      // in that time leaves them on pages of the previous revision.
+      if (!readsLiveRevision(detection, readState(), workingPath)) {
+        refuse();
+        return;
+      }
       setStatus(
         shown === 0
           ? tChrome('panel.prepareForm.foundNone')
           : tChromeCount('panel.prepareForm.found', shown),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Another document's panel does not show this document's failure.
+      if (readState().activeFileId === path) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [call, path, scope, workingPath]);
+  }, [call, path, readState, scope, workingPath]);
 
   const create = useCallback(async () => {
     const chosen = checkedCandidates(candidates);
@@ -479,7 +513,7 @@ export function PrepareFormPanel(): React.ReactElement {
         {tChrome('dialog.formPrep.openPanel')}
       </button>
 
-      {error && <div className="text-sm text-red-400">{tChrome('panel.common.error', { message: error })}</div>}
+      {error && <div className="text-sm text-red-400" data-testid="prepare-form-error">{tChrome('panel.common.error', { message: error })}</div>}
       {status && <div className="text-sm text-neutral-300" data-testid="prepare-form-status">{status}</div>}
 
       {result && candidates.length === 0 && (

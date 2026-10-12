@@ -4167,6 +4167,7 @@
   "panel.comments.summary_one": "{{count}} comentari",
   "panel.comments.summary_other": "{{count}} comentaris",
   "panel.common.error": "Error: {{message}}",
+  "panel.common.documentChanged": "El document ha canviat després que aquesta eina el llegís. Torneu-la a executar.",
   "panel.common.folderRouteHint": "Això actua sobre el document obert. Per aplicar els mateixos passos a tots els documents d’una carpeta, creeu una acció.",
   "panel.common.folderRouteOpen": "Obre les Accions guiades",
   "panel.common.gsNotExecutable": "El Ghostscript indicat a Preferències ▸ Motor ja no hi és. Torneu a triar el programa.",

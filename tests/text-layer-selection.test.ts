@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   boundaryAt,
+  edgeBoundaries,
   holdSelection,
   restoredBoundaries,
   selectionIsForward,
@@ -199,6 +200,65 @@ describe('a selection across two layers', () => {
       { node: page1.childNodes[1].childNodes[0], offset: 0 }, { node: text('Second page'), offset: 6 },
     ), true)!;
     expect(restoredBoundaries(layer(['First ', 'pages']), held)).toBeNull();
+  });
+});
+
+// A layer that loses its text (a failed build, changed text) takes only the
+// ends that lay in it; a drag onto another page keeps its other end there.
+describe('a layer that lost the selected text', () => {
+  it('moves a forward selection\'s focus to the start of the layer and keeps the anchor', () => {
+    const page1 = layer(['First ', 'page']);
+    const page2 = layer(['Second ', 'page']);
+    const anchorNode = page1.childNodes[1].childNodes[0];
+    const held = holdSelection(page2, selection(
+      { node: anchorNode, offset: 0 },
+      { node: page2.childNodes[0].childNodes[0], offset: 6 },
+    ), true)!;
+    const emptied = el('layer');
+    expect(edgeBoundaries(emptied, held)).toEqual({
+      anchor: { node: anchorNode, offset: 0 },
+      focus: { node: emptied, offset: 0 },
+    });
+  });
+
+  it('moves a forward selection\'s anchor to the end of the layer and keeps the focus', () => {
+    const page1 = layer(['First ', 'page']);
+    const page2 = layer(['Second ', 'page']);
+    const focusNode = page2.childNodes[0].childNodes[0];
+    const held = holdSelection(page1, selection(
+      { node: page1.childNodes[1].childNodes[0], offset: 0 },
+      { node: focusNode, offset: 6 },
+    ), true)!;
+    const changed = layer(['Other ', 'text']);
+    expect(edgeBoundaries(changed, held)).toEqual({
+      anchor: { node: changed, offset: changed.childNodes.length },
+      focus: { node: focusNode, offset: 6 },
+    });
+  });
+
+  it('a backward selection keeps its outside end before the layer', () => {
+    const page1 = layer(['First ', 'page']);
+    const page2 = layer(['Second ', 'page']);
+    const focusNode = page1.childNodes[1].childNodes[0];
+    // Anchor on page 2, dragged back onto page 1.
+    const held = holdSelection(page2, selection(
+      { node: page2.childNodes[0].childNodes[0], offset: 6 },
+      { node: focusNode, offset: 0 },
+    ), false)!;
+    const emptied = el('layer');
+    expect(edgeBoundaries(emptied, held)).toEqual({
+      anchor: { node: emptied, offset: 0 },
+      focus: { node: focusNode, offset: 0 },
+    });
+  });
+
+  it('a selection wholly inside the layer has nothing left to cover', () => {
+    const page1 = layer(['First ', 'page']);
+    const held = holdSelection(page1, selection(
+      { node: page1.childNodes[0].childNodes[0], offset: 0 },
+      { node: page1.childNodes[1].childNodes[0], offset: 4 },
+    ), true)!;
+    expect(edgeBoundaries(el('layer'), held)).toBeNull();
   });
 });
 

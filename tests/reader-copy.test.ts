@@ -7,10 +7,14 @@ import { UNRESTRICTED } from '../src/renderer/lib/document-permissions';
 import {
   READER_COPY_METHODS,
   holdReaderCopies,
+  readerRevisionIn,
+  readerRevisionOf,
+  readsLiveRevision,
   withReaderCopies,
   type ReaderCopyIo,
   type ReaderCopyRun,
 } from '../src/renderer/lib/reader-copy';
+import type { AppState, OpenFile } from '../src/renderer/state/types';
 
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({}));
 
@@ -32,10 +36,39 @@ function copyOf(working: string, n: number): string {
   return `${working.slice(0, at)}\\r42-${n.toString(16).padStart(8, '0')}${working.slice(at)}`;
 }
 
+type LiveState = Pick<AppState, 'files' | 'pageDirtyPaths'>;
+
+/** A window's documents, keyed by identity path, each with its own buffer. */
+function liveState(workingPaths: string[]): LiveState {
+  const files = new Map<string, OpenFile>();
+  for (const workingPath of workingPaths) {
+    const path = `D:\\docs\\${workingPath.slice(workingPath.lastIndexOf('\\') + 1)}`;
+    files.set(path, { path, workingPath, buffer: new Uint8Array(1), editRevision: 0 } as unknown as OpenFile);
+  }
+  return { files, pageDirtyPaths: [] };
+}
+
+/** Replaces the file of `workingPath` with `change` applied. */
+function changed(state: LiveState, workingPath: string, change: Partial<OpenFile>): void {
+  const files = new Map(state.files);
+  for (const [path, file] of files) {
+    if (file.workingPath === workingPath) files.set(path, { ...file, ...change });
+  }
+  state.files = files;
+}
+
+/** A commit of the document at `workingPath`: new bytes. */
+const committed = (state: LiveState, workingPath: string) =>
+  changed(state, workingPath, { buffer: new Uint8Array(1) });
+
+function identityPath(state: LiveState, workingPath: string): string {
+  return [...state.files.values()].find(file => file.workingPath === workingPath)!.path;
+}
+
 /** A window with `open` working copies. Records every copy made, removed,
  * lent and given back, and how many file-lock keys were held while each copy
  * was made. */
-function readerIo(open: string[]) {
+function readerIo(open: string[], live: LiveState = liveState(open)) {
   const made: string[] = [];
   const removed: string[] = [];
   const lent: string[] = [];
@@ -54,8 +87,9 @@ function readerIo(open: string[]) {
     remove: vi.fn(async (copy: string) => { removed.push(copy); return true; }),
     lend: vi.fn(async (_file: unknown, copy: string) => { lent.push(copy); return true; }),
     giveBack: vi.fn(async (copy: string) => { returned.push(copy); }),
+    revision: vi.fn((path: string) => readerRevisionIn(live, path)),
   } satisfies ReaderCopyIo;
-  return { io, made, removed, lent, returned, heldWhileCopying };
+  return { io, made, removed, lent, returned, heldWhileCopying, live };
 }
 
 function engine(io: ReaderCopyIo | null, trackable = true) {
@@ -247,6 +281,61 @@ describe('a long reader reads a private copy', () => {
     expect(r.returned).toEqual([]);
   });
 
+  it('a second copy that cannot be made removes the first, and the whole call reads the working copies', async () => {
+    const r = readerIo([W, W2]);
+    r.io.create.mockImplementationOnce(async (path: string) => {
+      const copy = copyOf(path, 1);
+      r.made.push(copy);
+      return copy;
+    });
+    r.io.create.mockRejectedValueOnce('Failed to make a reader copy: a stage name');
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const e = engine(r.io);
+    const step = deferred();
+    const leftAtDispatch: string[][] = [];
+    e.rawCall.mockImplementationOnce(async () => {
+      leftAtDispatch.push(r.made.filter(copy => !r.removed.includes(copy)));
+      await step.promise;
+      return {};
+    });
+    const compared = e.call('compare_visual', { file_a: W, file_b: W2 });
+    await vi.waitFor(() => expect(e.rawCall).toHaveBeenCalledOnce());
+    // No copy is left when the engine step starts, and it reads both working copies.
+    expect(r.made).toEqual([copyOf(W, 1)]);
+    expect(leftAtDispatch).toEqual([[]]);
+    expect(e.rawCall.mock.calls[0][1]).toEqual({ file_a: W, file_b: W2 });
+    expect(r.io.lend).not.toHaveBeenCalled();
+    // Both working copies stay claimed for the whole engine step.
+    const commitW = vi.fn();
+    const commitW2 = vi.fn();
+    const commits = [withFileLock([W], async () => { commitW(); }), withFileLock([W2], async () => { commitW2(); })];
+    await settle();
+    expect(commitW).not.toHaveBeenCalled();
+    expect(commitW2).not.toHaveBeenCalled();
+    step.resolve();
+    await Promise.all([compared, ...commits]);
+    expect(r.removed).toEqual(r.made);
+  });
+
+  it('a second copy whose credential cannot be lent removes both and returns the first loan', async () => {
+    const r = readerIo([W, W2]);
+    r.io.lend.mockImplementationOnce(async (_file: unknown, copy: string) => { r.lent.push(copy); return true; });
+    r.io.lend.mockRejectedValueOnce(new Error('stage credentials are not registered'));
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const e = engine(r.io);
+    const leftAtDispatch: string[][] = [];
+    e.rawCall.mockImplementationOnce(async () => {
+      leftAtDispatch.push(r.made.filter(copy => !r.removed.includes(copy)));
+      return {};
+    });
+    await e.call('compare_visual', { file_a: W, file_b: W2 });
+    expect(leftAtDispatch).toEqual([[]]);
+    expect(e.rawCall.mock.calls[0][1]).toEqual({ file_a: W, file_b: W2 });
+    expect(r.made).toHaveLength(2);
+    expect(r.removed).toEqual(r.made);
+    expect(r.returned).toEqual([r.made[0]]);
+  });
+
   it('a path the call also writes is never copied', async () => {
     const r = readerIo([W]);
     const e = engine(r.io);
@@ -369,5 +458,121 @@ describe('withReaderCopies', () => {
     expect(run).toHaveBeenCalledOnce();
     expect(run.mock.calls[0][0]).toBe(params);
     expect(run.mock.calls[0][1]).toBe(claims);
+  });
+});
+
+describe('a result records the revision it was read at', () => {
+  it('a copy records the revision of its claim; a commit during the engine step makes the result stale', async () => {
+    const r = readerIo([W]);
+    const e = engine(r.io);
+    const before = readerRevisionIn(r.live, W);
+    const step = deferred();
+    e.rawCall.mockImplementationOnce(async () => { await step.promise; return { candidates: [{ page: 1 }] }; });
+    const detected = e.call('detect_form_fields', { file: W, pages: 'all' });
+    await vi.waitFor(() => expect(e.rawCall).toHaveBeenCalledOnce());
+    // The commit is let through: the call holds the copy, not the working copy.
+    await withFileLock([W], async () => { committed(r.live, W); });
+    step.resolve();
+    const result = await detected;
+    expect(readerRevisionOf(result, W)).toEqual(before);
+    expect(readsLiveRevision(result, r.live, W)).toBe(false);
+  });
+
+  it('an unchanged document keeps the result live', async () => {
+    const r = readerIo([W]);
+    const e = engine(r.io);
+    e.rawCall.mockImplementationOnce(async () => ({ candidates: [] }));
+    const result = await e.call('detect_form_fields', { file: W, pages: 'all' });
+    expect(readsLiveRevision(result, r.live, W)).toBe(true);
+  });
+
+  it('the read under the locks records the revision inside the locks', async () => {
+    const r = readerIo([W]);
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const e = engine(r.io);
+    // A commit queued behind the copy claim, ahead of the call's own claim,
+    // lands before the engine step of the read under the locks.
+    let commit: Promise<void> | undefined;
+    r.io.create.mockImplementationOnce(async (path: string) => {
+      commit = withFileLock([W], async () => { committed(r.live, W); });
+      throw new Error(`no copy of ${path}`);
+    });
+    e.rawCall.mockImplementationOnce(async () => ({ candidates: [] }));
+    const result = await e.call('detect_form_fields', { file: W, pages: 'all' });
+    await commit;
+    expect(e.rawCall.mock.calls[0][1]).toEqual({ file: W, pages: 'all' });
+    expect(readsLiveRevision(result, r.live, W)).toBe(true);
+  });
+
+  it('refuses after a commit or a page edit of the document, and a result with no record', async () => {
+    const live = liveState([W, W2]);
+    const io = readerIo([W, W2], live).io;
+    // The result of a call on a copy is the remapped object, which carries the record.
+    const result = await withReaderCopies('detect_form_fields', { file: W }, [{ key: W, mode: 'shared' }], io,
+      async () => ({ pages: [1] }));
+    expect(result).toEqual({ pages: [1] });
+    expect(readsLiveRevision(result, live, W)).toBe(true);
+    expect(readsLiveRevision({}, live, W)).toBe(false);
+    expect(readsLiveRevision(null, live, W)).toBe(false);
+    expect(readsLiveRevision(result, live, W2)).toBe(false);
+
+    // Another document's commit leaves it live.
+    committed(live, W2);
+    expect(readsLiveRevision(result, live, W)).toBe(true);
+    // A page edit pending on the document.
+    live.pageDirtyPaths = [identityPath(live, W)];
+    expect(readsLiveRevision(result, live, W)).toBe(false);
+    live.pageDirtyPaths = [];
+    expect(readsLiveRevision(result, live, W)).toBe(true);
+    // A page edit that advanced the revision.
+    changed(live, W, { editRevision: 1 });
+    expect(readsLiveRevision(result, live, W)).toBe(false);
+    changed(live, W, { editRevision: 0 });
+    expect(readsLiveRevision(result, live, W)).toBe(true);
+    // A commit of the document.
+    committed(live, W);
+    expect(readsLiveRevision(result, live, W)).toBe(false);
+  });
+
+  it('a read while a page edit was pending never addresses the live document', async () => {
+    const live = liveState([W]);
+    live.pageDirtyPaths = [identityPath(live, W)];
+    const io = readerIo([W], live).io;
+    const result = await withReaderCopies('detect_form_fields', { file: W }, [{ key: W, mode: 'shared' }], io,
+      async () => ({}));
+    live.pageDirtyPaths = [];
+    expect(readerRevisionOf(result, W)?.pageDirty).toBe(true);
+    expect(readsLiveRevision(result, live, W)).toBe(false);
+  });
+});
+
+describe('a read of an internal method after the commit gate', () => {
+  // An internal reader runs no gate of its own: a page edit pending when it
+  // reads leaves its pages unaddressable, so the panel gates first.
+  it('is live when the gate committed the pending edit first, and stale without it', async () => {
+    const pendingAt = (live: LiveState) => {
+      live.pageDirtyPaths = [identityPath(live, W)];
+      changed(live, W, { editRevision: 1 });
+    };
+    const gate = async (live: LiveState) => {
+      await withFileLock([W], async () => {
+        committed(live, W);
+        live.pageDirtyPaths = [];
+      });
+    };
+
+    const gated = readerIo([W]);
+    pendingAt(gated.live);
+    const e = engine(gated.io, false);
+    await gate(gated.live);
+    const read = await e.callLocked('preflight', { file: W });
+    expect(e.runCommitGate).not.toHaveBeenCalled();
+    expect(readsLiveRevision(read, gated.live, W)).toBe(true);
+
+    const ungated = readerIo([W]);
+    pendingAt(ungated.live);
+    const e2 = engine(ungated.io, false);
+    const stale = await e2.callLocked('preflight', { file: W });
+    expect(readsLiveRevision(stale, ungated.live, W)).toBe(false);
   });
 });

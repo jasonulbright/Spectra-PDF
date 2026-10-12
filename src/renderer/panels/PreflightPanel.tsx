@@ -5,7 +5,10 @@ import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
 import { useOwnedOperationRun } from '../hooks/useOwnedOperationRun';
 import { EDIT_DECLINED } from '../lib/edit-text';
-import { useAppDispatch } from '../state/AppStateProvider';
+import { useAppDispatch, useReadAppState } from '../state/AppStateProvider';
+import { readsLiveRevision } from '../lib/reader-copy';
+import { runCommitGate } from '../lib/commit-gate';
+import { latestRun } from '../lib/latest-run';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getCanvasServices } from '../commands/context';
@@ -315,6 +318,7 @@ export function PreflightPanel(): React.ReactElement {
   const { performOperation } = useOperations();
   const beginRun = useOwnedOperationRun(activeFile);
   const dispatch = useAppDispatch();
+  const readState = useReadAppState();
   const [report, setReport] = useState<PreflightReport | null>(null);
   const [shipped, setShipped] = useState<PreflightProfile[]>([]);
   const [userProfiles, setUserProfiles] = useState<PreflightProfile[]>(() =>
@@ -383,20 +387,33 @@ export function PreflightPanel(): React.ReactElement {
     [],
   );
 
+  // The gate's commit replaces the buffer, which starts another run while this
+  // one is in flight; a document switch does the same. The run begun last owns
+  // the report, the drawn findings and `busy`.
+  const runs = useRef(latestRun()).current;
   const run = useCallback(
     async (usingId: string) => {
       if (!workingPath) return;
+      const current = runs.begin();
       setBusy(true);
       setStatus(tChrome('panel.preflight.analysing'));
       try {
         const user = userProfiles.find((p) => p.id === usingId);
+        // `preflight` is an internal method and runs no gate of its own. A
+        // read taken over a pending page edit addresses the bytes, not the
+        // pages on screen, and its findings could never be shown on a page.
+        await runCommitGate([workingPath]);
+        if (!current()) return;
+        const paths = await tools();
+        if (!current()) return;
         const res = (await call('preflight', {
           file: workingPath,
           // A user profile travels as the rule itself; a shipped one by id, so
           // the engine resolves its own constant rather than a copy of it.
           profile: user ?? usingId,
-          ...(await tools()),
+          ...paths,
         })) as unknown as PreflightReport;
+        if (!current()) return;
         setReport(res);
         // A draft is keyed by its finding's position in the report it was
         // typed against; kept across a new report it would name another
@@ -421,25 +438,30 @@ export function PreflightPanel(): React.ReactElement {
         }
         setStatus('');
       } catch (e: unknown) {
+        if (!current()) return;
         setStatus(
           tChrome('panel.common.error', {
             message: e instanceof Error ? e.message : String(e),
           }),
         );
       } finally {
-        setBusy(false);
+        if (current()) setBusy(false);
       }
     },
-    [workingPath, call, userProfiles, tools],
+    [workingPath, call, userProfiles, tools, runs],
   );
 
   useEffect(() => {
     if (!buffer || !workingPath) {
+      // A run still in flight read a document that is gone: overtaken here,
+      // it stores no report, and no run is left to own `busy`.
+      runs.begin();
+      setBusy(false);
       setReport(null);
       return;
     }
     void run(profileId);
-  }, [buffer, workingPath, profileId, run]);
+  }, [buffer, workingPath, profileId, run, runs]);
 
   // The findings on the page belong to the document that produced them.
   useEffect(() => {
@@ -472,11 +494,15 @@ export function PreflightPanel(): React.ReactElement {
         setShownCheck(null);
         return;
       }
+      if (!readsLiveRevision(report, readState(), workingPath ?? '')) {
+        setStatus(tChrome('panel.common.documentChanged'));
+        return;
+      }
       const { shown } = await services.a11yFindings.publish(path, placeable(check));
       setShownCheck(shown > 0 ? check.id : null);
       if (shown === 0) setStatus(tChrome('panel.preflight.nothingToShow'));
     },
-    [path, shownCheck],
+    [path, readState, report, shownCheck, workingPath],
   );
 
   /** One finding's jump — one of the three address kinds, each landing on the
@@ -490,6 +516,10 @@ export function PreflightPanel(): React.ReactElement {
           return;
         }
         if (shownCheck !== check.id) {
+          if (!readsLiveRevision(report, readState(), workingPath ?? '')) {
+            setStatus(tChrome('panel.common.documentChanged'));
+            return;
+          }
           const { shown } = await services.a11yFindings.publish(path, placeable(check));
           setShownCheck(shown > 0 ? check.id : null);
         }
@@ -506,7 +536,7 @@ export function PreflightPanel(): React.ReactElement {
       if (op) dispatch({ type: 'UI_SET_ACTIVE_OP', op });
       else setStatus(tChrome('panel.preflight.nothingToShow'));
     },
-    [dispatch, path, shownCheck],
+    [dispatch, path, readState, report, shownCheck, workingPath],
   );
 
   // ── fixups ──────────────────────────────────────────────────────────────
