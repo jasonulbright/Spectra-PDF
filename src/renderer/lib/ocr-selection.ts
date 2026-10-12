@@ -198,9 +198,18 @@ export function wordSpanBox(word: OcrWord, layoutW: number, layoutH: number): Wo
 // language in the key it would instead serve the boxes the previous model
 // produced for as long as the bytes stayed open.
 
+type RecognitionRun = () => Promise<OcrResult | null>;
+
+/** One page's recognition. `runners` holds every caller's run while the
+ * result is pending, newest last; it is emptied once the result settles. */
+interface PageWork {
+  result: Promise<OcrSelectPage>;
+  runners: RecognitionRun[];
+}
+
 interface KeyEntry {
   documents: number;
-  pages: Map<string, Promise<OcrSelectPage>>;
+  pages: Map<string, PageWork>;
 }
 
 const cache = new Map<string, KeyEntry>();
@@ -251,36 +260,118 @@ async function withSlot<T>(job: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Recognise one page once per content key per rotation per language. `run`
- * produces a raw result and is called at most once per (key, page, spin,
- * lang) while a document holds the key, and only once a concurrency slot is
- * free. A key no document holds caches nothing: its entry would never be
- * released.
+ * A run whose document was destroyed before or while it rendered. It says
+ * nothing about the bytes: another document over the same bytes can still
+ * recognise them.
+ */
+export class RecognitionCancelled extends Error {
+  constructor() {
+    super('recognition cancelled: the document was destroyed');
+    this.name = 'RecognitionCancelled';
+  }
+}
+
+/**
+ * Whether a run's rejection is a cancellation rather than a recognizer
+ * failure. pdf.js rejects a render in flight with `RenderingCancelledException`
+ * when its document is destroyed, and an aborted operator-list stream with
+ * `AbortException`; both carry the class name in `name`.
+ */
+export function isRecognitionCancellation(error: unknown): boolean {
+  if (error instanceof RecognitionCancelled) return true;
+  const name = error !== null && typeof error === 'object' ? (error as { name?: unknown }).name : undefined;
+  return name === 'RenderingCancelledException' || name === 'AbortException';
+}
+
+/**
+ * Holds every recognition after it takes its slot and before its run starts,
+ * until `release`. An end-to-end spec decides with it what happens while a
+ * recognition is pending. Reached only from the harness.
+ */
+let recognitionHold: { held: Promise<void>; waiting: number } | null = null;
+export function holdSelectionRecognition(): { release: () => void; waiting: () => number } {
+  let release!: () => void;
+  const hold = { held: new Promise<void>((resolve) => { release = resolve; }), waiting: 0 };
+  recognitionHold = hold;
+  return {
+    release: () => {
+      if (recognitionHold === hold) recognitionHold = null;
+      release();
+    },
+    waiting: () => hold.waiting,
+  };
+}
+
+const FAILED: OcrSelectPage = { status: 'failed', words: EMPTY };
+
+/** One attempt through the newest live runner. A cancelled runner is dropped
+ * and the next newest is tried; with none left the work leaves the cache. */
+function attempt(work: PageWork, drop: () => void): Promise<OcrSelectPage> {
+  let run: RecognitionRun | undefined;
+  return withSlot(async () => {
+    const hold = recognitionHold;
+    if (hold) {
+      hold.waiting++;
+      try { await hold.held; } finally { hold.waiting--; }
+    }
+    run = work.runners[work.runners.length - 1];
+    runs++;
+    return run();
+  }).then(
+    (raw) => {
+      work.runners = [];
+      return gateRecognition(raw);
+    },
+    (error: unknown) => {
+      if (!isRecognitionCancellation(error)) {
+        work.runners = [];
+        return FAILED;
+      }
+      work.runners = work.runners.filter((runner) => runner !== run);
+      if (work.runners.length) return attempt(work, drop);
+      drop();
+      return FAILED;
+    },
+  );
+}
+
+/**
+ * Recognise one page once per content key per rotation per language. A run
+ * is called at most once per (key, page, spin, lang) while a document holds
+ * the key, and only once a concurrency slot is free. A key no document holds
+ * caches nothing: its entry would never be released.
  *
  * A failure is CACHED as 'failed' rather than left to retry: a recognizer that
  * refused this page will refuse it again, and re-running Tesseract on every
  * pointer-down would turn one quiet fallback into a stutter.
+ *
+ * A cancellation is not a failure. Two documents over equal bytes share one
+ * entry, and each caller's `run` renders through its own document. While the
+ * entry is pending every caller's run is kept; a run whose document was
+ * destroyed under it gives way to the newest remaining run, and when none
+ * remains the entry is dropped, so the next gesture recognises through a live
+ * document instead of being served the closed one's cancellation.
  */
 export function recognizeForSelection(
   key: string,
   pageNumber: number,
   spin: number,
   lang: string,
-  run: () => Promise<OcrResult | null>,
+  run: RecognitionRun,
 ): Promise<OcrSelectPage> {
   const pages = cache.get(key)?.pages;
   const id = entryKey(pageNumber, spin, lang);
   const existing = pages?.get(id);
-  if (existing) return existing;
-  const started = withSlot(() => {
-    runs++;
-    return run();
-  }).then(gateRecognition, () => ({
-    status: 'failed' as const,
-    words: EMPTY,
-  }));
-  pages?.set(id, started);
-  return started;
+  if (existing) {
+    if (existing.runners.length && !existing.runners.includes(run)) existing.runners.push(run);
+    return existing.result;
+  }
+  const work: PageWork = { result: undefined as unknown as Promise<OcrSelectPage>, runners: [run] };
+  pages?.set(id, work);
+  work.result = attempt(work, () => {
+    if (pages?.get(id) === work) pages.delete(id);
+  });
+  return work.result;
 }
 
 /** What the cache already knows, without starting anything. */
@@ -290,7 +381,7 @@ export function peekSelectionCache(
   spin: number,
   lang: string,
 ): Promise<OcrSelectPage> | null {
-  return cache.get(key)?.pages.get(entryKey(pageNumber, spin, lang)) ?? null;
+  return cache.get(key)?.pages.get(entryKey(pageNumber, spin, lang))?.result ?? null;
 }
 
 /**

@@ -14,7 +14,10 @@ import {
   WORD_MIN_CONFIDENCE,
   forgetSelectionCache,
   gateRecognition,
+  holdSelectionRecognition,
+  isRecognitionCancellation,
   peekSelectionCache,
+  RecognitionCancelled,
   rasterScaleFor,
   recognitionRunCount,
   recognizeForSelection,
@@ -248,6 +251,84 @@ describe('recognizeForSelection', () => {
     expect((await recognizeForSelection(key, 1, 0, 'eng', run)).status).toBe('failed');
     expect((await recognizeForSelection(key, 1, 0, 'eng', run)).status).toBe('failed');
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches a failure once, and serves it to a caller whose run is waiting', async () => {
+    const key = held();
+    let fail!: (error: Error) => void;
+    const first = vi.fn(() => new Promise<OcrResult | null>((_, reject) => { fail = reject; }));
+    const second = vi.fn(async () => result(confidentPage()));
+    const a = recognizeForSelection(key, 1, 0, 'eng', first);
+    const b = recognizeForSelection(key, 1, 0, 'eng', second);
+    fail(new Error('no tesseract'));
+    expect((await a).status).toBe('failed');
+    expect(await b).toBe(await a);
+    expect((await recognizeForSelection(key, 1, 0, 'eng', second)).status).toBe('failed');
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a cancellation: the next call recognises again', async () => {
+    // Closing one of two documents over equal bytes destroys its pdf.js
+    // document under its render. That says nothing about the bytes the other
+    // document still shows.
+    const key = held();
+    const before = recognitionRunCount();
+    const cancelled = vi.fn(async (): Promise<OcrResult | null> => {
+      throw new RecognitionCancelled();
+    });
+    expect((await recognizeForSelection(key, 1, 0, 'eng', cancelled)).status).toBe('failed');
+    expect(peekSelectionCache(key, 1, 0, 'eng')).toBeNull();
+    const live = vi.fn(async () => result(confidentPage()));
+    const ready = await recognizeForSelection(key, 1, 0, 'eng', live);
+    expect(ready.status).toBe('ready');
+    expect(live).toHaveBeenCalledTimes(1);
+    expect(recognitionRunCount()).toBe(before + 2);
+    expect(await recognizeForSelection(key, 1, 0, 'eng', live)).toBe(ready);
+    expect(live).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands a pending recognition to a waiting caller's run when the first is cancelled", async () => {
+    const key = held();
+    let cancel!: () => void;
+    const closing = vi.fn(() => new Promise<OcrResult | null>((_, reject) => {
+      cancel = () => reject(Object.assign(new Error('Rendering cancelled, page 1'), { name: 'RenderingCancelledException' }));
+    }));
+    const live = vi.fn(async () => result(confidentPage()));
+    const a = recognizeForSelection(key, 1, 0, 'eng', closing);
+    const b = recognizeForSelection(key, 1, 0, 'eng', live);
+    expect(b).toBe(a);
+    expect(live).not.toHaveBeenCalled();
+    cancel();
+    const page = await b;
+    expect(page.status).toBe('ready');
+    expect(live).toHaveBeenCalledTimes(1);
+    expect(await peekSelectionCache(key, 1, 0, 'eng')).toBe(page);
+  });
+
+  it('tells pdf.js cancellations apart from recognizer failures', () => {
+    const named = (name: string) => Object.assign(new Error('x'), { name });
+    expect(isRecognitionCancellation(new RecognitionCancelled())).toBe(true);
+    expect(isRecognitionCancellation(named('RenderingCancelledException'))).toBe(true);
+    expect(isRecognitionCancellation(named('AbortException'))).toBe(true);
+    expect(isRecognitionCancellation(new Error('Worker was destroyed'))).toBe(false);
+    expect(isRecognitionCancellation(new Error('no tesseract'))).toBe(false);
+    expect(isRecognitionCancellation('RenderingCancelledException')).toBe(false);
+    expect(isRecognitionCancellation(null)).toBe(false);
+  });
+
+  it('holds a recognition before its run until released', async () => {
+    const key = held();
+    const hold = holdSelectionRecognition();
+    const run = vi.fn(async () => result(confidentPage()));
+    const pending = recognizeForSelection(key, 1, 0, 'eng', run);
+    await Promise.resolve();
+    expect(hold.waiting()).toBe(1);
+    expect(run).not.toHaveBeenCalled();
+    hold.release();
+    expect((await pending).status).toBe('ready');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(hold.waiting()).toBe(0);
   });
 
   it('peeks without starting work, and forgets on demand', async () => {

@@ -17,6 +17,7 @@ import { holdReaderCopies } from './lib/reader-copy';
 
 let rewriteHold: ReturnType<typeof holdRewriteEngineSteps> | null = null;
 let readerHold: ReturnType<typeof holdReaderCopies> | null = null;
+let recognitionHold: ReturnType<typeof holdSelectionRecognition> | null = null;
 const handOffHolds = new Map<HandOffStage, ReturnType<typeof holdHandOff>>();
 import { windowLabel } from './lib/window-label';
 import {
@@ -27,7 +28,7 @@ import {
 } from './lib/platform-capabilities';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import { rebuildTextLayers } from './lib/text-layer-rebuild';
-import { recognitionRunCount } from './lib/ocr-selection';
+import { holdSelectionRecognition, recognitionRunCount } from './lib/ocr-selection';
 import {
   invokeCommand as invokeRegisteredCommand,
   isCommandEnabled,
@@ -1584,6 +1585,12 @@ export interface TestHarness {
   refreshActiveBuffer: () => void;
   /** How many recognitions for selection have started in this window. */
   recognitionRuns: () => number;
+  /** Holds every recognition for selection after it takes its slot and
+   * before its run, until `releaseSelectionRecognition`;
+   * `selectionRecognitionWaiting` counts the recognitions held there. */
+  holdSelectionRecognition: () => void;
+  releaseSelectionRecognition: () => void;
+  selectionRecognitionWaiting: () => number;
   /** Holds every hand-off of a document to another window at `stage` until
    * `releaseHandOff(stage)`. `committed`: after the page tier came to rest
    * and its revision was noted, before the reservation. `sealed`: after the
@@ -2769,6 +2776,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     rebuildTextLayers: () => rebuildTextLayers(),
     refreshActiveBuffer: () => deps.refreshActiveBuffer(),
     recognitionRuns: () => recognitionRunCount(),
+    holdSelectionRecognition: () => {
+      recognitionHold?.release();
+      recognitionHold = holdSelectionRecognition();
+    },
+    releaseSelectionRecognition: () => {
+      recognitionHold?.release();
+      recognitionHold = null;
+    },
+    selectionRecognitionWaiting: () => recognitionHold?.waiting() ?? 0,
     holdHandOff: (stage) => {
       handOffHolds.get(stage)?.release();
       handOffHolds.set(stage, holdHandOff(stage));
