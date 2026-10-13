@@ -60,6 +60,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
+from engine.default_fonts import release_form
 from pikepdf import Array, Dictionary, Name
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import token_text
@@ -266,7 +267,7 @@ def prune_form_to_pages(pdf: pikepdf.Pdf, kept_indices) -> None:
     keep = [f for f in fields if _survive_node(f, page_ids, annot_ids, 0)]
     acro = pdf.Root.get("/AcroForm")
     if not keep and acro.get("/XFA") is None:
-        del pdf.Root["/AcroForm"]
+        release_form(pdf)
         return
     if len(keep) != len(fields):
         acro["/Fields"] = Array(keep)
@@ -703,7 +704,7 @@ def strip_signatures(pdf: pikepdf.Pdf) -> int:
     if keep or acro.get("/XFA") is not None:
         acro["/Fields"] = Array(keep)
     else:
-        del pdf.Root["/AcroForm"]
+        release_form(pdf)
     _drop_widgets(pdf, dropped)
     refresh_sig_flags(pdf)
     _reconcile_co_in_place(pdf)

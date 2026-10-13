@@ -43,12 +43,49 @@ import {
   PDFString,
 } from 'pdf-lib';
 import { tChrome } from '../i18n';
+import { reachableDictionaries } from './pdf-reachability';
 
 export interface CarriedSourcePages {
   /** The SAME loaded instance copyPages ran against — never a re-load. */
   doc: PDFDocument;
-  /** Kept pages: source page index → the copied page in the output. */
-  pairs: { srcIndex: number; outPage: PDFPage }[];
+  /** Kept pages: source page index → the copied page in the output.
+   *  `annotsAsCopied` holds the copied /Annots entries in source order for a
+   *  page whose /Annots the build changed afterwards: a walk that pairs the
+   *  source page with its copy by position pairs /Annots with this array. */
+  pairs: { srcIndex: number; outPage: PDFPage; annotsAsCopied?: PDFArray }[];
+  /** Copied objects the build took out of the output, by output tag: the
+   *  annotation that replaced a removed annotation, or null when nothing
+   *  replaced the object. */
+  replaced?: ReadonlyMap<string, PDFRef | null>;
+  /** The build's record of settled actions, shared by every pass over this
+   *  source's graph. */
+  settlement?: ActionSettlement;
+}
+
+/** The two values a positional walk pairs for one key of a kept page. */
+export function pagePair(
+  source: CarriedSourcePages,
+  pair: CarriedSourcePages['pairs'][number],
+  key: string,
+): [PDFObject | undefined, PDFObject | undefined] {
+  const src = source.doc.getPage(pair.srcIndex).node.get(N(key));
+  if (key === 'Annots' && pair.annotsAsCopied) return [source.doc.context.lookup(src), pair.annotsAsCopied];
+  return [src, pair.outPage.node.get(N(key))];
+}
+
+/** Applies `replaced` to a source-tag → output map: a replaced object maps to
+ *  its replacement, and an object with no replacement leaves the map. Returns
+ *  the source tags that left. */
+export function settleReplaced(map: ObjectMap, replaced: ReadonlyMap<string, PDFRef | null> | undefined): Set<string> {
+  const gone = new Set<string>();
+  if (!replaced || replaced.size === 0) return gone;
+  for (const [srcTag, outRef] of [...map]) {
+    const to = replaced.get(outRef.tag);
+    if (to === undefined) continue;
+    if (to) map.set(srcTag, to);
+    else { map.delete(srcTag); gone.add(srcTag); }
+  }
+  return gone;
 }
 
 const N = PDFName.of.bind(PDFName);
@@ -112,20 +149,13 @@ export function buildInPageObjectMap(
   const map: ObjectMap = new Map();
   const seen = new Set<string>();
   const budget = { visits: IN_PAGE_OBJECT_LIMIT };
-  for (const { srcIndex, outPage } of source.pairs) {
-    const srcPage = source.doc.getPage(srcIndex);
+  for (const pair of source.pairs) {
     for (const key of ['Resources', 'Annots', 'B'] as const) {
-      mapParallel(
-        srcPage.node.get(N(key)),
-        outPage.node.get(N(key)),
-        source.doc,
-        output,
-        map,
-        seen,
-        budget,
-      );
+      const [src, out] = pagePair(source, pair, key);
+      mapParallel(src, out, source.doc, output, map, seen, budget);
     }
   }
+  settleReplaced(map, source.replaced);
   return map;
 }
 
@@ -573,14 +603,204 @@ export function carryThreads(output: PDFDocument, sources: CarriedSourcePages[])
 
 // ── document actions and scripts ──────────────────────────────────────────
 
-/** A jump to a removed page loses that jump and nothing else. Only a GoTo
- * whose OWN destination `removed` accepts leaves its chain; when the head
- * GoTo dangles, its surviving /Next actions take its place in execution
- * order (ISO 32000-2 12.6.2/Table 196). Every other action kind is kept.
+/** Whether an action has lost its own target. A predicate may first rewrite
+ * the targets that stand, and gives the same answer when asked again. */
+export type ActionLoss = (action: PDFDict) => boolean;
+
+/** What one build has decided about the actions of its documents. A loss
+ * predicate and a settler read and write it, so a second pass over a graph
+ * answers as the first did: an emptied target list reads as empty because its
+ * entries are gone, and a chain is spliced once. */
+export interface ActionSettlement {
+  /** The target lists a loss predicate emptied. */
+  emptied: Set<PDFArray>;
+  /** Each action that left its chain, and what took its place. */
+  left: Map<PDFDict, PDFObject | undefined>;
+}
+
+export function newActionSettlement(): ActionSettlement {
+  return { emptied: new Set(), left: new Map() };
+}
+
+/** A GoTo whose own destination `removed` accepts. */
+export function goToLoss(removed: (destination: PDFObject) => boolean): ActionLoss {
+  return action => {
+    const goTo = action.get(N('D'));
+    return action.lookup(N('S')) === N('GoTo') && goTo !== undefined && removed(goTo);
+  };
+}
+
+/** The entry under which an action names an annotation by reference
+ * (ISO 32000-2 12.6.4.11, 12.6.4.14, 12.6.4.10, 12.6.4.16, 12.6.4.18). */
+const ANNOTATION_TARGET = new Map([
+  ['Hide', 'T'], ['Rendition', 'AN'], ['Movie', 'Annotation'], ['GoTo3DView', 'TA'], ['RichMediaExecute', 'TA'],
+]);
+
+/** An action whose annotation target is gone. `standing` gives the reference
+ * a target has now, or undefined when the annotation is gone. A target that
+ * moved is rewritten. A Hide list loses its gone entries and the action is
+ * lost only when that leaves the list empty; a text string entry names a
+ * field and always stands. A list written empty is not a loss. */
+export function annotationTargetLoss(context: PDFContext, standing: (target: PDFRef) => PDFRef | undefined,
+  settlement: ActionSettlement = newActionSettlement()): ActionLoss {
+  return action => {
+    const kind = action.lookup(N('S'));
+    const name = kind instanceof PDFName ? ANNOTATION_TARGET.get(kind.decodeText()) : undefined;
+    if (name === undefined) return false;
+    const key = N(name), raw = action.get(key), value = context.lookup(raw);
+    if (value instanceof PDFArray) {
+      for (let i = value.size() - 1; i >= 0; i--) {
+        const entry = value.get(i);
+        if (!(entry instanceof PDFRef)) continue;
+        const now = standing(entry);
+        if (now === undefined) { value.remove(i); if (value.size() === 0) settlement.emptied.add(value); }
+        else if (now !== entry) value.set(i, now);
+      }
+      return settlement.emptied.has(value);
+    }
+    if (!(raw instanceof PDFRef) || !(value instanceof PDFDict)) return false;
+    const now = standing(raw);
+    if (now === undefined) return true;
+    if (now !== raw) action.set(key, now);
+    return false;
+  };
+}
+
+/** Marks a target dictionary whose /P and /A hold references during a build. */
+const BOUND_TARGET = N('SpectraBoundTarget');
+
+/** The target dictionary of an embedded go-to action whose first path element
+ * is a child of this document (ISO 32000-2 12.6.4.4, Tables 204 and 205).
+ * Its /P and /A name a page and an annotation of this document by position.
+ * With /F the path starts in another file, and a nested /T names a page of
+ * the child: neither is a position in this document. */
+function embeddedTarget(context: PDFContext, action: PDFDict): PDFDict | undefined {
+  if (action.lookup(N('S')) !== N('GoToE') || action.has(N('F'))) return undefined;
+  const target = context.lookup(action.get(N('T')));
+  return target instanceof PDFDict && target.lookup(N('R')) === N('C') ? target : undefined;
+}
+
+/** Rewrites each embedded go-to target of `doc` that names a page and an
+ * annotation by position to name them by reference, so the copy and every
+ * later pass follow the objects. /P becomes the page (from a page number or a
+ * named destination). An integer /A becomes the annotation at that position;
+ * one written directly in /Annots is registered first. A text string /A names
+ * the annotation by /NM and stays. A target whose page or position does not
+ * resolve stays as written. `unbindEmbeddedTargets` writes positions back.
+ * Returns how many targets were bound. */
+export function bindEmbeddedTargets(doc: PDFDocument): number {
+  const context = doc.context, pages = doc.getPages();
+  const byTag = new Map(pages.map(page => [page.ref.tag, page]));
+  const resolveName = namedDestinationResolver(doc);
+  const seen = new Set<PDFDict>();
+  let bound = 0;
+  for (const action of reachableDictionaries(context, [context.trailerInfo.Root])) {
+    const target = embeddedTarget(context, action);
+    if (!target || seen.has(target)) continue;
+    seen.add(target);
+    target.delete(BOUND_TARGET);
+    const where = context.lookup(target.get(N('P')));
+    let page: PDFPage | undefined;
+    if (where instanceof PDFNumber) page = Number.isInteger(where.asNumber()) ? pages[where.asNumber()] : undefined;
+    else if (where instanceof PDFString || where instanceof PDFHexString) {
+      const first = resolveName(where)?.get(0);
+      page = first instanceof PDFRef ? byTag.get(first.tag) : undefined;
+    }
+    if (!page) continue;
+    const which = context.lookup(target.get(N('A')));
+    let annotation: PDFRef | undefined;
+    if (which instanceof PDFNumber) {
+      const annots = context.lookup(page.node.get(N('Annots'))), index = which.asNumber();
+      if (!(annots instanceof PDFArray) || !Number.isInteger(index) || index < 0 || index >= annots.size()) continue;
+      const entry = annots.get(index);
+      if (!(context.lookup(entry) instanceof PDFDict)) continue;
+      annotation = entry instanceof PDFRef ? entry : context.register(entry);
+      if (annotation !== entry) annots.set(index, annotation);
+    } else if (!(which instanceof PDFString || which instanceof PDFHexString)) continue;
+    target.set(N('P'), page.ref);
+    if (annotation) target.set(N('A'), annotation);
+    target.set(BOUND_TARGET, PDFBool.True);
+    bound++;
+  }
+  return bound;
+}
+
+/** An embedded go-to action whose bound page or annotation is gone.
+ * `pageStands` answers for the page; `standing` is as for
+ * `annotationTargetLoss`, and an annotation that moved is rewritten. */
+export function embeddedTargetLoss(context: PDFContext, pageStands: (page: PDFRef) => boolean,
+  standing: (target: PDFRef) => PDFRef | undefined): ActionLoss {
+  return action => {
+    const target = embeddedTarget(context, action);
+    if (!target?.has(BOUND_TARGET)) return false;
+    const page = target.get(N('P')), annotation = target.get(N('A'));
+    if (page instanceof PDFRef && !pageStands(page)) return true;
+    if (!(annotation instanceof PDFRef)) return false;
+    const now = standing(annotation);
+    if (now === undefined) return true;
+    if (now !== annotation) target.set(N('A'), now);
+    return false;
+  };
+}
+
+/** Writes each bound embedded go-to target of the output back as positions:
+ * /A is the annotation's index in the /Annots that lists it, and /P is that
+ * page's index. An annotation the bound page lists is read there; a page
+ * placed more than once lists its own copy. A bound target that names no
+ * listed annotation or no page of the output refuses the build. */
+export function unbindEmbeddedTargets(output: PDFDocument): void {
+  const context = output.context, pages = output.getPages();
+  const pageIndex = new Map(pages.map((page, index) => [page.ref.tag, index]));
+  let places: Map<string, [number, number][]> | undefined;
+  const placesOf = (tag: string): [number, number][] => {
+    if (!places) {
+      const found = new Map<string, [number, number][]>();
+      pages.forEach((page, index) => {
+        const annots = context.lookup(page.node.get(N('Annots')));
+        if (!(annots instanceof PDFArray)) return;
+        annots.asArray().forEach((entry, slot) => {
+          if (!(entry instanceof PDFRef)) return;
+          const list = found.get(entry.tag) ?? [];
+          list.push([index, slot]);
+          found.set(entry.tag, list);
+        });
+      });
+      places = found;
+    }
+    return places.get(tag) ?? [];
+  };
+  for (const action of reachableDictionaries(context, [context.trailerInfo.Root])) {
+    const target = embeddedTarget(context, action);
+    if (!target?.has(BOUND_TARGET)) continue;
+    const page = target.get(N('P')), annotation = target.get(N('A'));
+    let index = page instanceof PDFRef ? pageIndex.get(page.tag) : undefined;
+    if (annotation instanceof PDFRef) {
+      const listed = placesOf(annotation.tag);
+      const place = listed.find(([at]) => at === index) ?? listed[0];
+      if (!place) throw new Error(tChrome('app.operation.unverified'));
+      index = place[0];
+      target.set(N('A'), PDFNumber.of(place[1]));
+    }
+    if (index === undefined) throw new Error(tChrome('app.operation.unverified'));
+    target.set(N('P'), PDFNumber.of(index));
+    target.delete(BOUND_TARGET);
+  }
+}
+
+export function anyLoss(...losses: ActionLoss[]): ActionLoss {
+  return action => losses.some(lost => lost(action));
+}
+
+/** An action that lost its target leaves its chain and nothing else does.
+ * Only an action `lost` accepts leaves; when the head leaves, its surviving
+ * /Next actions take its place in execution
+ * order (ISO 32000-2 12.6.2/Table 196). Every other action is kept.
  * Returns the settled head, or undefined when nothing survives. Chains are
  * rewritten in place in the source graph, once per action: a shared action
- * settled twice would append its predecessor's remainder twice. */
-export function actionSettler(context: PDFContext, removed: (destination: PDFObject) => boolean) {
+ * settled twice would append its predecessor's remainder twice. An action
+ * that left in an earlier pass of the build (`settlement`) is not spliced
+ * again: what took its place is settled in its stead. */
+export function actionSettler(context: PDFContext, lost: ActionLoss, settlement: ActionSettlement = newActionSettlement()) {
   const settled = new Map<PDFDict, PDFObject | undefined>(), active = new Set<PDFDict>();
   let steps = 0;
   const settle = (raw: PDFObject | undefined, depth = 0): PDFObject | undefined => {
@@ -590,14 +810,22 @@ export function actionSettler(context: PDFContext, removed: (destination: PDFObj
     if (settled.has(action)) return settled.get(action) === action ? raw : settled.get(action);
     if (active.has(action)) return raw;
     active.add(action);
+    if (settlement.left.has(action)) {
+      const prior = settlement.left.get(action);
+      const stead = prior === undefined ? undefined : settle(prior, depth + 1);
+      active.delete(action);
+      settled.set(action, stead);
+      settlement.left.set(action, stead);
+      return stead;
+    }
     const nextRaw = action.get(N('Next')), next = context.lookup(nextRaw);
     const chain = next instanceof PDFArray ? next.asArray() : nextRaw !== undefined ? [nextRaw] : [];
     const results = chain.map(item => settle(item, depth + 1));
     const survivors = results.filter((item): item is PDFObject => item !== undefined);
-    const goTo = action.get(N('D'));
     let result: PDFObject | undefined = raw;
-    if (action.lookup(N('S')) === N('GoTo') && goTo !== undefined && removed(goTo)) {
+    if (lost(action)) {
       result = survivors[0];
+      settlement.left.set(action, result);
       const head = context.lookup(result);
       if (head instanceof PDFDict && survivors.length > 1) {
         const ownRaw = head.get(N('Next')), own = context.lookup(ownRaw);
@@ -625,21 +853,19 @@ export function settleActionEntry(owner: PDFDict, key: PDFName, settle: (raw: PD
   else if (result !== value) owner.set(key, result);
 }
 
-/** Whether an action chain holds a GoTo whose destination `removed` accepts.
+/** Whether an action chain holds an action `lost` accepts.
  * /Next is a single action or an ordered array (ISO 32000-2 12.6.2/Table 196)
  * and may legally rejoin itself, so the walk is bounded and cycle-safe. Each
  * call has its own budget: a document large enough to exhaust a tree walk's
  * budget must still decide every chain. */
-export function jumpsToRemovedPage(context: PDFContext, raw: PDFObject | undefined,
-  removed: (destination: PDFObject) => boolean): boolean {
+export function jumpsToRemovedPage(context: PDFContext, raw: PDFObject | undefined, lost: ActionLoss): boolean {
   const seen = new Set<PDFDict>(); let steps = 0;
   const walk = (value: PDFObject | undefined, depth: number): boolean => {
     if (++steps > 10000 || depth > 128) throw new Error(tChrome('app.operation.unverified'));
     const action = context.lookup(value);
     if (!(action instanceof PDFDict) || seen.has(action)) return false;
     seen.add(action);
-    const goTo = action.get(N('D'));
-    if (action.lookup(N('S')) === N('GoTo') && goTo !== undefined && removed(goTo)) return true;
+    if (lost(action)) return true;
     const next = action.get(N('Next')), resolved = context.lookup(next);
     if (resolved instanceof PDFArray) {
       for (const child of resolved.asArray()) if (walk(child, depth + 1)) return true;
@@ -652,7 +878,8 @@ export function jumpsToRemovedPage(context: PDFContext, raw: PDFObject | undefin
 
 /** Preserve document-owned action roots, not just script text.
  * Bind page references to actual output pages before copying other objects.
- * A jump to a page the rebuild removed loses that jump only; ambiguous or
+ * A jump to a page the rebuild removed loses that jump only, and so does an
+ * action that names an annotation the output does not hold; ambiguous or
  * unresolvable targets refuse the rebuild, never silently drop behavior.
  * ISO 32000-2 12.6.2/Table 196 permits action trees via /Next; Table 200
  * defines /AA. Preservation never executes an action. */
@@ -664,6 +891,8 @@ interface CatalogObjectCopy {
   structure(raw: PDFObject | undefined): PDFRef;
   /** The destination resolves to a source page absent from the output. */
   removedDestination(raw: PDFObject | undefined): boolean;
+  /** The chain holds a jump to a removed page or an action whose annotation
+   *  is not in the output. */
   jumpsToRemovedPage(raw: PDFObject | undefined): boolean;
   /** Retain every name-tree and legacy /Dests entry whose target page is kept. */
   carryNamedDestinations(): void;
@@ -720,6 +949,13 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
     return explicit(hit instanceof PDFDict ? hit.lookup(N('D')) : hit);
   };
   const pageRefs = new Set(source.doc.getPages().map(p => p.ref.tag));
+  // Every annotation a source page lists, whatever its /Type says: its copy is
+  // the one the page copy made, never a second object.
+  const sourceAnnotations = new Set<string>();
+  for (const page of source.doc.getPages()) {
+    const annots = source.doc.context.lookup(page.node.get(N('Annots')));
+    if (annots instanceof PDFArray) for (const raw of annots.asArray()) if (raw instanceof PDFRef) sourceAnnotations.add(raw.tag);
+  }
   // A page placed more than once binds to its first placement in output
   // order, the one a viewer reaches first; pairs arrive in output order.
   const pages = new Map<string, PDFRef>();
@@ -744,8 +980,8 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
       // action may also be reachable through a page: that copier's GoTo can
       // still point at a detached page, so it is never an authority here.
       if (target instanceof PDFDict && [N('OCG'), N('OCMD')].includes(target.lookup(N('Type')) as PDFName)) throw fail();
-      if (target instanceof PDFDict && ([N('Annot')].includes(target.lookup(N('Type')) as PDFName)
-        || target.has(N('FT')) || target.lookup(N('Subtype')) === N('Widget'))) {
+      if (sourceAnnotations.has(value.tag) || (target instanceof PDFDict && ([N('Annot')].includes(target.lookup(N('Type')) as PDFName)
+        || target.has(N('FT')) || target.lookup(N('Subtype')) === N('Widget')))) {
         const mapped = objectMap.get(value.tag); if (!mapped) throw fail(); return mapped;
       }
       const ref = output.context.nextRef(); refs.set(value.tag, ref);
@@ -859,9 +1095,15 @@ function catalogObjectCopier(output: PDFDocument, source: CarriedSourcePages, ob
   };
   const kept = new Set(source.pairs.map(pair => source.doc.getPage(pair.srcIndex).ref.tag));
   const removedDestination = (raw: PDFObject | undefined): boolean => !kept.has((destination(raw).get(0) as PDFRef).tag);
-  const settle = actionSettler(source.doc.context, removedDestination);
+  // The object map holds each listed annotation the output still has, under
+  // its replacement when the build re-authored it. A listed annotation the
+  // map lacks is on a removed page or was deleted.
+  const standing = (target: PDFRef) => sourceAnnotations.has(target.tag) && !objectMap.has(target.tag) ? undefined : target;
+  const lost = anyLoss(goToLoss(removedDestination), annotationTargetLoss(source.doc.context, standing, source.settlement),
+    embeddedTargetLoss(source.doc.context, page => kept.has(page.tag), standing));
+  const settle = actionSettler(source.doc.context, lost, source.settlement);
   return { copy, destination, copyDestination, structure, removedDestination, carryNamedDestinations, settle,
-    jumpsToRemovedPage: raw => jumpsToRemovedPage(source.doc.context, raw, removedDestination), bind: (sourceRef, outputRef) => {
+    jumpsToRemovedPage: raw => jumpsToRemovedPage(source.doc.context, raw, lost), bind: (sourceRef, outputRef) => {
     const previous = refs.get(sourceRef.tag);
     if (previous && previous !== outputRef) throw fail();
     refs.set(sourceRef.tag, outputRef);

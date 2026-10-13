@@ -350,15 +350,34 @@ interface Placed {
   pageId: string;
 }
 
+/** A frame other than the stored one in which a group operation measures and
+ * moves its members. Boxes and deltas a caller hands in are in that frame;
+ * every result is stored geometry. Without a frame the stored boxes are the
+ * frame. */
+export interface GroupFrame {
+  /** The member's box in the frame. */
+  box(a: PageAnnotation): { x: number; y: number; w: number; h: number };
+  /** `translatedBy` for a delta in the frame. */
+  moved(a: PageAnnotation, dx: number, dy: number): ReturnType<typeof translatedBy>;
+  /** The stored box for a new box in the frame, kept on the page. A box that
+   * equals the member's box in the frame gives the member's stored values. */
+  resized(
+    a: PageAnnotation,
+    box: { x: number; y: number; w: number; h: number },
+  ): { x: number; y: number; w: number; h: number };
+}
+
 /** Align a same-page selection to the group's bounding box.
  * Returns only the members that actually move. */
-export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransform[] {
+export function alignEdits(members: Placed[], mode: AlignMode, frame?: GroupFrame): AnnotationTransform[] {
   const movable = members.filter((m) => isTransformable(m.annotation));
   if (movable.length < 2) return [];
-  const xs0 = movable.map((m) => m.annotation.x);
-  const ys0 = movable.map((m) => m.annotation.y);
-  const xs1 = movable.map((m) => m.annotation.x + m.annotation.w);
-  const ys1 = movable.map((m) => m.annotation.y + m.annotation.h);
+  const boxOf = (a: PageAnnotation): { x: number; y: number; w: number; h: number } => (frame ? frame.box(a) : a);
+  const boxes = movable.map((m) => boxOf(m.annotation));
+  const xs0 = boxes.map((b) => b.x);
+  const ys0 = boxes.map((b) => b.y);
+  const xs1 = boxes.map((b) => b.x + b.w);
+  const ys1 = boxes.map((b) => b.y + b.h);
   const box = {
     x0: minOf(xs0),
     y0: minOf(ys0),
@@ -366,32 +385,33 @@ export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransf
     y1: maxOf(ys1),
   };
   const out: AnnotationTransform[] = [];
-  for (const m of movable) {
+  for (const [i, m] of movable.entries()) {
     const a = m.annotation;
+    const b = boxes[i];
     let dx = 0;
     let dy = 0;
     switch (mode) {
       case 'left':
-        dx = box.x0 - a.x;
+        dx = box.x0 - b.x;
         break;
       case 'right':
-        dx = box.x1 - (a.x + a.w);
+        dx = box.x1 - (b.x + b.w);
         break;
       case 'centerH':
-        dx = (box.x0 + box.x1) / 2 - (a.x + a.w / 2);
+        dx = (box.x0 + box.x1) / 2 - (b.x + b.w / 2);
         break;
       case 'top':
-        dy = box.y0 - a.y;
+        dy = box.y0 - b.y;
         break;
       case 'bottom':
-        dy = box.y1 - (a.y + a.h);
+        dy = box.y1 - (b.y + b.h);
         break;
       case 'centerV':
-        dy = (box.y0 + box.y1) / 2 - (a.y + a.h / 2);
+        dy = (box.y0 + box.y1) / 2 - (b.y + b.h / 2);
         break;
     }
     if (Math.abs(dx) < EPS && Math.abs(dy) < EPS) continue;
-    const t = translatedBy(a, dx, dy);
+    const t = frame ? frame.moved(a, dx, dy) : translatedBy(a, dx, dy);
     out.push({
       pageId: m.pageId,
       annotationId: a.id,
@@ -409,30 +429,30 @@ export function alignEdits(members: Placed[], mode: AlignMode): AnnotationTransf
 
 /** Create even gaps along one axis with the first and last boxes pinned.
  * Requires three or more movable members. */
-export function distributeEdits(members: Placed[], mode: DistributeMode): AnnotationTransform[] {
+export function distributeEdits(members: Placed[], mode: DistributeMode, frame?: GroupFrame): AnnotationTransform[] {
   const movable = members.filter((m) => isTransformable(m.annotation));
   if (movable.length < 3) return [];
   const horiz = mode === 'horizontal';
-  const sorted = [...movable].sort((p, q) =>
-    horiz ? p.annotation.x - q.annotation.x : p.annotation.y - q.annotation.y,
-  );
-  const first = sorted[0].annotation;
-  const last = sorted[sorted.length - 1].annotation;
+  const sorted = movable
+    .map((m) => ({ m, b: frame ? frame.box(m.annotation) : m.annotation }))
+    .sort((p, q) => (horiz ? p.b.x - q.b.x : p.b.y - q.b.y));
+  const first = sorted[0].b;
+  const last = sorted[sorted.length - 1].b;
   const span = horiz
     ? last.x + last.w - first.x
     : last.y + last.h - first.y;
-  const total = sorted.reduce((s, m) => s + (horiz ? m.annotation.w : m.annotation.h), 0);
+  const total = sorted.reduce((s, { b }) => s + (horiz ? b.w : b.h), 0);
   const gap = (span - total) / (sorted.length - 1);
   const out: AnnotationTransform[] = [];
   let cursor = horiz ? first.x : first.y;
-  for (const m of sorted) {
+  for (const { m, b } of sorted) {
     const a = m.annotation;
     const target = cursor;
-    cursor += (horiz ? a.w : a.h) + gap;
-    const dx = horiz ? target - a.x : 0;
-    const dy = horiz ? 0 : target - a.y;
+    cursor += (horiz ? b.w : b.h) + gap;
+    const dx = horiz ? target - b.x : 0;
+    const dy = horiz ? 0 : target - b.y;
     if (Math.abs(dx) < EPS && Math.abs(dy) < EPS) continue;
-    const t = translatedBy(a, dx, dy);
+    const t = frame ? frame.moved(a, dx, dy) : translatedBy(a, dx, dy);
     out.push({
       pageId: m.pageId,
       annotationId: a.id,
@@ -454,24 +474,30 @@ export function sizeMatchEdits(
   members: Placed[],
   mode: SizeMatchMode,
   pageDims: Map<string, { width: number; height: number; rotation: number }>,
+  frame?: GroupFrame,
 ): AnnotationTransform[] {
   const resizable = members.filter((m) => isResizable(m.annotation));
   if (resizable.length < 2) return [];
-  const ref = resizable[0].annotation;
+  const ref: { w: number; h: number } = frame ? frame.box(resizable[0].annotation) : resizable[0].annotation;
   const out: AnnotationTransform[] = [];
   for (const m of resizable.slice(1)) {
     const a = m.annotation;
-    const box = {
-      x: a.x,
-      y: a.y,
-      w: mode === 'height' ? a.w : ref.w,
-      h: mode === 'width' ? a.h : ref.h,
+    const own: { x: number; y: number; w: number; h: number } = frame ? frame.box(a) : a;
+    let box = {
+      x: own.x,
+      y: own.y,
+      w: mode === 'height' ? own.w : ref.w,
+      h: mode === 'width' ? own.h : ref.h,
     };
-    // Keep the resized box on the page.
-    box.x = Math.min(box.x, Math.max(0, 1 - box.w));
-    box.y = Math.min(box.y, Math.max(0, 1 - box.h));
-    box.w = Math.min(box.w, 1 - box.x);
-    box.h = Math.min(box.h, 1 - box.y);
+    if (frame) {
+      box = frame.resized(a, box);
+    } else {
+      // Keep the resized box on the page.
+      box.x = Math.min(box.x, Math.max(0, 1 - box.w));
+      box.y = Math.min(box.y, Math.max(0, 1 - box.h));
+      box.w = Math.min(box.w, 1 - box.x);
+      box.h = Math.min(box.h, 1 - box.y);
+    }
     if (box.x === a.x && box.y === a.y && box.w === a.w && box.h === a.h) continue;
     const points = a.points ? scaledPoints(a, box) : undefined;
     const strokes = a.strokes ? scaledStrokes(a, box) : undefined;

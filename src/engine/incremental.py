@@ -57,6 +57,10 @@ survives; /P 3 adds annotation creation, deletion and modification, so
 an unknown policy and permits nothing. Field locks (FieldMDP) keep their
 existing enforcement at the caller's decision table.
 
+A form dictionary held directly in the catalog has no object of its own: a
+change of one of its entries is appended as a revision of the catalog, with
+every other catalog entry as the original holds it.
+
 Anything else — content-stream or resource drift, encryption changes,
 form structure changes — refuses with ``applied=False`` and a reason; the
 caller falls back to the rewrite path it was already on. Document
@@ -1295,14 +1299,21 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
     # suspicious modification (live e2e catch: 3 -> 1).
     _ACRO_KEEP = frozenset({"/Fields", "/SigFlags"})
     if not memo_mat.equal(orig_acro, mod_acro, skip=_ACRO_KEEP):
-        # A direct /AcroForm has no object to mark updated, and the only way to
-        # reach it is to rewrite the catalog — which this module never does, so
-        # the delta is inexpressible rather than absent. The twin of the inline
-        # field refusal above.
-        if not orig_acro.is_indirect:
-            raise _TransplantRefusal("acroform-inline")
-        ref = _writer_ref(orig_acro.objgen, writer)
-        live = ref.get_object()
+        if orig_acro.is_indirect:
+            ref = _writer_ref(orig_acro.objgen, writer)
+            live = ref.get_object()
+        else:
+            # A direct /AcroForm is part of the catalog object, so the appended
+            # revision carries the catalog again with this one entry updated.
+            # Every other catalog entry stays the original's own value: the
+            # caller compared the two catalogs before this pass, and nothing
+            # here reads the rebuild's catalog for another key. A validator
+            # reads /AcroForm the same way direct or by reference, and accepts
+            # a catalog revision whose other entries are unchanged.
+            ref = None
+            live = writer.root.raw_get("/AcroForm")
+            if not isinstance(live, generic.DictionaryObject):
+                raise _TransplantRefusal("acroform-inline")
         changed = False
         for k in list(mod_acro.keys()):
             ks = str(k)
@@ -1335,7 +1346,10 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
                 del live[generic.pdf_name(ks)]
                 changed = True
         if changed:
-            writer.mark_update(ref)
+            if ref is None:
+                writer.update_root()
+            else:
+                writer.mark_update(ref)
             updated += 1
     return updated
 

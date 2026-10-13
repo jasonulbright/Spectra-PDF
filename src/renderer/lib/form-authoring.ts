@@ -19,13 +19,16 @@ import {
   PDFHexString,
   PDFName,
   PDFRef,
+  PDFStream,
   PDFString,
+  StandardFonts,
   adjustDimsForRotation,
   componentsToColor,
   degrees,
   drawRectangle,
   reduceRotation,
   rotateInPlace,
+  type PDFObject,
   type PDFOperator,
   type PDFOptionList,
   type PDFWidgetAnnotation,
@@ -60,6 +63,8 @@ import {
 // this file stays pure over bytes and unit-testable with no DOM.
 import { tChrome, type UiKey } from '../i18n';
 import { normalizeEscapedNames } from './pdf-name-normalize';
+import { interchangeableFontKey } from './annotation-default-resources';
+import { flushAndDropUnreachable } from './pdf-reachability';
 
 export type NewFieldType =
   | 'text'
@@ -799,10 +804,156 @@ export async function addFormFields(
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
   normalizeEscapedNames(doc, bytes, 'all');
   validateSpecs(doc, specs);
+  const existing = new Set(doc.getForm().acroForm.getAllFields().map(([field]) => field.dict));
   for (const spec of specs) createField(doc, spec);
   writeCalculationOrder(doc, specs);
-  return doc.save();
+  // The writer saves every object the context holds. The appearances are
+  // redrawn here, not inside save(), so the streams they replace are among
+  // the objects the sweep deletes, with every object the loaded file held
+  // outside the trailer's graph. The redraw writes default appearance
+  // strings, so the default resources are completed after it.
+  doc.getForm().updateFieldAppearances();
+  completeDefaultResources(doc, existing);
+  await flushAndDropUnreachable(doc);
+  return doc.save({ updateFieldAppearances: false });
 }
+
+/** The font names a default appearance string selects with `Tf`. */
+function defaultAppearanceFonts(holder: PDFDict): string[] {
+  const value = holder.lookup(PDFName.of('DA'));
+  if (!(value instanceof PDFString || value instanceof PDFHexString)) return [];
+  const names: string[] = [];
+  for (const match of value.decodeText().matchAll(/\/([^\s/[\]<>(){}%]+)\s+[-+]?[\d.]+\s+Tf/g)) {
+    names.push(match[1].replace(/#([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))));
+  }
+  return names;
+}
+
+/** Every font a default appearance string of the form or of a field names is
+ * an entry of the form's default resources: a viewer that redraws a field
+ * resolves the name there and nowhere else (ISO 32000-2 12.7.4.3). The field
+ * provider writes the font into each widget appearance only. A missing name
+ * takes the font a normal appearance of the field holds under that name; the
+ * standard face's two names take the form's default font. Any other missing
+ * name stays missing: no object of the file says which font it is.
+ *
+ * The provider gives a check box and a radio button a default appearance that
+ * selects a name no font carries. That name is rewritten to ZaDb, bound to
+ * the standard symbol face.
+ *
+ * One name is one font. A field of `existing` keeps the entry its document
+ * holds under the name. A field this batch created means the font its
+ * appearance holds, or the standard face of the name: when the entry under
+ * the name is another font, that entry stays, the field's font goes under the
+ * first of `Name_1`, `Name_2`, ... that is free or holds it, and the field's
+ * default appearance is rewritten to that name. */
+function completeDefaultResources(doc: PDFDocument, existing: ReadonlySet<PDFDict>): void {
+  const form = doc.getForm(), acro = form.acroForm.dict, context = doc.context;
+  const DA = PDFName.of('DA'), DR = PDFName.of('DR'), FONT = PDFName.of('Font');
+  let symbols: PDFRef | undefined;
+  const nameSymbolFace = (holder: PDFDict): void => {
+    const value = holder.lookup(DA);
+    if (!(value instanceof PDFString || value instanceof PDFHexString)) return;
+    const text = value.decodeText();
+    const named = text.replace(/\/dummy__noop(?=\s)/g, '/ZaDb');
+    if (named !== text) holder.set(DA, PDFString.of(named));
+  };
+  const table = (create: boolean): PDFDict | undefined => {
+    const held = acro.lookup(DR);
+    const resources = held instanceof PDFDict ? held : create ? context.obj({}) : undefined;
+    if (!resources) return undefined;
+    if (resources !== held) acro.set(DR, resources);
+    const fonts = resources.lookup(FONT);
+    if (fonts instanceof PDFDict || !create) return fonts instanceof PDFDict ? fonts : undefined;
+    const created = context.obj({});
+    resources.set(FONT, created);
+    return created;
+  };
+  const drawnWith = (holders: PDFDict[], name: PDFName): PDFObject | undefined => {
+    for (const holder of holders) {
+      const appearance = holder.lookup(PDFName.of('AP'));
+      const normal = appearance instanceof PDFDict ? appearance.lookup(PDFName.of('N')) : undefined;
+      const streams = normal instanceof PDFStream ? [normal]
+        : normal instanceof PDFDict ? normal.keys().map((key) => normal.lookup(key)) : [];
+      for (const stream of streams) {
+        const resources = stream instanceof PDFStream ? stream.dict.lookup(PDFName.of('Resources')) : undefined;
+        const fonts = resources instanceof PDFDict ? resources.lookup(FONT) : undefined;
+        const font = fonts instanceof PDFDict ? fonts.get(name) : undefined;
+        if (context.lookup(font) instanceof PDFDict) return font;
+      }
+    }
+    return undefined;
+  };
+  const standard = (text: string): PDFObject | undefined => {
+    if (text === 'Helv' || text === 'Helvetica') return form.getDefaultFont().ref;
+    if (text === 'ZaDb') return (symbols ??= doc.embedStandardFont(StandardFonts.ZapfDingbats).ref);
+    return undefined;
+  };
+  const holds = (name: PDFName): PDFObject | undefined => {
+    const held = table(false)?.get(name);
+    return context.lookup(held) instanceof PDFDict ? held : undefined;
+  };
+  /** The suffix of the name a created field's font takes when `text` holds
+   *  another font; 0 when the entry under `text` is the field's font, or when
+   *  nothing says which font the field means. */
+  const ownNameSuffix = (text: string, held: PDFObject, drawn: PDFDict[]): { suffix: number; font?: PDFObject } => {
+    const own = drawnWith(drawn, PDFName.of(text));
+    const key = own ? interchangeableFontKey(doc, own) : STANDARD_FACE_KEYS.get(text) ?? null;
+    if (!own && key === null) return { suffix: 0 };
+    const same = (other: PDFObject): boolean => other === own || (key !== null && interchangeableFontKey(doc, other) === key);
+    if (same(held)) return { suffix: 0 };
+    for (let suffix = 1; ; suffix++) {
+      const other = holds(PDFName.of(`${text}_${suffix}`));
+      if (other === undefined) return { suffix, font: own ?? standard(text) };
+      if (same(other)) return { suffix };
+    }
+  };
+  const complete = (holder: PDFDict, drawn: PDFDict[], created: boolean): void => {
+    nameSymbolFace(holder);
+    const renamed = new Map<string, number>();
+    for (const text of defaultAppearanceFonts(holder)) {
+      const name = PDFName.of(text);
+      const held = holds(name);
+      if (held !== undefined) {
+        if (!created) continue;
+        const { suffix, font } = ownNameSuffix(text, held, drawn);
+        if (suffix === 0) continue;
+        if (font) table(true)!.set(PDFName.of(`${text}_${suffix}`), font);
+        renamed.set(text, suffix);
+        continue;
+      }
+      const font = drawnWith(drawn, name) ?? standard(text);
+      if (font) table(true)!.set(name, font);
+    }
+    if (renamed.size === 0) return;
+    const value = holder.lookup(DA);
+    if (!(value instanceof PDFString || value instanceof PDFHexString)) return;
+    holder.set(DA, PDFString.of(value.decodeText().replace(
+      /\/([^\s/[\]<>(){}%]+)(?=\s+[-+]?[\d.]+\s+Tf)/g,
+      (whole, written: string) => {
+        const suffix = renamed.get(written.replace(/#([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))));
+        return suffix === undefined ? whole : `/${written}_${suffix}`;
+      },
+    )));
+  };
+  complete(acro, [], false);
+  for (const [field] of form.acroForm.getAllFields()) {
+    const created = !existing.has(field.dict);
+    const kids = field.dict.lookup(PDFName.of('Kids'));
+    const widgets = kids instanceof PDFArray ? kids.asArray().map((kid) => context.lookup(kid)).filter((kid): kid is PDFDict => kid instanceof PDFDict) : [];
+    complete(field.dict, [field.dict, ...widgets], created);
+    // A widget that is not its field can carry a default appearance too.
+    for (const widget of widgets) if (!widget.has(PDFName.of('T'))) complete(widget, [widget, field.dict], created);
+  }
+}
+
+/** What the standard face of a default appearance name is, as
+ *  `interchangeableFontKey` reads the font the form embeds for it. */
+const STANDARD_FACE_KEYS: ReadonlyMap<string, string> = new Map([
+  ['Helv', '/Type1 /Helvetica /WinAnsiEncoding'],
+  ['Helvetica', '/Type1 /Helvetica /WinAnsiEncoding'],
+  ['ZaDb', '/Type1 /ZapfDingbats '],
+]);
 
 /** Rewrite `/CO` for the calculations this batch just created.
  *

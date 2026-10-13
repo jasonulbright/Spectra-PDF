@@ -57,6 +57,7 @@ export interface ExportAnnotation {
   // face `note` is set in; the AP embeds that face's subset and draws the
   // name in it, with no border and no fill. See lib/signature-fonts.
   signatureFont?: string;
+  noRotate?: true; // carried stamp only: the box is the upright box of a NoRotate original
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
   // measure only — the dimension class + the /Measure dict inputs.
@@ -96,6 +97,7 @@ export interface ExportAnnotation {
       | 'Squiggly' | 'Text' | 'Circle' | 'Line' | 'Polygon' | 'PolyLine';
     rect: [number, number, number, number];
     contents?: string;
+    color?: string;
   };
 }
 

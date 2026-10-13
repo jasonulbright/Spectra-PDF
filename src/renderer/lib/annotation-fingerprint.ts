@@ -339,11 +339,15 @@ function keysAreAmbiguous(dict: PDFDict): boolean {
  * /BS /Type, /BE /S, a name-typed /Contents, the /AP /N keys) holds a spelling
  * the parse has lost (`nameSpellingIsLost`), or two keys of one dictionary
  * decode to one name, which leaves which of them pdf.js keeps to file order
- * the parse has also lost. Such an annotation is left as it is: not imported,
- * so never stripped or re-authored.
+ * the parse has also lost. A group reply reads its group attributes from its
+ * primary's dictionary (`contentsHolder`), so the primary's keys count as the
+ * reply's own. Such an annotation is left as it is: not imported, so never
+ * stripped or re-authored.
  */
 export function annotationDictionaryIsAmbiguous(dict: PDFDict): boolean {
   if (keysAreAmbiguous(dict)) return true;
+  const holder = contentsHolder(dict);
+  if (holder !== dict && keysAreAmbiguous(holder)) return true;
   const names: unknown[] = ['Subtype', 'AS', 'RT', 'IT', 'Contents'].map((key) => entryOf(dict, key));
   const le = entryOf(dict, 'LE');
   if (le instanceof PDFArray) {

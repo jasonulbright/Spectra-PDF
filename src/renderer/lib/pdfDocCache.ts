@@ -3,6 +3,7 @@ import { documentPassword } from './document-passwords';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PdfBuffer } from '../state/types';
 import { releaseSelectionCache, retainSelectionCache } from './ocr-selection';
+import { releaseStampRasters, retainStampRasters } from './stamp-raster';
 
 // One live pdf.js document per open file, shared by the workspace indexer and
 // the canvas page renderers. Entries are keyed by files-map key and are stale
@@ -52,6 +53,18 @@ export function contentKeyOf(proxy: PDFDocumentProxy): Promise<string> | null {
   return contentKeys.get(proxy) ?? null;
 }
 
+/** A second document over the bytes of `proxy`, outside this cache: nothing
+ * else renders it and its holder destroys it. It is opened as `proxy` was:
+ * the entry's buffer, and the password its path has at the time of the call,
+ * which is read for this load and kept nowhere else. A document this cache
+ * did not load is refused: `getData()` gives the bytes as stored, encrypted
+ * for a password document, and no record says how they were opened. */
+export function openPrivateCopy(proxy: PDFDocumentProxy): Promise<PDFDocumentProxy> {
+  const entry = entryOf.get(proxy);
+  if (!entry) return Promise.reject(new Error('private copy: the document was not loaded by the proxy cache'));
+  return loadDocument(entry.buffer, documentPassword(entry.path));
+}
+
 /** The load of the newest document that replaced `proxy` for its path, by
  * replacement or by a load after its eviction: it resolves when that document
  * loaded and rejects when its load failed. Null when nothing replaced `proxy`.
@@ -83,7 +96,10 @@ export function replacementOf(proxy: PDFDocumentProxy): Promise<PDFDocumentProxy
 function releaseEntry(entry: CacheEntry, after?: Promise<unknown>): void {
   if (entry.released) return;
   entry.released = true;
-  void Promise.all([entry.contentKey, after]).then(([key]) => releaseSelectionCache(key));
+  void Promise.all([entry.contentKey, after]).then(([key]) => {
+    releaseSelectionCache(key);
+    releaseStampRasters(key);
+  });
 }
 
 // A request sent to a proxy whose transport has started terminating never
@@ -109,7 +125,10 @@ export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDo
   const existing = cache.get(path);
   if (existing && existing.buffer === buffer) return existing.promise;
   const contentKey = contentKeyOfBuffer(buffer);
-  void contentKey.then(retainSelectionCache);
+  void contentKey.then((key) => {
+    retainSelectionCache(key);
+    retainStampRasters(key);
+  });
   if (existing) destroyEntry(path, existing, contentKey);
   const entry: CacheEntry = {
     path, buffer, promise: loadDocument(buffer, documentPassword(path)), contentKey, released: false, successor: null,

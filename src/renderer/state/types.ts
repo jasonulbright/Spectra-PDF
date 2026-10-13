@@ -169,6 +169,17 @@ export interface PageAnnotation {
   // so its strokes are vector paths by the same route a freehand drawing
   // takes. An IMPORTED one places as an image stamp (`imageData`).
   signatureFont?: string;
+  // stamp only, imported: the commit keeps the original's appearance and
+  // writes only the rectangle, note and colour that changed, so the model
+  // holds no drawing. The value is pdf.js's id of the original in its source
+  // page; the canvas draws that appearance, rastered from the loaded bytes.
+  carriedAppearance?: string;
+  // stamp only, imported with its appearance carried: the original has the
+  // NoRotate flag (ISO 32000-2 12.5.3). The box is then the stamp as it
+  // stands upright on the screen: its top-left corner is the upper-left
+  // corner of /Rect in default user space, and its width and height are those
+  // of /Rect, whatever the page rotation.
+  noRotate?: true;
   // shape only: which figure. See ShapeType.
   shapeType?: ShapeType;
   // line/arrow/polyline only: the /LE ending names at [start, end], limited

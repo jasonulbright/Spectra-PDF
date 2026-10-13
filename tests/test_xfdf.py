@@ -729,3 +729,105 @@ def test_import_missing_annots_section(tmp_path):
     )
     with pytest.raises(ValueError):
         import_xfdf(bare, str(xfdf), str(tmp_path / "out.pdf"))
+
+
+def _xfdf_file(path: str, body: str) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">'
+            "<annots>" + body + "</annots></xfdf>"
+        )
+
+
+def _blank(path: str, acroform=None) -> None:
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(300, 300))
+    if acroform is not None:
+        pdf.Root["/AcroForm"] = acroform(pdf)
+    pdf.save(path)
+    pdf.close()
+
+
+_FREE_TEXT = '<freetext page="0" rect="10,10,120,40"><contents>typed</contents></freetext>'
+
+
+def test_an_imported_free_text_names_a_font_the_default_resources_hold(tmp_path):
+    # ISO 32000-2 12.5.6.6 reads a free text /DA by 12.7.4.3: its font is a
+    # name in /AcroForm /DR /Font.
+    src, xfdf, out = (str(tmp_path / n) for n in ("bare.pdf", "one.xfdf", "out.pdf"))
+    _blank(src)
+    _xfdf_file(xfdf, _FREE_TEXT)
+    assert import_xfdf(src, xfdf, out)["added"] == 1
+    with pikepdf.open(out) as result:
+        annot = result.pages[0].obj["/Annots"][0]
+        assert bytes(annot["/DA"]) == b"0 0 0 rg /Helv 12 Tf"
+        acro = result.Root["/AcroForm"]
+        assert len(acro["/Fields"]) == 0
+        assert str(acro["/DR"]["/Font"]["/Helv"]["/BaseFont"]) == "/Helvetica"
+
+
+def test_an_import_with_no_free_text_adds_no_form(tmp_path):
+    src, xfdf, out = (str(tmp_path / n) for n in ("bare.pdf", "one.xfdf", "out.pdf"))
+    _blank(src)
+    _xfdf_file(xfdf, '<square page="0" rect="10,10,120,40"/>')
+    assert import_xfdf(src, xfdf, out)["added"] == 1
+    with pikepdf.open(out) as result:
+        assert "/AcroForm" not in result.Root
+
+
+def _form_with(font: dict):
+    def acroform(pdf):
+        own = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name("/Font"), **{
+            key: pikepdf.Name(value) for key, value in font.items()
+        }))
+        return pdf.make_indirect(pikepdf.Dictionary(
+            Fields=pikepdf.Array(), DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=own)),
+        ))
+    return acroform
+
+
+def test_an_imported_free_text_shares_helv_with_an_interchangeable_font(tmp_path):
+    src, xfdf, out = (str(tmp_path / n) for n in ("form.pdf", "one.xfdf", "out.pdf"))
+    _blank(src, _form_with({"Subtype": "/Type1", "BaseFont": "/Helvetica", "Encoding": "/WinAnsiEncoding"}))
+    _xfdf_file(xfdf, _FREE_TEXT)
+    import_xfdf(src, xfdf, out)
+    with pikepdf.open(out) as result:
+        assert list(result.Root["/AcroForm"]["/DR"]["/Font"].keys()) == ["/Helv"]
+        assert bytes(result.pages[0].obj["/Annots"][0]["/DA"]) == b"0 0 0 rg /Helv 12 Tf"
+
+
+def test_an_imported_free_text_takes_a_name_of_its_own_when_helv_is_another_font(tmp_path):
+    # One name is one font: a /DA written here means the standard Helvetica
+    # face, so it does not take a name that holds Times.
+    src, xfdf, out, again = (str(tmp_path / n) for n in ("form.pdf", "one.xfdf", "out.pdf", "again.pdf"))
+    _blank(src, _form_with({"Subtype": "/Type1", "BaseFont": "/Times-Roman"}))
+    _xfdf_file(xfdf, _FREE_TEXT + _FREE_TEXT.replace("10,10", "10,60"))
+    assert import_xfdf(src, xfdf, out)["added"] == 2
+    with pikepdf.open(out) as result:
+        fonts = result.Root["/AcroForm"]["/DR"]["/Font"]
+        assert {str(k): str(v["/BaseFont"]) for k, v in fonts.items()} == {
+            "/Helv": "/Times-Roman", "/Helv_1": "/Helvetica",
+        }
+        assert [bytes(a["/DA"]) for a in result.pages[0].obj["/Annots"]] == [b"0 0 0 rg /Helv_1 12 Tf"] * 2
+    # A second import finds the face under the name it took.
+    import_xfdf(out, xfdf, again)
+    with pikepdf.open(again) as result:
+        assert sorted(str(k) for k in result.Root["/AcroForm"]["/DR"]["/Font"].keys()) == ["/Helv", "/Helv_1"]
+        assert [bytes(a["/DA"]) for a in result.pages[0].obj["/Annots"]] == [b"0 0 0 rg /Helv_1 12 Tf"] * 4
+
+
+def test_a_form_written_in_the_catalog_takes_the_entry_in_place(tmp_path):
+    src, xfdf, out = (str(tmp_path / n) for n in ("direct.pdf", "one.xfdf", "out.pdf"))
+
+    def acroform(pdf):
+        field = pdf.make_indirect(pikepdf.Dictionary(FT=pikepdf.Name("/Tx"), T=pikepdf.String("name")))
+        return pikepdf.Dictionary(Fields=pikepdf.Array([field]))
+
+    _blank(src, acroform)
+    _xfdf_file(xfdf, _FREE_TEXT)
+    import_xfdf(src, xfdf, out)
+    with pikepdf.open(out) as result:
+        acro = result.Root["/AcroForm"]
+        assert len(acro["/Fields"]) == 1
+        assert str(acro["/DR"]["/Font"]["/Helv"]["/BaseFont"]) == "/Helvetica"
