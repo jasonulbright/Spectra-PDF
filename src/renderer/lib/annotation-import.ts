@@ -179,13 +179,19 @@ function quadRects(quadPoints: unknown): [number, number, number, number][] {
  * an icon size and is matched without its rectangle. An ambiguous annotation
  * written directly in /Annots has no id to pair by, so the page's other
  * annotations are left as they are too.
+ *
+ * An annotation id is an object number, so `rawStyles` are read from the
+ * bytes `a` was read from: a save of the same document by another writer
+ * numbers its objects anew, and an id then names another annotation's entry.
  */
-function leftUntouched(rawStyles: RawAnnotStyle[] | undefined, a: PlacedAnnotation): boolean {
-  if (!rawStyles) return false;
-  if (rawStyles.some((s) => s.ambiguous && (s.ref === undefined || s.ref === a.id))) return true;
-  if (a.subtype === 'Text' || a.id === undefined) return false;
+function leftUntouched(rawStyles: RawAnnotStyle[] | undefined, a: PlacedAnnotation): RawAnnotStyle | 'page' | undefined {
+  if (!rawStyles) return undefined;
+  const marker = rawStyles.find((s) => s.ambiguous && s.ref === a.id && a.id !== undefined);
+  if (marker) return marker;
+  if (rawStyles.some((s) => s.ambiguous && s.ref === undefined)) return 'page';
+  if (a.subtype === 'Text' || a.id === undefined) return undefined;
   const own = rawStyles.find((s) => !s.ambiguous && s.ref === a.id);
-  return own !== undefined && !own.rect.every((v, k) => Math.abs(v - a.rect[k]) <= 0.5);
+  return own !== undefined && !own.rect.every((v, k) => Math.abs(v - a.rect[k]) <= 0.5) ? own : undefined;
 }
 
 type PlacedAnnotation = RawAnnotation & { rect: [number, number, number, number] };
@@ -205,6 +211,7 @@ const isPlaced = (a: RawAnnotation): a is PlacedAnnotation => Array.isArray(a.re
 export async function importPageAnnotations(
   page: PDFPageProxy,
   rawStyles?: RawAnnotStyle[],
+  untouchedSlots?: number[],
 ): Promise<PageAnnotation[]> {
   const raw = (await page.getAnnotations()) as unknown as RawAnnotation[];
   const [vx0, vy0, vx1, vy1] = page.view;
@@ -215,7 +222,15 @@ export async function importPageAnnotations(
   const imported: PageAnnotation[] = [];
   for (const a of raw) {
     if (!RECOGNIZED_SUBTYPES.has(a.subtype) || !isPlaced(a)) continue;
-    if (leftUntouched(rawStyles, a)) continue;
+    const untouched = leftUntouched(rawStyles, a);
+    if (untouched) {
+      // The commit never strips an annotation left untouched, even under
+      // another annotation's fingerprint.
+      if (untouched !== 'page' && untouched.slot !== undefined && !untouchedSlots?.includes(untouched.slot)) {
+        untouchedSlots?.push(untouched.slot);
+      }
+      continue;
+    }
     const kind = kindFor(a.subtype);
     const contents = a.contentsObj?.str || undefined;
     const color = colorToHex(a.color) ?? DEFAULT_COLOR[a.subtype];
@@ -684,4 +699,20 @@ function importCallout(
     ...(sidecar.opacity !== undefined && sidecar.opacity < 1 ? { opacity: sidecar.opacity } : {}),
     importedOriginal,
   };
+}
+
+/** A page's imported annotations and the positions in its /Annots the import
+ *  leaves untouched, as the workspace index records them. An ambiguous
+ *  annotation written directly in /Annots is among them although nothing
+ *  pairs it with pdf.js's reading. */
+export async function importPage(
+  page: PDFPageProxy,
+  rawStyles?: RawAnnotStyle[],
+): Promise<{ annotations: PageAnnotation[]; untouchedSlots: number[] }> {
+  const untouchedSlots: number[] = [];
+  const annotations = await importPageAnnotations(page, rawStyles, untouchedSlots);
+  for (const style of rawStyles ?? []) {
+    if (style.ambiguous && style.slot !== undefined && !untouchedSlots.includes(style.slot)) untouchedSlots.push(style.slot);
+  }
+  return { annotations, untouchedSlots };
 }

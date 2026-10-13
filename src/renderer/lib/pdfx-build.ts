@@ -16,8 +16,8 @@ import type { MetadataOverrides } from './metadata-process';
 import type { CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
-import { normalizeEscapedNames } from './pdf-name-normalize';
-import { decodePdfTextString, pdfNameKey, pdfNameText, pdfStringCodes } from './pdf-text-string';
+import { inheritNameReadings, nameReading, normalizeEscapedNames } from './pdf-name-normalize';
+import { decodePdfTextString, pdfNameText, pdfStringCodes } from './pdf-text-string';
 import { annotationDictionaryIsAmbiguous, contentsHolder, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import {
   LEGEND_FONT_SIZE,
@@ -253,6 +253,7 @@ function stripImportedOriginals(
   copied: import('pdf-lib').PDFPage,
   annotations: ExportAnnotation[],
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
+  untouched: ReadonlySet<PDFDict>,
 ): StrippedOriginals {
   const layerGates = new Map<ExportAnnotation, PDFObject>();
   const nameContents = new Map<ExportAnnotation, string>();
@@ -282,14 +283,14 @@ function stripImportedOriginals(
     }
     // Never imported, so never a strip candidate, even when a fingerprint of
     // another annotation happens to fit it.
-    if (annotationDictionaryIsAmbiguous(dict)) continue;
+    if (untouched.has(dict) || annotationDictionaryIsAmbiguous(dict)) continue;
     // Typed lookups throw on a value of the wrong type. A key whose value
     // breaks Table 166's typing (ISO 32000-2 12.5.2) reads as absent here,
     // which is how the importer's pdf.js reading sees it too, so both sides
     // fingerprint alike. A strict read fails the whole commit over one
     // malformed annotation.
     const subtypeObj = entryOf(dict, 'Subtype');
-    const subtype = subtypeObj instanceof PDFName ? pdfNameKey(subtypeObj) : undefined;
+    const subtype = subtypeObj instanceof PDFName ? nameReading(subtypeObj, dict.context) : undefined;
     const STRIPPABLE = new Set([
       'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
       // The imported drawing shapes re-append like everything else.
@@ -363,8 +364,9 @@ function addAnnotations(
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
   stampImages: Map<string, import('pdf-lib').PDFImage>,
   signatureFonts: Map<string, import('pdf-lib').PDFFont>,
+  untouched: ReadonlySet<PDFDict>,
 ): void {
-  const { layerGates, nameContents } = stripImportedOriginals(copied, annotations, removedImportedOriginals);
+  const { layerGates, nameContents } = stripImportedOriginals(copied, annotations, removedImportedOriginals, untouched);
   const context = output.context;
   // CropBox (defaults to MediaBox when absent, so byte-identical for the
   // common case) — must match what annotation-import.ts reads via pdf.js's
@@ -1272,6 +1274,7 @@ function applyPageExtras(
   output: PDFDocument,
   stampImages: Map<string, import('pdf-lib').PDFImage>,
   signatureFonts: Map<string, import('pdf-lib').PDFFont>,
+  untouched: ReadonlySet<PDFDict>,
 ): void {
   applyRotation(copied, page);
   // Must still run when `annotations` is empty but removedImportedOriginals
@@ -1285,6 +1288,7 @@ function applyPageExtras(
       page.removedImportedOriginals ?? [],
       stampImages,
       signatureFonts,
+      untouched,
     );
   }
 }
@@ -1591,8 +1595,11 @@ async function assemblePages(
   >();
   const contributions: FormContribution[] = [];
   for (const [key, g] of groups) {
-    const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true, updateMetadata: false });
-    normalizeEscapedNames(doc);
+    // Every name is rewritten to the reading pdf.js and qpdf give the file's
+    // own spelling. A signed document's incremental append pairs the rebuilt
+    // pages with the original ones by that reading, so a key pdf-lib would
+    // otherwise write back as `#23` keeps the pairing.
+    const doc = await loadNormalized(g.bytes);
     if (sourceHasXfa(doc)) {
       // Page surgery on an XFA form detaches the form from its pages
       // (the XFA template lays out its own) — refuse with the reason rather
@@ -1620,10 +1627,12 @@ async function assemblePages(
     contributions.push(contribution);
     sources.set(key, { doc, bytes: g.bytes, copier, copiedByIndex, contribution });
   }
+  // The strip reads the copied annotations in the output's context.
+  inheritNameReadings(output.context, [...sources.values()].map((s) => s.doc.context));
   const stampImages = await embedStampImages(output, pages);
   const signatureFonts = await embedSignatureFonts(output, pages);
   const used = new Set<PDFPage>();
-  const pendingExtras: { copied: PDFPage; page: ExportPage }[] = [];
+  const pendingExtras: { copied: PDFPage; page: ExportPage; untouched: ReadonlySet<PDFDict> }[] = [];
   // Which source page landed at which output page — the reference-identity
   // channel every catalog/struct remap depends on (catalog-carry.ts).
   const pairsByKey = new Map<string, { srcIndex: number; outPage: PDFPage }[]>();
@@ -1639,9 +1648,28 @@ async function assemblePages(
     }
     used.add(copied);
     carryIntents(src.doc, src.doc.getPage(page.pageIndex).node, copied.node);
+    // The copied /Annots still holds the source's entries in their order,
+    // so a position the importer left untouched names its copy here.
+    const untouched = new Set<PDFDict>();
+    const copiedAnnots = output.context.lookup(copied.node.get(PDFName.of('Annots')));
+    const copyAt = (slot: number): PDFObject | undefined =>
+      copiedAnnots instanceof PDFArray && slot < copiedAnnots.size() ? output.context.lookup(copiedAnnots.get(slot)) : undefined;
+    for (const slot of page.untouchedAnnotationSlots ?? []) {
+      const dict = copyAt(slot);
+      if (dict instanceof PDFDict) untouched.add(dict);
+    }
+    // Whether a name is unresolved is a fact of the document that wrote it,
+    // so each annotation is asked in its source, and the answer names its
+    // copy by position. The output holds names of every source.
+    const sourceAnnots = src.doc.context.lookup(src.doc.getPage(page.pageIndex).node.get(PDFName.of('Annots')));
+    for (let slot = 0; sourceAnnots instanceof PDFArray && slot < sourceAnnots.size(); slot++) {
+      const own = src.doc.context.lookup(sourceAnnots.get(slot));
+      const dict = own instanceof PDFDict && annotationDictionaryIsAmbiguous(own) ? copyAt(slot) : undefined;
+      if (dict instanceof PDFDict) untouched.add(dict);
+    }
     // Layer identity is paired against the untouched copy. Adding/removing
     // an annotation or wrapping Contents first changes that graph's shape.
-    pendingExtras.push({ copied, page });
+    pendingExtras.push({ copied, page, untouched });
     output.addPage(copied);
     // copyPages clones the page leaf separately from its recursive object
     // cache. An annotation's /P can therefore name a second, detached copy
@@ -1691,7 +1719,7 @@ async function assemblePages(
   const optionalContent = carryOptionalContent(output, carriedSources, owner);
   if (optionalContent.properties) output.catalog.set(PDFName.of('OCProperties'),
     output.context.getObjectRef(optionalContent.properties) ?? output.context.register(optionalContent.properties));
-  for (const { copied, page } of pendingExtras) applyPageExtras(copied, page, output, stampImages, signatureFonts);
+  for (const { copied, page, untouched } of pendingExtras) applyPageExtras(copied, page, output, stampImages, signatureFonts, untouched);
   const structureMaps = carryStructTree(output, carriedSources);
   // Bookmarks, language, preferences and document actions remain owner-only.
   // Actions use the same actual layer identities as the composed registry.
@@ -1723,7 +1751,7 @@ async function assemblePages(
  *  rewritten to the spelling pdf.js reads (`normalizeEscapedNames`). */
 async function loadNormalized(bytes: Uint8Array): Promise<PDFDocument> {
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
-  normalizeEscapedNames(doc);
+  normalizeEscapedNames(doc, bytes, 'all');
   return doc;
 }
 
