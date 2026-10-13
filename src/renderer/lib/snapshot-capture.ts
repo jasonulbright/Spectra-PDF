@@ -23,6 +23,7 @@ import {
   type NormRect,
 } from './snapshot-image';
 import { imageClipboard, type ClipboardImage } from './tauri-bridge';
+import { renderPageUprightOnce } from './upright-stamps';
 
 /** A captured region, still on the page as a transient card. Same lifecycle
  * as the crop placement: single, page-anchored, view state only. */
@@ -79,6 +80,7 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
  * must not clear whatever the clipboard already held.
  */
 export async function captureSnapshot(
+  pdf: object,
   page: PDFPageProxy,
   band: NormRect,
   rotationExtra: number,
@@ -100,12 +102,12 @@ export async function captureSnapshot(
   // The whole page is rendered THROUGH a canvas the size of the band: the
   // transform slides the region under it, so a 600-dpi capture of a corner
   // costs the corner's pixels and not the page's.
-  await page.render({
+  await renderPageUprightOnce(pdf, page, {
     canvas,
     canvasContext: ctx,
     viewport,
     transform: [1, 0, 0, 1, -rect.x, -rect.y],
-  }).promise;
+  });
 
   const png = await canvasToPng(canvas);
   const image = ctx.getImageData(0, 0, rect.w, rect.h);

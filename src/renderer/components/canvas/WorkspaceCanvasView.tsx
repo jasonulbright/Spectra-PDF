@@ -2102,7 +2102,7 @@ export function WorkspaceCanvasView({
         try {
           const proxy = await getDocumentProxy(page.sourceDocId, buffer);
           const p = await proxy.getPage(page.sourcePageIndex + 1);
-          const shot = await captureSnapshot(p, rect, rotationAtDraw, getSettings().snapshotDpi);
+          const shot = await captureSnapshot(proxy, p, rect, rotationAtDraw, getSettings().snapshotDpi);
           if (!shot) return; // a click, not a capture
           setSnapshotError(null);
           setSnapshotPlacement({

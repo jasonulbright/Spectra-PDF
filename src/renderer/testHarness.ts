@@ -26,7 +26,7 @@ import {
   type PlatformCapabilities,
   type PlatformFeature,
 } from './lib/platform-capabilities';
-import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
+import { getRenderTimings, clearRenderTimings, uprightStampsPainted } from './components/canvas/raster';
 import { rebuildTextLayers } from './lib/text-layer-rebuild';
 import { holdSelectionRecognition, recognitionRunCount } from './lib/ocr-selection';
 import {
@@ -1766,6 +1766,11 @@ export interface TestHarness {
   getRedactionMarkCount: () => number;
   /** Completed pdf.js render durations (base + detail rasters). */
   getRenderTimings: () => { kind: string; pageNumber: number; ms: number }[];
+  /** For each page cell of the canvas, how many stamps the render behind its
+   * painted base raster took as upright, and the same for its detail raster.
+   * Null for a raster that has painted nothing, and for a detail raster that
+   * is not shown. Reads only. */
+  getPaintedUpright: () => { pageId: string; base: number | null; detail: number | null }[];
   clearRenderTimings: () => void;
   /** Persist the pending marks as the file's /Redact set (the status
    * bar's Save-marks path). */
@@ -3034,6 +3039,20 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     clearRedactionMarks: () => canvasRedaction?.clear(),
     getRedactionMarkCount: () => canvasRedaction?.count() ?? 0,
     getRenderTimings: () => getRenderTimings(),
+    getPaintedUpright: () => {
+      const cells: { pageId: string; base: number | null; detail: number | null }[] = [];
+      for (const cell of Array.from(document.querySelectorAll<HTMLElement>('[data-page-id]'))) {
+        const base = cell.querySelector<HTMLCanvasElement>('canvas.pageview-base');
+        if (!base) continue;
+        const detail = cell.querySelector<HTMLCanvasElement>('canvas.pageview-detail');
+        cells.push({
+          pageId: cell.getAttribute('data-page-id') ?? '',
+          base: uprightStampsPainted(base),
+          detail: detail && detail.style.display !== 'none' ? uprightStampsPainted(detail) : null,
+        });
+      }
+      return cells;
+    },
     clearRenderTimings: () => clearRenderTimings(),
     saveRedactionMarks: async () => {
       if (!canvasRedaction) {
