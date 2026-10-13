@@ -8,10 +8,11 @@
 // pdf.js-only import: the shape kinds then stay UNIMPORTED rather than
 // imported blind — faithful-or-untouched.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFNumber, PDFRef, PDFString } from 'pdf-lib';
+import type { PDFContext } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
 import { annotationDictionaryIsAmbiguous, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import { pdfNameKey } from './pdf-text-string';
-import { normalizeEscapedNames } from './pdf-name-normalize';
+import { nameReading, normalizeEscapedNames } from './pdf-name-normalize';
 
 export interface RawAnnotStyle {
   subtype: string;
@@ -59,6 +60,8 @@ export interface RawAnnotStyle {
   /** The annotation's object, spelt as pdf.js spells an annotation id (`12R`,
    *  `12R3`); absent for an annotation written directly in /Annots. */
   ref?: string;
+  /** The annotation's position in its page's /Annots. */
+  slot?: number;
   /** The annotation reads differently here and in pdf.js
    *  (`annotationDictionaryIsAmbiguous`). Nothing else is recorded for it,
    *  and the importer leaves it untouched. */
@@ -101,8 +104,9 @@ function colorHex(arr: unknown): string | undefined {
   return undefined;
 }
 
-function nameOf(v: unknown): string | undefined {
-  return v instanceof PDFName ? pdfNameKey(v) : undefined;
+function nameOf(v: unknown, context?: PDFContext): string | undefined {
+  if (!(v instanceof PDFName)) return undefined;
+  return context ? nameReading(v, context) : pdfNameKey(v);
 }
 
 /** The value under the key spelt `name` (decoded as pdf.js decodes keys),
@@ -142,7 +146,7 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
     doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
     // The commit reads the same bytes after this rewrite; the sidecar reads
     // what the commit will match against.
-    normalizeEscapedNames(doc);
+    normalizeEscapedNames(doc, bytes, 'annotations');
   } catch {
     return null;
   }
@@ -172,11 +176,11 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           const ref = raw instanceof PDFRef
             ? `${raw.objectNumber}R${raw.generationNumber === 0 ? '' : raw.generationNumber}` : undefined;
           if (annotationDictionaryIsAmbiguous(dict)) {
-            styles.push({ subtype: '', rect: [0, 0, 0, 0], ref, ambiguous: true });
+            styles.push({ subtype: '', rect: [0, 0, 0, 0], ref, slot: i, ambiguous: true });
             continue;
           }
           const subtypeObj = entryOf(dict, 'Subtype');
-          const subtype = subtypeObj instanceof PDFName ? pdfNameKey(subtypeObj) : undefined;
+          const subtype = nameOf(subtypeObj, doc.context);
           if (!subtype) continue;
           // Keyed by the rectangle pdf.js reports, which the strip compares too:
           // an annotation with no appearance is reported at the box pdf.js draws.
@@ -191,12 +195,12 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           if (leRaw instanceof PDFArray) {
             const names: string[] = [];
             for (let j = 0; j < leRaw.size(); j++) {
-              const n = nameOf(leRaw.lookup(j));
+              const n = nameOf(leRaw.lookup(j), doc.context);
               if (n) names.push(n);
             }
             if (names.length) le = names;
           } else if (leRaw instanceof PDFName) {
-            le = [pdfNameKey(leRaw)];
+            le = [nameOf(leRaw, doc.context)!];
           }
           const rd = numArray(typedEntry(dict, 'RD', isArray));
           const measure = rawEntry(dict, 'Measure');
@@ -204,12 +208,13 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             subtype,
             rect: rect as [number, number, number, number],
             ref,
+            slot: i,
             strokeWidth: num(bs ? typedEntry(bs, 'W', isNumber) : undefined),
             opacity: num(typedEntry(dict, 'CA', isNumber)),
             fillColor: colorHex(typedEntry(dict, 'IC', isArray)),
-            cloudy: nameOf(be ? typedEntry(be, 'S', isName) : undefined) === 'C',
+            cloudy: nameOf(be ? typedEntry(be, 'S', isName) : undefined, doc.context) === 'C',
             cloudIntensity: num(be ? typedEntry(be, 'I', isNumber) : undefined),
-            it: nameOf(typedEntry(dict, 'IT', isName)),
+            it: nameOf(typedEntry(dict, 'IT', isName), doc.context),
             cl: numArray(typedEntry(dict, 'CL', isArray)),
             le,
             vertices: numArray(typedEntry(dict, 'Vertices', isArray)),

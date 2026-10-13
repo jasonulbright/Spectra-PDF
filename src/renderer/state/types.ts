@@ -260,6 +260,11 @@ export interface PageRef {
   // indexed PageRef has none, and the removed original is genuinely gone
   // from the file by then.
   removedImportedOriginals?: ImportedAnnotationFingerprint[];
+  // Positions in the source page's /Annots of the annotations the importer
+  // left untouched (ambiguous, or read at another rectangle than pdf.js's).
+  // The commit never strips them, even when another annotation's
+  // fingerprint fits. Cleared by the next reindex, like the fingerprints.
+  untouchedAnnotationSlots?: number[];
 }
 
 // A document as composed in the workspace. Usually one per open file; a .pdfx

@@ -20,12 +20,13 @@ export const PDF_DOC_DIFFERENCES: ReadonlyMap<number, number> = new Map([
 
 const ESCAPE = 0x1b;
 
-/** A string of character codes. Spreading a long run of codes into one call
- *  overflows the stack, so the codes go in slices. */
-export function charactersOf(codes: readonly number[]): string {
+/** A string of the character codes in `from`..`to`. Spreading a long run of
+ *  codes into one call overflows the stack, and one append per code allocates
+ *  per code, so the codes go in slices. */
+export function charactersOf(codes: readonly number[] | Uint8Array, from = 0, to = codes.length): string {
   const SLICE = 8192;
   let out = '';
-  for (let i = 0; i < codes.length; i += SLICE) out += String.fromCharCode(...codes.slice(i, i + SLICE));
+  for (let i = from; i < to; i += SLICE) out += String.fromCharCode(...codes.slice(i, Math.min(i + SLICE, to)));
   return out;
 }
 const BACKSLASH = 0x5c;

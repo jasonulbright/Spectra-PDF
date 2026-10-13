@@ -7,8 +7,9 @@
 // except where it draws an appearance of its own for an annotation that has
 // none: there the rectangle becomes the box of what it draws.
 import { PDFArray, PDFBool, PDFDict, PDFHexString, PDFName, PDFNull, PDFNumber, PDFStream, PDFString } from 'pdf-lib';
-import type { PDFObject } from 'pdf-lib';
-import { charactersOf, pdfNameKey, pdfStringCodes } from './pdf-text-string';
+import type { PDFContext, PDFObject } from 'pdf-lib';
+import { nameIsUnresolved, nameReading } from './pdf-name-normalize';
+import { charactersOf, pdfStringCodes } from './pdf-text-string';
 import { maxOf, minOf } from './coordinate-bounds';
 
 export type Rect = [number, number, number, number];
@@ -18,7 +19,8 @@ const N = (name: string): PDFName => PDFName.of(name);
 /** The value stored under the key spelt `name`, unresolved, null included.
  *  pdf.js decodes a key's `#xx` escapes in either case (7.3.5); pdf-lib's
  *  parser keeps a key such as `/B#6frder` under that literal spelling, so a
- *  dictionary holding any key with a `#` is read by decoded spelling. Two
+ *  dictionary holding any key with a `#` is read by pdf.js's spelling
+ *  (`nameReading`). Two
  *  spellings of one key are two entries here and one in pdf.js, where the
  *  one written later replaces the other; the entries keep file order, so the
  *  last match is taken. A dictionary with no `#` key is read by exact key.
@@ -32,7 +34,7 @@ export function rawEntry(dict: PDFDict, name: string): PDFObject | undefined {
   if (!name.includes('#') && !entries.some(([key]) => key.asString().includes('#'))) return dict.get(N(name), true);
   let found: PDFObject | undefined;
   for (const [key, value] of entries) {
-    if (pdfNameKey(key) === name) found = value;
+    if (nameReading(key, dict.context) === name) found = value;
   }
   return found;
 }
@@ -98,7 +100,7 @@ export function hasNormalAppearance(dict: PDFDict): boolean {
   if (!(normal instanceof PDFDict)) return false;
   const state = entryOf(dict, 'AS');
   if (!(state instanceof PDFName)) return false;
-  return entryOf(normal, pdfNameKey(state)) instanceof PDFStream;
+  return entryOf(normal, nameReading(state, dict.context)) instanceof PDFStream;
 }
 
 /** A border width as pdf.js takes it: a name is 0, a positive number wider
@@ -174,7 +176,7 @@ function borderWidth(dict: PDFDict, rect: Rect): number {
     // A /Type that is falsy as pdf.js holds it (absent, null, 0, false, an
     // empty string) counts as no type at all.
     const type = entryOf(bs, 'Type');
-    const typed = !jsTruthy(type) || (type instanceof PDFName && pdfNameKey(type) === 'Border');
+    const typed = !jsTruthy(type) || (type instanceof PDFName && nameReading(type, dict.context) === 'Border');
     if (!typed) return 1;
     return dashVoidsWidth(entryOf(bs, 'D'), true) ? 0 : widthOf(entryOf(bs, 'W'), rect);
   }
@@ -223,7 +225,7 @@ function pathRect(rect: Rect, points: ArrayLike<number>[], width: number): Rect 
 export function contentsHolder(dict: PDFDict): PDFDict {
   if (!hasKey(dict, 'IRT')) return dict;
   const type = entryOf(dict, 'RT');
-  if (!(type instanceof PDFName) || pdfNameKey(type) !== 'Group') return dict;
+  if (!(type instanceof PDFName) || nameReading(type, dict.context) !== 'Group') return dict;
   const parent = entryOf(dict, 'IRT');
   return parent instanceof PDFDict ? parent : dict;
 }
@@ -300,19 +302,20 @@ export function importedRect(dict: PDFDict, subtype: string): Rect {
 const isHexCode = (code: number | undefined): boolean => code !== undefined
   && ((code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x46) || (code >= 0x61 && code <= 0x66));
 
-/** Whether pdf.js's reading of a parsed name depends on a file spelling the
- *  parse no longer holds (7.3.5): a `#` before one hex digit and anything
- *  that is not a hex digit came from a `#` pdf.js reads as a failed escape.
- *  A failed escape followed by an escape the parser decodes leaves no such
- *  trace (`/#6#41` parses as `#6A`, pdf.js reads `#6#41`); only the importer's
- *  rectangle cross-check catches that, and only when the reading changes the
- *  rectangle. A name with an undecoded lowercase escape is not counted: the
- *  load rewrites it (`normalizeEscapedNames`). */
-export function nameSpellingIsLost(name: PDFName): boolean {
+/** Whether pdf.js's reading of a parsed name is unknown (7.3.5). After a load
+ *  that ran `normalizeEscapedNames`, that is a name the file's own tokens
+ *  could not settle. Without one, a `#` before one hex digit and another
+ *  character is counted: pdf.js may have read a failed escape there, which
+ *  also swallows an escape after it (`/#6#41` parses as `#6A`, pdf.js reads
+ *  `#6#41`). A `#` and one hex digit at the end of a name read the same on
+ *  both sides. */
+export function nameSpellingIsLost(name: PDFName, context?: PDFContext): boolean {
+  const settled = context ? nameIsUnresolved(name, context) : undefined;
+  if (settled !== undefined) return settled;
   const bytes = name.asBytes();
   for (let i = 0; i < bytes.length; i++) {
     if (bytes[i] !== 0x23 || !isHexCode(bytes[i + 1])) continue;
-    if (!isHexCode(bytes[i + 2])) return true;
+    if (i + 2 < bytes.length && !isHexCode(bytes[i + 2])) return true;
   }
   return false;
 }
@@ -320,8 +323,8 @@ export function nameSpellingIsLost(name: PDFName): boolean {
 function keysAreAmbiguous(dict: PDFDict): boolean {
   const seen = new Set<string>();
   for (const key of dict.keys()) {
-    if (nameSpellingIsLost(key)) return true;
-    const decoded = pdfNameKey(key);
+    if (nameSpellingIsLost(key, dict.context)) return true;
+    const decoded = nameReading(key, dict.context);
     if (seen.has(decoded)) return true;
     seen.add(decoded);
   }
@@ -357,5 +360,5 @@ export function annotationDictionaryIsAmbiguous(dict: PDFDict): boolean {
       if (normal instanceof PDFDict && keysAreAmbiguous(normal)) return true;
     }
   }
-  return names.some((value) => value instanceof PDFName && nameSpellingIsLost(value));
+  return names.some((value) => value instanceof PDFName && nameSpellingIsLost(value, dict.context));
 }

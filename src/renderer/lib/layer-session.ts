@@ -6,7 +6,8 @@ import type { EngineCall } from './engine-call';
 import type { ProcessingStep } from './processing-steps';
 import { EDIT_DECLINED } from './edit-text';
 import { tChrome } from '../i18n';
-import { normalizeEscapedNames } from './pdf-name-normalize';
+import { rawEntry } from './annotation-fingerprint';
+import { pdfNameKey } from './pdf-text-string';
 import { readableBytes, SealedDecryptError } from './sealed-edit';
 
 export interface Layer { index: number; name: string; visible: boolean; locked: boolean; processing_step: ProcessingStep | null }
@@ -29,11 +30,6 @@ export function parseLayerRead(reply: unknown): Layer[] {
  * evidence. Missing, many-to-one or inconsistent bindings refuse. */
 export async function remapLayerIndex(before: PdfBuffer, after: PdfBuffer, index: number, pairs: [number, number][]): Promise<number> {
   const [src, dst] = await Promise.all([PDFDocument.load(new Uint8Array(before)), PDFDocument.load(new Uint8Array(after))]), N = PDFName.of;
-  // The two revisions are compared key by key, so both read their names as
-  // the commit's output was written: a key such as /Pr#6fperties would
-  // otherwise have no counterpart.
-  normalizeEscapedNames(src);
-  normalizeEscapedNames(dst);
   const groups = (pdf: PDFDocument) => pdf.catalog.lookup(N('OCProperties'), PDFDict).lookup(N('OCGs'), PDFArray).asArray();
   const old = groups(src), next = groups(dst);
   if (old.some(r => !(r instanceof PDFRef)) || next.some(r => !(r instanceof PDFRef)) || !old[index]) throw changed();
@@ -50,7 +46,9 @@ export async function remapLayerIndex(before: PdfBuffer, after: PdfBuffer, index
     const av = a instanceof PDFRef ? src.context.lookup(a) : a, bv = b instanceof PDFRef ? dst.context.lookup(b) : b;
     if (av instanceof PDFRawStream && bv instanceof PDFRawStream) { walk(av.dict, bv.dict, depth + 1); return; }
     if (av instanceof PDFDict && bv instanceof PDFDict) {
-      for (const [key, value] of av.entries()) if (!['Parent', 'P'].includes(key.decodeText())) walk(value, bv.get(key), depth + 1);
+      // The later revision may hold a key under its decoded spelling (a
+      // /Pr#6fperties written back as /Properties), so keys pair by that.
+      for (const [key, value] of av.entries()) if (!['Parent', 'P'].includes(key.decodeText())) walk(value, rawEntry(bv, pdfNameKey(key)), depth + 1);
     } else if (av instanceof PDFArray && bv instanceof PDFArray) {
       if (av.size() !== bv.size()) throw changed();
       av.asArray().forEach((value, i) => walk(value, bv.get(i), depth + 1));
