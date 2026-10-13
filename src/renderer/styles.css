@@ -3434,6 +3434,27 @@ input:not([type]) {
   user-select: none;
 }
 
+/* A stamp whose own appearance the commit keeps: that appearance alone, no
+   box chrome. The label look stands in when the appearance has no bitmap. */
+.page-annot-stamp:has(.page-annot-stamp-appearance) {
+  border-width: 0;
+}
+.page-annot-stamp-appearance {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+.page-annot-stamp-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
 /* A TYPED personal signature: the name alone in its script face, no box
    chrome — the same look the appearance stream draws. The size is driven from
    the box because the appearance fits the name to the rect on the face's own

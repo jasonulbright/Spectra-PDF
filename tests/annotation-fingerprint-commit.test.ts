@@ -376,6 +376,184 @@ describe('a reply to another annotation (12.5.6.2)', () => {
   });
 });
 
+/** Page 1 holds a /Text parent; page 2 holds one reply to it. */
+async function replyAcrossPages(
+  reply: (ctx: PDFContext, parentRef: PDFRef) => PDFDict,
+  parentText: string | null = 'Parent note',
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const first = doc.addPage([300, 600]);
+  const second = doc.addPage([300, 600]);
+  const ctx = doc.context;
+  const parent = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [10, 370, 30, 390], F: 4, C: [1, 0, 0], P: first.ref });
+  if (parentText !== null) parent.set(PDFName.of('Contents'), PDFHexString.fromText(parentText));
+  parent.set(PDFName.of('T'), PDFString.of('Parent author'));
+  const parentRef = ctx.register(parent);
+  first.node.set(PDFName.of('Annots'), ctx.obj([parentRef]));
+  second.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(reply(ctx, parentRef))]));
+  return doc.save({ useObjectStreams: false });
+}
+
+function highlightReply(replyType: string, ownContents?: string): (ctx: PDFContext, parentRef: PDFRef) => PDFDict {
+  return (ctx, parentRef) => {
+    const reply = ctx.obj({
+      Type: 'Annot', Subtype: 'Highlight', Rect: [98, 498, 202, 522], QuadPoints: QUAD, C: [1, 1, 0], IRT: parentRef, RT: replyType,
+    });
+    if (ownContents !== undefined) reply.set(PDFName.of('Contents'), PDFHexString.fromText(ownContents));
+    return reply;
+  };
+}
+
+/** One import + commit cycle that keeps the second page only. */
+async function commitSecondPageOnly(bytes: Uint8Array, edit: (page: PageRef) => PageRef = (page) => page): Promise<Uint8Array> {
+  const pdf = await loadPdf(bytes);
+  const styles = await readRawAnnotationStyles(bytes);
+  const { annotations, untouchedSlots } = await importPage(await pdf.getPage(2), styles?.[1]);
+  await pdf.loadingTask.destroy();
+  const file = { ...makeFile('a.pdf', bytes), pageCount: 2 };
+  const page: PageRef = edit({
+    id: 'a.pdf#p1', sourceDocId: 'a.pdf', sourcePageIndex: 1, rotation: 0, width: 0, height: 0, annotations,
+    ...(untouchedSlots.length ? { untouchedAnnotationSlots: untouchedSlots } : {}),
+  });
+  const doc: OpenDocument = { ...file, id: 'a.pdf#0', name: file.name, pages: [page], pageCount: 1 };
+  const [plan] = planCommit({ documents: [doc] }, new Map([['a.pdf', file]]), ['a.pdf']);
+  return buildCommitBytes(plan);
+}
+
+/** The first page's annotations as pdf.js shows them. */
+async function shown(bytes: Uint8Array): Promise<{ subtype: string; text: string; inReplyTo: string | null }[]> {
+  const pdf = await loadPdf(bytes);
+  expect(pdf.numPages).toBe(1);
+  const annots = (await (await pdf.getPage(1)).getAnnotations()) as { subtype: string; contentsObj?: { str: string }; inReplyTo?: string | null }[];
+  await pdf.loadingTask.destroy();
+  return annots.map((a) => ({ subtype: a.subtype, text: a.contentsObj?.str ?? '', inReplyTo: a.inReplyTo ?? null }));
+}
+
+/** The keys among `names` that any object of the saved file holds, and
+ *  whether the file holds a /Text annotation object, on a page or not. */
+async function heldObjects(bytes: Uint8Array, names: string[]): Promise<{ keys: string[]; parent: boolean }> {
+  const doc = await PDFDocument.load(bytes);
+  const keys = new Set<string>();
+  let parent = false;
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict)) continue;
+    for (const name of names) if (obj.has(PDFName.of(name))) keys.add(name);
+    if (obj.has(PDFName.of('Rect')) && obj.get(PDFName.of('Subtype')) === PDFName.of('Text')) parent = true;
+  }
+  return { keys: [...keys].sort(), parent };
+}
+
+describe('a group reply whose parent is on a removed page', () => {
+  it('is replaced once, keeps the text pdf.js showed, and holds no link to the parent', async () => {
+    const source = await replyAcrossPages(highlightReply('Group'));
+    const once = await commitSecondPageOnly(source);
+    expect(await shown(once)).toEqual([{ subtype: 'Highlight', text: 'Parent note', inReplyTo: null }]);
+    expect(await heldObjects(once, ['IRT', 'RT'])).toEqual({ keys: [], parent: false });
+    expect(await shown(await commitCycle(once))).toEqual([{ subtype: 'Highlight', text: 'Parent note', inReplyTo: null }]);
+  });
+
+  it('with text of its own is replaced once and keeps the parent text pdf.js showed', async () => {
+    const source = await replyAcrossPages(highlightReply('Group', 'Own hidden'));
+    const once = await commitSecondPageOnly(source);
+    expect(await shown(once)).toEqual([{ subtype: 'Highlight', text: 'Parent note', inReplyTo: null }]);
+    expect(await shown(await commitCycle(once))).toEqual([{ subtype: 'Highlight', text: 'Parent note', inReplyTo: null }]);
+  });
+
+  it('whose parent has no text is replaced once and stays without text', async () => {
+    const source = await replyAcrossPages(highlightReply('Group', 'Own hidden'), null);
+    const once = await commitSecondPageOnly(source);
+    expect(await shown(once)).toEqual([{ subtype: 'Highlight', text: '', inReplyTo: null }]);
+    expect(await shown(await commitCycle(once))).toEqual([{ subtype: 'Highlight', text: '', inReplyTo: null }]);
+  });
+
+  it('is removed when the user deleted it', async () => {
+    const source = await replyAcrossPages(highlightReply('Group'));
+    const once = await commitSecondPageOnly(source, (p) => ({
+      ...p, annotations: [], removedImportedOriginals: [p.annotations![0].importedOriginal!],
+    }));
+    expect(await shown(once)).toEqual([]);
+  });
+
+  it('of a subtype the import leaves alone keeps the text pdf.js showed', async () => {
+    const source = await replyAcrossPages((ctx, parentRef) => {
+      const caret = ctx.obj({
+        Type: 'Annot', Subtype: 'Caret', Rect: [98, 498, 110, 510], C: [0, 0, 1], IRT: parentRef, RT: 'Group', AP: appearance(ctx),
+      });
+      caret.set(PDFName.of('Contents'), PDFHexString.fromText('Own hidden'));
+      caret.set(PDFName.of('T'), PDFString.of('Own author'));
+      caret.set(PDFName.of('Subj'), PDFString.of('Own subject'));
+      return caret;
+    });
+    type Seen = { contentsObj: { str: string }; titleObj: { str: string }; color: ArrayLike<number> | null };
+    const read = async (bytes: Uint8Array, pageNumber: number) => {
+      const pdf = await loadPdf(bytes);
+      const [seen] = (await (await pdf.getPage(pageNumber)).getAnnotations()) as Seen[];
+      await pdf.loadingTask.destroy();
+      return { text: seen.contentsObj.str, author: seen.titleObj.str, color: seen.color ? Array.from(seen.color) : null };
+    };
+    const before = await read(source, 2);
+    expect(before).toEqual({ text: 'Parent note', author: 'Parent author', color: [255, 0, 0] });
+    const once = await commitSecondPageOnly(source);
+    expect(await shown(once)).toEqual([{ subtype: 'Caret', text: 'Parent note', inReplyTo: null }]);
+    expect(await read(once, 1)).toEqual(before);
+    // The primary wrote no /Subj, so the group had none.
+    expect(await heldObjects(once, ['IRT', 'RT', 'Subj'])).toEqual({ keys: [], parent: false });
+  });
+
+  it('a plain reply keeps its own text and is replaced once', async () => {
+    const source = await replyAcrossPages(highlightReply('R', 'Own note'));
+    const once = await commitSecondPageOnly(source);
+    expect(await shown(once)).toEqual([{ subtype: 'Highlight', text: 'Own note', inReplyTo: null }]);
+    expect(await heldObjects(once, ['IRT', 'RT'])).toEqual({ keys: [], parent: false });
+    expect(await shown(await commitCycle(once))).toEqual([{ subtype: 'Highlight', text: 'Own note', inReplyTo: null }]);
+  });
+});
+
+describe('a group reply whose parent dictionary the parse cannot read faithfully', () => {
+  /** A /Text parent and a group reply on one page; the parent's /Contents
+   *  keys are placeholders `keys` rewrites. */
+  async function replyToParent(parentKeys: Record<string, string>, keys: [string, string][]): Promise<Uint8Array> {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 600]);
+    const ctx = doc.context;
+    const parent = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [10, 370, 30, 390], F: 4 });
+    for (const [key, text] of Object.entries(parentKeys)) parent.set(PDFName.of(key), PDFString.of(text));
+    const parentRef = ctx.register(parent);
+    const reply = ctx.obj({
+      Type: 'Annot', Subtype: 'Highlight', Rect: [98, 498, 202, 522], QuadPoints: QUAD, C: [1, 1, 0], IRT: parentRef, RT: 'Group',
+    });
+    page.node.set(PDFName.of('Annots'), ctx.obj([parentRef, ctx.register(reply)]));
+    return withKeys(await doc.save({ useObjectStreams: false }), keys);
+  }
+
+  const cases: [string, () => Promise<Uint8Array>][] = [
+    ['/Contents (A) /C#6fntents (B) /Contents (C)', () => replyToParent(
+      { QQQQQQQQ: 'A', CZZZntents: 'B', WWWWWWWW: 'C' },
+      [['/QQQQQQQQ', '/Contents'], ['/CZZZntents', '/C#6fntents'], ['/WWWWWWWW', '/Contents']])],
+    ['/Contents (A) /C#6fntents (B)', () => replyToParent(
+      { QQQQQQQQ: 'A', CZZZntents: 'B' },
+      [['/QQQQQQQQ', '/Contents'], ['/CZZZntents', '/C#6fntents']])],
+  ];
+  for (const [label, build] of cases) {
+    it(`${label}: the reply is not imported, and stays one annotation through two commits`, async () => {
+      const source = await build();
+      const once = await commitCycle(source);
+      expect((await subtypes(once)).sort()).toEqual(['Highlight', 'Text']);
+      expect((await subtypes(await commitCycle(once))).sort()).toEqual(['Highlight', 'Text']);
+      const { annotations, untouchedSlots } = await importFirstPage(source);
+      expect(annotations).toHaveLength(0);
+      expect([...untouchedSlots].sort()).toEqual([0, 1]);
+    });
+  }
+
+  it('a reply to a parent that reads one way is imported as before', async () => {
+    const source = await replyToParent({ QQQQQQQQ: 'A' }, [['/QQQQQQQQ', '/Contents']]);
+    const { annotations, untouchedSlots } = await importFirstPage(source);
+    expect(annotations.map((a) => a.note)).toEqual(['A', 'A']);
+    expect(untouchedSlots).toEqual([]);
+  });
+});
+
 describe('dash entries pdf.js resolves in unusual ways', () => {
   const inkWith = (dash: (ctx: PDFContext) => unknown) => (ctx: PDFContext) => ctx.obj({
     Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1],

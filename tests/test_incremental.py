@@ -1379,15 +1379,15 @@ class TestAcroFormDelta:
         with pikepdf.open(out) as pdf:
             assert pdf.Root.get("/AcroForm") is not None
 
-    def test_a_direct_acroform_delta_refuses(self, tmp_dir, pki):
+    def test_a_direct_acroform_delta_lands_in_a_catalog_revision(self, tmp_dir, pki):
         """An /AcroForm-level change to a DIRECT form dictionary.
 
-        In-place reconciliation needs an object to mark updated; a direct
-        /AcroForm lives inside the catalog, which this module never rewrites.
-        Pre-fix the whole reconciliation was skipped and the annotation landed
-        alone.
+        A direct /AcroForm is part of the catalog object, so the appended
+        revision carries the catalog again with that entry updated and every
+        other entry as the original holds it.
         """
         signed = _signed(tmp_dir, pki, with_form=True, form_direct=True)
+        orig_bytes = open(signed, "rb").read()
         with pikepdf.open(signed) as pdf:
             assert not pdf.Root["/AcroForm"].is_indirect, "fixture is not direct"
 
@@ -1398,9 +1398,19 @@ class TestAcroFormDelta:
         modified = _rewrite_with(signed, tmp_dir, mutate)
         out = os.path.join(tmp_dir, "out.pdf")
         r = transplant_incremental(signed, modified, out)
-        assert r["applied"] is False
-        assert r["reason"] == "acroform-inline"
-        assert not os.path.exists(out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["fields_updated"] == 1
+        assert r["delta_classes"] == ["form-fill", "annotations"]
+        assert open(out, "rb").read()[: len(orig_bytes)] == orig_bytes
+        _assert_sig_still_valid(out, pki)
+        with pikepdf.open(out) as pdf, pikepdf.open(signed) as before:
+            form = pdf.Root["/AcroForm"]
+            assert not form.is_indirect
+            assert bool(form["/NeedAppearances"]) is True
+            assert len(form["/Fields"]) == len(before.Root["/AcroForm"]["/Fields"])
+            _assert_catalog_kept(before, pdf)
+            names = {str(a.get("/NM")) for a in pdf.pages[0].obj["/Annots"] if a.get("/NM") is not None}
+            assert "direct-form" in names
 
     def test_an_indirect_form_takes_the_same_key_change(self, tmp_dir, pki):
         # Control for the refusal above: only the indirection differs.
@@ -1420,8 +1430,7 @@ class TestAcroFormDelta:
             assert bool(pdf.Root["/AcroForm"]["/NeedAppearances"]) is True
 
     def test_a_direct_form_with_no_form_delta_still_applies(self, tmp_dir, pki):
-        # The direct fixture is not refused for being direct — only for a
-        # difference it cannot express.
+        # With no difference in the form, the catalog is not written again.
         signed = _signed(tmp_dir, pki, with_form=True, form_direct=True)
 
         def mutate(pdf):
@@ -1470,6 +1479,148 @@ class TestAcroFormDelta:
         assert "removed form field" in r["reason"]
 
 
+def _assert_catalog_kept(before, after):
+    """Every catalog entry but /AcroForm is the original's own value."""
+    assert set(after.Root.keys()) == set(before.Root.keys())
+    for key in before.Root.keys():
+        if key == "/AcroForm":
+            continue
+        old, new = before.Root[key], after.Root[key]
+        if isinstance(old, pikepdf.Object) and old.is_indirect:
+            assert new.is_indirect and new.objgen == old.objgen, key
+        else:
+            assert new == old, key
+
+
+def _m_direct_form_key(pdf):
+    pdf.Root["/AcroForm"]["/NeedAppearances"] = True
+
+
+def _m_direct_default_font(pdf):
+    pdf.Root["/AcroForm"]["/DR"] = pikepdf.Dictionary(Font=pikepdf.Dictionary(
+        Helv=pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name("/Font"), Subtype=pikepdf.Name("/Type1"),
+            BaseFont=pikepdf.Name("/Helvetica"), Encoding=pikepdf.Name("/WinAnsiEncoding"),
+        )),
+    ))
+
+
+def _m_direct_text_box(pdf):
+    """A free text annotation and the default resource font its /DA names."""
+    _m_direct_default_font(pdf)
+    ap = pdf.make_stream(b"BT /Helv 12 Tf 2 4 Td (Note) Tj ET")
+    ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+    ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+    ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 120, 20])
+    ap.stream_dict["/Resources"] = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(Helv=pdf.Root["/AcroForm"]["/DR"]["/Font"]["/Helv"])
+    )
+    pdf.pages[0].obj["/Annots"].append(pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/FreeText"),
+        Rect=pikepdf.Array([300, 300, 420, 320]), F=4,
+        DA=pikepdf.String("0 0 0 rg /Helv 12 Tf"), Contents=pikepdf.String("Note"),
+        NM=pikepdf.String("direct-text-box"), AP=pikepdf.Dictionary(N=ap),
+    )))
+
+
+#: delta name -> (mutation, its classes, the modification level the OUTPUT
+#: reports when the delta is carried). The verifier judges a changed
+#: /NeedAppearances with the catalog revision that carries it, at its lowest
+#: level; a changed /DR is judged as form filling.
+_DIRECT_FORM_DELTAS = {
+    "form-key": (_m_direct_form_key, ["form-fill"], "LTA_UPDATES"),
+    "default-font": (_m_direct_default_font, ["form-fill"], "FORM_FILLING"),
+    "text-box": (_m_direct_text_box, ["form-fill", "annotations"], "ANNOTATIONS"),
+}
+
+
+@pytest.fixture(scope="module")
+def direct_docs(tmp_path_factory, matrix_pki):
+    """One signed fixture per certification situation whose form dictionary
+    is held directly in the catalog. Read-only for every test."""
+    root = tmp_path_factory.mktemp("incr-direct-form")
+    base = str(root / "base.pdf")
+    _base_pdf(base, with_form=True, annots=1, form_direct=True)
+    out = {}
+    for label, kw in _SITUATIONS.items():
+        signed = str(root / f"signed-{label}.pdf")
+        sign_pdf(base, signed, pfx_path=matrix_pki["pfx"], password="pw", **kw)
+        with pikepdf.open(signed) as pdf:
+            assert not pdf.Root["/AcroForm"].is_indirect, "fixture is not direct"
+        out[label] = signed
+    return out
+
+
+class TestDirectFormDictionary:
+    """A form dictionary held directly in the catalog, under each
+    certification: a change of one of its entries is appended as a catalog
+    revision, permitted exactly where the same change of an indirect form
+    dictionary is (ISO 32000-2 Table 257)."""
+
+    @pytest.mark.parametrize("situation", sorted(_SITUATIONS))
+    @pytest.mark.parametrize("delta", sorted(_DIRECT_FORM_DELTAS))
+    def test_cell(self, situation, delta, direct_docs, matrix_pki, tmp_dir):
+        mutate, classes, expect_level = _DIRECT_FORM_DELTAS[delta]
+        signed = direct_docs[situation]
+        orig_bytes = open(signed, "rb").read()
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+
+        r = transplant_incremental(signed, modified, out)
+
+        if not all(_permits(situation, c) for c in classes):
+            level = situation[len("certified-"):]
+            assert r["applied"] is False
+            assert r["reason"].startswith(f"certified-{level}-forbids-"), r["reason"]
+            assert not os.path.exists(out), "a refusal wrote a file"
+            return
+
+        assert r["applied"] is True, r.get("reason")
+        assert r["delta_classes"] == classes, r["delta_classes"]
+        result = open(out, "rb").read()
+        assert result[: len(orig_bytes)] == orig_bytes
+        v = _verdict(out, matrix_pki)
+        assert v["intact"] is True
+        assert v["policy_judged"] is True
+        assert v["modification_level"] == expect_level, v
+        assert v["policy_ok"] is True, v
+        with pikepdf.open(out) as pdf, pikepdf.open(signed) as before:
+            form = pdf.Root["/AcroForm"]
+            assert not form.is_indirect
+            _assert_catalog_kept(before, pdf)
+            # /Fields and /SigFlags are the original's: the signature field
+            # and its value are not part of the delta.
+            assert [f.objgen for f in form["/Fields"]] == [f.objgen for f in before.Root["/AcroForm"]["/Fields"]]
+            assert form.get("/SigFlags") == before.Root["/AcroForm"].get("/SigFlags")
+            if delta == "form-key":
+                assert bool(form["/NeedAppearances"]) is True
+            else:
+                assert form["/DR"]["/Font"]["/Helv"]["/BaseFont"] == pikepdf.Name("/Helvetica")
+            if delta == "text-box":
+                added = [a for a in pdf.pages[0].obj["/Annots"] if a.get("/Subtype") == pikepdf.Name("/FreeText")]
+                assert len(added) == 1
+                # The annotation's own font resource and the default resource
+                # are one object, as in the rebuild.
+                assert added[0]["/AP"]["/N"]["/Resources"]["/Font"]["/Helv"].objgen == form["/DR"]["/Font"]["/Helv"].objgen
+
+    def test_a_second_delta_appends_another_catalog_revision(self, direct_docs, matrix_pki, tmp_dir):
+        signed = direct_docs["approval"]
+        first = os.path.join(tmp_dir, "first.pdf")
+        r = transplant_incremental(signed, _rewrite_with(signed, tmp_dir, _m_direct_default_font), first)
+        assert r["applied"] is True, r.get("reason")
+        second = os.path.join(tmp_dir, "second.pdf")
+        r = transplant_incremental(first, _rewrite_with(first, tmp_dir, _m_direct_form_key, name="again.pdf"), second)
+        assert r["applied"] is True, r.get("reason")
+        first_bytes = open(first, "rb").read()
+        assert open(second, "rb").read()[: len(first_bytes)] == first_bytes
+        v = _verdict(second, matrix_pki)
+        assert (v["intact"], v["policy_ok"]) == (True, True), v
+        with pikepdf.open(second) as pdf:
+            form = pdf.Root["/AcroForm"]
+            assert bool(form["/NeedAppearances"]) is True
+            assert form["/DR"]["/Font"]["/Helv"]["/BaseFont"] == pikepdf.Name("/Helvetica")
+
+
 class TestRevertProofs:
     """Each feature, switched off, must give the pre-feature answer back — with
     values the passing tests above never use, so a proof cannot be a copy."""
@@ -1478,11 +1629,9 @@ class TestRevertProofs:
     def _ignore_acroform_refusal(monkeypatch, reason: str):
         """Restore the pre-fix "missing on one side = nothing to do" answer.
 
-        Faithful for both reverted reasons because each is raised before the
-        pass has written anything and with no field-level count to discard:
-        `acroform-removed` is the function's first statement after the lookup,
-        and `acroform-inline` is reached only for fixtures whose sole
-        difference is an /AcroForm-level key.
+        Faithful because the reason is raised before the pass has written
+        anything and with no field-level count to discard: `acroform-removed`
+        is the function's first statement after the lookup.
         """
         real = incremental._acroform_delta
 
@@ -1595,10 +1744,12 @@ class TestRevertProofs:
             "a document carrying only one of its two changes"
         )
 
-    def test_without_the_inline_refusal_a_direct_form_change_vanishes(
+    def test_without_the_catalog_revision_a_direct_form_change_vanishes(
         self, tmp_dir, pki, monkeypatch
     ):
-        self._ignore_acroform_refusal(monkeypatch, "acroform-inline")
+        monkeypatch.setattr(
+            incremental.IncrementalPdfFileWriter, "update_root", lambda self: None
+        )
         signed = _signed(tmp_dir, pki, with_form=True, annots=2, form_direct=True)
 
         def mutate(pdf):
@@ -1608,11 +1759,11 @@ class TestRevertProofs:
         modified = _rewrite_with(signed, tmp_dir, mutate)
         out = os.path.join(tmp_dir, "out.pdf")
         r = transplant_incremental(signed, modified, out)
-        assert r["applied"] is True, "the revert did not reach the refusal"
+        assert r["applied"] is True, "the revert did not reach the form update"
         with pikepdf.open(out) as pdf:
             assert pdf.Root["/AcroForm"].get("/NeedAppearances") is None, (
-                "without the refusal the form half of the edit is dropped and "
-                "the annotation half is reported as the whole"
+                "without the catalog revision the form half of the edit is "
+                "dropped and the annotation half is reported as the whole"
             )
 
 

@@ -5,15 +5,18 @@ import { MANIFEST_NAME, PDFX_VERSION } from './pdfx-format';
 import type { ExportAnnotation, ExportDocument, ExportPage, PdfxManifest } from './pdfx-format';
 import { carryAcroForm, prepareSourceForms, sourceHasXfa } from './acroform-carry';
 import type { FormContribution } from './acroform-carry';
+import { stampAppearanceIsCarried } from './carried-stamp';
+import { completeAnnotationDefaultResources, defaultAppearanceString } from './annotation-default-resources';
 import { carryEmbeddedFiles } from './embedded-files-carry';
 import type { CarrySource } from './embedded-files-carry';
-import { actionSettler, carryDocumentCatalog, carryThreads, namedDestinationResolver, settleActionEntry } from './catalog-carry';
+import { actionSettler, annotationTargetLoss, anyLoss, bindEmbeddedTargets, carryDocumentCatalog, carryThreads, embeddedTargetLoss, goToLoss, namedDestinationResolver, newActionSettlement, settleActionEntry, unbindEmbeddedTargets } from './catalog-carry';
 import { carryOptionalContent } from './optional-content-carry';
 import { carryDocumentMetadata } from './metadata-carry';
 import { copyOutputIntents } from './output-intents-carry';
 import { carryFormatDeclarations, saveWithFormatDeclarations } from './format-declarations';
+import { flushAndDropUnreachable, reachableDictionaries, reachableTags } from './pdf-reachability';
 import type { MetadataOverrides } from './metadata-process';
-import type { CarriedSourcePages } from './catalog-carry';
+import type { ActionSettlement, CarriedSourcePages } from './catalog-carry';
 import { carryStructTree } from './struct-carry';
 import { cloudBumps } from './annotation-manipulation';
 import { inheritNameReadings, nameReading, normalizeEscapedNames } from './pdf-name-normalize';
@@ -125,6 +128,39 @@ export function pdfRectToDisplay(
   const x = Math.min(...xs);
   const y = Math.min(...ys);
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+const displaySize = (
+  box: { width: number; height: number },
+  rotation: number,
+): { width: number; height: number } =>
+  ((rotation % 180) + 180) % 180 === 90 ? { width: box.height, height: box.width } : { width: box.width, height: box.height };
+
+// The display box of an annotation with the NoRotate flag (ISO 32000-2
+// 12.5.3, Table 167 and the text after it): the upper-left corner of /Rect in
+// default user space stays where the page rotation puts it, and the
+// annotation stands upright from that point with the width and height of
+// /Rect. /Rect itself is not changed by a page rotation.
+export function pdfRectToUprightDisplay(
+  rect: [number, number, number, number],
+  box: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): { x: number; y: number; w: number; h: number } {
+  const [x0, y0, x1, y1] = rect;
+  const [x, y] = pdfPointToDisplay(x0, y1, box, rotation);
+  const shown = displaySize(box, rotation);
+  return { x, y, w: (x1 - x0) / shown.width, h: (y1 - y0) / shown.height };
+}
+
+// Inverse of pdfRectToUprightDisplay.
+export function uprightDisplayToPdfRect(
+  a: { x: number; y: number; w: number; h: number },
+  box: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): [number, number, number, number] {
+  const [left, top] = displayPointToPdf(a.x, a.y, box, rotation);
+  const shown = displaySize(box, rotation);
+  return [left, top - a.h * shown.height, left + a.w * shown.width, top];
 }
 
 // A count symbol's unit-square parts as PDF path operators.
@@ -254,10 +290,13 @@ function stripImportedOriginals(
   annotations: ExportAnnotation[],
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
   untouched: ReadonlySet<PDFDict>,
+  removals: RemovedAnnotations,
 ): StrippedOriginals {
   const layerGates = new Map<ExportAnnotation, PDFObject>();
   const nameContents = new Map<ExportAnnotation, string>();
-  const stripped = { layerGates, nameContents };
+  const references = new Map<ExportAnnotation, PDFRef>();
+  const dictionaries = new Map<ExportAnnotation, PDFDict>();
+  const stripped = { layerGates, nameContents, references, dictionaries };
   // Two sources of fingerprints to strip-on-match: annotations being
   // re-appended (live, possibly edited) and ones the user REMOVED (tombstones
   // — matched and stripped same as any other, just never re-appended after).
@@ -329,6 +368,16 @@ function stripImportedOriginals(
     // Only the annotation's own name-typed /Contents is carried: a group
     // reply's parent keeps its own value.
     if (annotation && holder === dict && contentsObj instanceof PDFName) nameContents.set(annotation, pdfNameText(contentsObj));
+    if (annotation) dictionaries.set(annotation, dict);
+    const reference = annots.get(i);
+    if (reference instanceof PDFRef) {
+      removals.replaced.set(reference.tag, null);
+      removals.references.push(reference);
+      if (annotation) references.set(annotation, reference);
+      const popup = dict.get(PDFName.of('Popup'));
+      if (popup instanceof PDFRef) removals.popups.set(popup.tag, reference.tag);
+    }
+    removals.count++;
     annots.remove(i);
   }
   return stripped;
@@ -341,6 +390,22 @@ interface StrippedOriginals {
    *  importer reads that value as no text, so it is carried only into a
    *  replacement whose note is empty. */
   nameContents: Map<ExportAnnotation, string>;
+  /** The matched original's reference, which its replacement stands in for. */
+  references: Map<ExportAnnotation, PDFRef>;
+  /** The matched original's dictionary. */
+  dictionaries: Map<ExportAnnotation, PDFDict>;
+}
+
+/** The originals one build took out of the pages' /Annots. */
+interface RemovedAnnotations {
+  /** Removed original's tag → the annotation authored in its place, or null
+   *  when the user deleted it. */
+  replaced: Map<string, PDFRef | null>;
+  references: PDFRef[];
+  /** How many entries left an /Annots array, direct dictionaries included. */
+  count: number;
+  /** The tag of the /Popup a removed original names → that original's tag. */
+  popups: Map<string, string>;
 }
 
 /** The stroke width every dimension annotation is drawn at. */
@@ -365,8 +430,10 @@ function addAnnotations(
   stampImages: Map<string, import('pdf-lib').PDFImage>,
   signatureFonts: Map<string, import('pdf-lib').PDFFont>,
   untouched: ReadonlySet<PDFDict>,
+  removals: RemovedAnnotations,
+  writtenDefaults: Set<PDFDict>,
 ): void {
-  const { layerGates, nameContents } = stripImportedOriginals(copied, annotations, removedImportedOriginals, untouched);
+  const { layerGates, nameContents, references, dictionaries } = stripImportedOriginals(copied, annotations, removedImportedOriginals, untouched, removals);
   const context = output.context;
   // CropBox (defaults to MediaBox when absent, so byte-identical for the
   // common case) — must match what annotation-import.ts reads via pdf.js's
@@ -983,7 +1050,7 @@ function addAnnotations(
         IT: 'CountLegend',
         AP: { N: ap },
       });
-      annot.set(PDFName.of('DA'), PDFHexString.fromText(`0.1 0.1 0.1 rg /Helv ${fs} Tf`));
+      annot.set(PDFName.of('DA'), defaultAppearanceString(`0.1 0.1 0.1 rg /Helv ${fs} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
       annot.set(
         PDFName.of('SpectraLegend'),
@@ -1073,6 +1140,9 @@ function addAnnotations(
         AP: { N: ap },
       });
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
+      // The face travels by name: the import reads it back, so the next commit
+      // draws the signature in its face again.
+      annot.set(PDFName.of('SpectraSignatureFont'), PDFName.of(a.signatureFont));
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
       // A custom image stamp draws the pre-embedded raster without a border or
       // fill. /Contents keeps the display name.
@@ -1096,6 +1166,24 @@ function addAnnotations(
         AP: { N: ap },
       });
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
+    } else if (a.kind === 'stamp' && a.importedOriginal && stampAppearanceIsCarried(dictionaries.get(authored))) {
+      // The import holds no drawing for this stamp, so its appearance is the
+      // original's: every entry of the original travels, and only what the
+      // user changed is written. A viewer maps the appearance box onto /Rect
+      // (ISO 32000-2 12.5.5), so a move or a resize needs /Rect alone. An
+      // unmoved stamp keeps /Rect as written.
+      // The box of a NoRotate original is its upright box, so a page rotation
+      // alone gives back the rectangle as written.
+      const original = a.importedOriginal;
+      annot = dictionaries.get(authored)!.clone(context);
+      const placed = a.noRotate ? uprightDisplayToPdfRect(a, { x, y, width, height }, rotation) : [rx0, ry0, rx1, ry1];
+      if (placed.some((v, k) => Math.abs(v - original.rect[k]) > 0.01)) {
+        annot.set(PDFName.of('Rect'), context.obj(placed));
+      }
+      if ((authored.note ?? '') !== (original.contents ?? '')) {
+        annot.set(PDFName.of('Contents'), PDFHexString.fromText(authored.note ?? ''));
+      }
+      if (original.color !== undefined && a.color !== original.color) annot.set(PDFName.of('C'), context.obj([r, g, b]));
     } else if (a.kind === 'stamp') {
       const label = (a.note ?? '').toUpperCase();
       const fontRef = context.register(
@@ -1258,7 +1346,11 @@ function addAnnotations(
     }
     const layer = layerGates.get(authored);
     if (layer !== undefined) annot.set(PDFName.of('OC'), layer);
+    // A /DA written here names this builder's own font.
+    if (annot.has(PDFName.of('DA'))) writtenDefaults.add(annot);
     const ref = context.register(annot);
+    const original = references.get(authored);
+    if (original) removals.replaced.set(original.tag, ref);
     let annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
     if (!annots) {
       annots = context.obj([]) as PDFArray;
@@ -1275,6 +1367,8 @@ function applyPageExtras(
   stampImages: Map<string, import('pdf-lib').PDFImage>,
   signatureFonts: Map<string, import('pdf-lib').PDFFont>,
   untouched: ReadonlySet<PDFDict>,
+  removals: RemovedAnnotations,
+  writtenDefaults: Set<PDFDict>,
 ): void {
   applyRotation(copied, page);
   // Must still run when `annotations` is empty but removedImportedOriginals
@@ -1289,6 +1383,8 @@ function applyPageExtras(
       stampImages,
       signatureFonts,
       untouched,
+      removals,
+      writtenDefaults,
     );
   }
 }
@@ -1360,13 +1456,40 @@ async function embedStampImages(
   return map;
 }
 
+// ISO 32000-2 12.5.6.2: these entries of a group's primary annotation apply
+// to the whole group, and a subordinate's own are ignored. /Popup is not
+// among them here: a popup belongs to the page that lists it.
+const GROUP_ATTRIBUTES = ['Contents', 'RC', 'DS', 'M', 'C', 'T', 'CreationDate', 'Subj', 'Open'];
+
+// A group reply about to lose its link to the primary takes the primary's
+// group attributes as its own entries, so every reader finds on the reply
+// what the group showed. The import fingerprint holds the primary's
+// /Contents; the strip reads the reply after the link is gone and must find
+// the same value there. A primary /Contents that is not a string reads as no
+// text in the group and is not taken. A reply that is ambiguous by its own
+// keys or its primary's is left as written: the value a viewer showed for it
+// cannot be read from the parsed dictionaries.
+function adoptGroupAttributes(reply: PDFDict): void {
+  const primary = contentsHolder(reply);
+  if (primary === reply || annotationDictionaryIsAmbiguous(reply)) return;
+  for (const name of GROUP_ATTRIBUTES) {
+    for (const key of reply.keys()) if (nameReading(key, reply.context) === name) reply.delete(key);
+    const value = entryOf(primary, name);
+    if (value === undefined) continue;
+    if (name === 'Contents' && !(value instanceof PDFString || value instanceof PDFHexString)) continue;
+    reply.set(PDFName.of(name), rawEntry(primary, name)!);
+  }
+}
+
 // copyPages follows an explicit /Dest or GoTo chain into its target page and
 // writes that page into the output even when the build dropped it, as a page
-// object outside the page tree. On the loaded source copy, before copying, a
-// link's /Dest, an annotation's /A, and each page or annotation /AA trigger
-// that jumps to a removed page is deleted. A named destination pulls no page
-// object and stays as written.
-function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void {
+// object outside the page tree. An action that names an annotation of a
+// removed page pulls that annotation and, through its /P, the page. On the
+// loaded source copy, before copying, a link's /Dest, an annotation's /A, and
+// each page, annotation or field /AA trigger that jumps to a removed page or
+// names an annotation of one leaves its chain (actionSettler). A named
+// destination pulls no page object and stays as written.
+function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[], settlement: ActionSettlement): void {
   const pages = doc.getPages();
   const all = new Set(pages.map(page => page.ref.tag));
   const kept = new Set(keptIndices.flatMap(index => pages[index] ? [pages[index].ref.tag] : []));
@@ -1412,11 +1535,24 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
     };
     walk(raw, 0);
   };
-  const settle = actionSettler(doc.context, removed);
+  const standing = (target: PDFRef) => onRemovedPage(target) ? undefined : target;
+  const settle = actionSettler(doc.context, anyLoss(goToLoss(removed),
+    annotationTargetLoss(doc.context, standing, settlement),
+    embeddedTargetLoss(doc.context, page => !all.has(page.tag) || kept.has(page.tag), standing)), settlement);
   const dropTriggers = (owner: PDFDict) => {
     const triggers = doc.context.lookup(owner.get(PDFName.of('AA')));
     if (!(triggers instanceof PDFDict)) return;
     for (const [key] of triggers.entries()) settleActionEntry(triggers, key, settle);
+  };
+  // A widget's field ancestors hold triggers of their own.
+  const fieldAncestors = new Set<PDFDict>();
+  const dropFieldTriggers = (widget: PDFDict) => {
+    let node = doc.context.lookup(widget.get(PDFName.of('Parent')));
+    while (node instanceof PDFDict && !fieldAncestors.has(node)) {
+      fieldAncestors.add(node);
+      dropTriggers(node);
+      node = doc.context.lookup(node.get(PDFName.of('Parent')));
+    }
   };
   for (const index of new Set(keptIndices)) {
     if (!pages[index]) continue;
@@ -1437,8 +1573,13 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
       if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Link') && dest !== undefined && removed(dest)) annot.delete(PDFName.of('Dest'));
       settleActionEntry(annot, PDFName.of('A'), settle);
       dropTriggers(annot);
+      if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Widget')) dropFieldTriggers(annot);
       if (onRemovedPage(annot.get(PDFName.of('Popup')))) annot.delete(PDFName.of('Popup'));
-      if (onRemovedPage(annot.get(PDFName.of('IRT')))) { annot.delete(PDFName.of('IRT')); annot.delete(PDFName.of('RT')); }
+      if (onRemovedPage(annot.get(PDFName.of('IRT')))) {
+        adoptGroupAttributes(annot);
+        annot.delete(PDFName.of('IRT'));
+        annot.delete(PDFName.of('RT'));
+      }
       if (annot.lookup(PDFName.of('Subtype')) === PDFName.of('Popup') && onRemovedPage(annot.get(PDFName.of('Parent')))) annot.delete(PDFName.of('Parent'));
     }
   }
@@ -1482,6 +1623,106 @@ function dropJumpsToRemovedPages(doc: PDFDocument, keptIndices: number[]): void 
     });
     thread.set(PDFName.of('F'), onKept[0]);
     doc.context.lookup(onKept[0], PDFDict).set(PDFName.of('T'), threadRef);
+  }
+}
+
+// After the pages' originals are removed and re-authored, no annotation of
+// the output links to an annotation that no page lists. A reply's /IRT and a
+// popup's /Parent that name a replaced original name its replacement, which
+// takes the popup as its /Popup. A reply to an annotation no page lists (the
+// user deleted it, or the link reached a copy outside every /Annots) stands
+// alone: a group member first takes the primary's group attributes, then
+// /IRT and /RT leave. The popup of a deleted original leaves its page; a
+// popup whose parent no page lists otherwise loses /Parent.
+function settleLinksToRemoved(output: PDFDocument, removals: RemovedAnnotations): void {
+  const context = output.context;
+  const IRT = PDFName.of('IRT'), PARENT = PDFName.of('Parent'), POPUP = PDFName.of('Popup');
+  const listed = new Set<string>();
+  const pageAnnots = output.getPages().map(page => context.lookup(page.node.get(PDFName.of('Annots'))));
+  for (const annots of pageAnnots) {
+    if (annots instanceof PDFArray) for (const raw of annots.asArray()) if (raw instanceof PDFRef) listed.add(raw.tag);
+  }
+  for (const annots of pageAnnots) {
+    if (!(annots instanceof PDFArray)) continue;
+    for (let i = annots.size() - 1; i >= 0; i--) {
+      const raw = annots.get(i), dict = context.lookup(raw);
+      if (!(dict instanceof PDFDict)) continue;
+      const target = dict.get(IRT);
+      if (target instanceof PDFRef) {
+        const replacement = removals.replaced.get(target.tag);
+        if (replacement) dict.set(IRT, replacement);
+        else if (!listed.has(target.tag)) {
+          adoptGroupAttributes(dict);
+          dict.delete(IRT);
+          dict.delete(PDFName.of('RT'));
+        }
+      }
+      if (dict.lookup(PDFName.of('Subtype')) !== POPUP) continue;
+      const parent = dict.get(PARENT);
+      const original = parent instanceof PDFRef && removals.replaced.has(parent.tag) ? parent.tag
+        : raw instanceof PDFRef ? removals.popups.get(raw.tag) : undefined;
+      if (original !== undefined) {
+        const replacement = removals.replaced.get(original);
+        const holder = replacement ? context.lookup(replacement) : undefined;
+        if (replacement && holder instanceof PDFDict && raw instanceof PDFRef) {
+          dict.set(PARENT, replacement);
+          holder.set(POPUP, raw);
+        } else annots.remove(i);
+      } else if (parent instanceof PDFRef && !listed.has(parent.tag)) dict.delete(PARENT);
+    }
+  }
+}
+
+// An action of the output that names a removed original by reference (a
+// link's /A, a trigger under any /AA) names its replacement. With no
+// replacement the action leaves its chain, as a jump to a removed page does
+// (actionSettler). The owners are found by a walk of everything the catalog
+// reaches, so no owner kind is listed here. A bound embedded go-to target
+// follows the same rule, and is also lost when no page of the output lists
+// its annotation or its page is outside the page tree.
+function settleActionsOnRemoved(output: PDFDocument, removals: RemovedAnnotations, settlement: ActionSettlement): void {
+  const context = output.context;
+  const standing = (target: PDFRef): PDFRef | undefined => {
+    const replacement = removals.replaced.get(target.tag);
+    return replacement === undefined ? target : replacement ?? undefined;
+  };
+  const tree = new Set(output.getPages().map(page => page.ref.tag));
+  let listed: Set<string> | undefined;
+  const listedStanding = (target: PDFRef): PDFRef | undefined => {
+    if (!listed) {
+      listed = new Set();
+      for (const page of output.getPages()) {
+        const annots = context.lookup(page.node.get(PDFName.of('Annots')));
+        if (annots instanceof PDFArray) for (const raw of annots.asArray()) if (raw instanceof PDFRef) listed.add(raw.tag);
+      }
+    }
+    const now = standing(target);
+    return now && listed.has(now.tag) ? now : undefined;
+  };
+  const settle = actionSettler(context, anyLoss(annotationTargetLoss(context, standing, settlement),
+    embeddedTargetLoss(context, page => tree.has(page.tag), listedStanding)), settlement);
+  const A = PDFName.of('A'), AA = PDFName.of('AA'), S = PDFName.of('S');
+  const isAction = (raw: PDFObject | undefined): boolean => {
+    const value = context.lookup(raw);
+    return value instanceof PDFDict && value.lookup(S) instanceof PDFName;
+  };
+  for (const owner of reachableDictionaries(context, [context.trailerInfo.Root])) {
+    if (isAction(owner.get(A))) settleActionEntry(owner, A, settle);
+    const triggers = context.lookup(owner.get(AA));
+    if (!(triggers instanceof PDFDict)) continue;
+    for (const [key, value] of triggers.entries()) if (isAction(value)) settleActionEntry(triggers, key, settle);
+  }
+}
+
+// The copies under the removed originals that nothing else in the output
+// reaches (an appearance stream, a popup taken off its page) are recorded as
+// removed with no replacement, so a carry that maps source objects to their
+// copies reads them as gone.
+function recordRemovedSubtrees(output: PDFDocument, removals: RemovedAnnotations): void {
+  const { Root, Info } = output.context.trailerInfo;
+  const live = reachableTags(output.context, [Root, Info]);
+  for (const tag of reachableTags(output.context, removals.references)) {
+    if (!live.has(tag) && !removals.replaced.has(tag)) removals.replaced.set(tag, null);
   }
 }
 
@@ -1580,6 +1821,10 @@ async function assemblePages(
     if (copied) targetRoot.set(PDFName.of('OutputIntents'), output.context.getObjectRef(copied) ?? copied);
     else targetRoot.delete(PDFName.of('OutputIntents'));
   };
+  // One record of settled actions for the build: the pass before the copy,
+  // the pass after the strip and the catalog carry read the same answers.
+  const settlement = newActionSettlement();
+  let boundTargets = 0;
   const groups = new Map<string, { bytes: Uint8Array; indices: number[] }>();
   for (const page of pages) {
     let g = groups.get(page.sourceKey);
@@ -1600,6 +1845,7 @@ async function assemblePages(
     // pages with the original ones by that reading, so a key pdf-lib would
     // otherwise write back as `#23` keeps the pairing.
     const doc = await loadNormalized(g.bytes);
+    boundTargets += bindEmbeddedTargets(doc);
     if (sourceHasXfa(doc)) {
       // Page surgery on an XFA form detaches the form from its pages
       // (the XFA template lays out its own) — refuse with the reason rather
@@ -1612,7 +1858,7 @@ async function assemblePages(
       );
     }
     prepareSourceForms(doc, g.indices);
-    dropJumpsToRemovedPages(doc, g.indices);
+    dropJumpsToRemovedPages(doc, g.indices, settlement);
     // copyPages' own shape, with the copier kept: the catalog carries below
     // copy through the same cache, so an object reached from a page and the
     // catalog lands once.
@@ -1632,7 +1878,8 @@ async function assemblePages(
   const stampImages = await embedStampImages(output, pages);
   const signatureFonts = await embedSignatureFonts(output, pages);
   const used = new Set<PDFPage>();
-  const pendingExtras: { copied: PDFPage; page: ExportPage; untouched: ReadonlySet<PDFDict> }[] = [];
+  const pendingExtras: { copied: PDFPage; page: ExportPage; untouched: ReadonlySet<PDFDict>; pair: CarriedSourcePages['pairs'][number] }[] = [];
+  const removals: RemovedAnnotations = { replaced: new Map(), references: [], popups: new Map(), count: 0 };
   // Which source page landed at which output page — the reference-identity
   // channel every catalog/struct remap depends on (catalog-carry.ts).
   const pairsByKey = new Map<string, { srcIndex: number; outPage: PDFPage }[]>();
@@ -1669,7 +1916,8 @@ async function assemblePages(
     }
     // Layer identity is paired against the untouched copy. Adding/removing
     // an annotation or wrapping Contents first changes that graph's shape.
-    pendingExtras.push({ copied, page, untouched });
+    const pair: CarriedSourcePages['pairs'][number] = { srcIndex: page.pageIndex, outPage: copied };
+    pendingExtras.push({ copied, page, untouched, pair });
     output.addPage(copied);
     // copyPages clones the page leaf separately from its recursive object
     // cache. An annotation's /P can therefore name a second, detached copy
@@ -1688,11 +1936,11 @@ async function assemblePages(
       pairs = [];
       pairsByKey.set(page.sourceKey, pairs);
     }
-    pairs.push({ srcIndex: page.pageIndex, outPage: copied });
+    pairs.push(pair);
     placements.push({ doc: src.doc, srcIndex: page.pageIndex, outPage: copied });
   }
   bindDetachedPageCopies(output, placements);
-  carryAcroForm(output, contributions);
+  const fontBindings = carryAcroForm(output, contributions);
   // The structure tree: EVERY source contributes its surviving tags —
   // a donor page's MCIDs arrive in its copied stream, so its subtree must
   // come along (the AcroForm precedent). Also sweeps the stale
@@ -1700,6 +1948,8 @@ async function assemblePages(
   const carriedSources: CarriedSourcePages[] = [...sources.entries()].map(([key, s]) => ({
     doc: s.doc,
     pairs: pairsByKey.get(key) ?? [],
+    replaced: removals.replaced,
+    settlement,
   }));
   const formatSources = carriedSources.map(source => source.doc);
   // Layer state belongs to every source whose content we copy. Resolve the
@@ -1713,13 +1963,30 @@ async function assemblePages(
     // page-relative entries use an empty map, never the donor's namespace.
     const ownDoc = own?.doc ?? (ownBytes ? await loadNormalized(ownBytes) : undefined);
     if (ownDoc) {
-      owner = { doc: ownDoc, pairs: ownPairs ?? [] };
+      if (!own) boundTargets += bindEmbeddedTargets(ownDoc);
+      owner = { doc: ownDoc, pairs: ownPairs ?? [], replaced: removals.replaced, settlement };
     }
   }
   const optionalContent = carryOptionalContent(output, carriedSources, owner);
   if (optionalContent.properties) output.catalog.set(PDFName.of('OCProperties'),
     output.context.getObjectRef(optionalContent.properties) ?? output.context.register(optionalContent.properties));
-  for (const { copied, page, untouched } of pendingExtras) applyPageExtras(copied, page, output, stampImages, signatureFonts, untouched);
+  const asCopied = new Map<CarriedSourcePages['pairs'][number], PDFObject[]>();
+  const writtenDefaults = new Set<PDFDict>();
+  for (const { copied, page, untouched, pair } of pendingExtras) {
+    const annots = output.context.lookup(copied.node.get(PDFName.of('Annots')));
+    if (annots instanceof PDFArray) asCopied.set(pair, annots.asArray().slice());
+    applyPageExtras(copied, page, output, stampImages, signatureFonts, untouched, removals, writtenDefaults);
+  }
+  // The carries below pair each source page with its copy by position. A
+  // build that removes an original changes the order of /Annots (the strip,
+  // a popup taken off another page), so every page then pairs /Annots as
+  // copied; a build that removes none pairs the live arrays.
+  if (removals.count > 0) {
+    for (const [pair, entries] of asCopied) pair.annotsAsCopied = output.context.obj(entries);
+    settleLinksToRemoved(output, removals);
+  }
+  if (removals.count > 0 || boundTargets > 0) settleActionsOnRemoved(output, removals, settlement);
+  if (removals.count > 0) recordRemovedSubtrees(output, removals);
   const structureMaps = carryStructTree(output, carriedSources);
   // Bookmarks, language, preferences and document actions remain owner-only.
   // Actions use the same actual layer identities as the composed registry.
@@ -1745,6 +2012,10 @@ async function assemblePages(
   }
   carryEmbeddedFiles(output, ownCarry, [...sources].filter(([key]) => key !== ownKey).map(([, s]) => s));
   carryFormatDeclarations(output, formatSources);
+  if (boundTargets > 0) unbindEmbeddedTargets(output);
+  // After every annotation is in place: each free text /DA font is a name
+  // of the form's default resources (ISO 32000-2 12.5.6.6, 12.7.4.3).
+  completeAnnotationDefaultResources(output, contributions, { authored: writtenDefaults, bindings: fontBindings });
 }
 
 /** A source document as the build copies from it: loaded, then its names
@@ -1834,6 +2105,16 @@ function carryDocumentInfo(output: PDFDocument, source: PDFDocument): void {
   for (const [key, value] of carried) target.set(key, value);
 }
 
+// A build leaves objects nothing references in the output context: the
+// originals the strip removed with their appearance streams and popups,
+// copies of pages the build dropped, streams a carry replaced. Each holds
+// content the document no longer shows, and the writer saves every object of
+// the context.
+async function saveReachable(output: PDFDocument): Promise<Uint8Array> {
+  await flushAndDropUnreachable(output);
+  return saveWithFormatDeclarations(output);
+}
+
 export async function buildPdf(
   pages: ExportPage[],
   ownBytes?: Uint8Array,
@@ -1852,7 +2133,7 @@ export async function buildPdf(
   // Names the writer, so it describes this build and not the source's tool.
   // GENERATED_INFO_KEYS keeps the carry off the key; this is its only writer.
   output.setProducer(`PDFX ${PDFX_VERSION}`);
-  return saveWithFormatDeclarations(output);
+  return saveReachable(output);
 }
 
 export async function buildPdfx(
@@ -1891,5 +2172,5 @@ export async function buildPdfx(
   output.setProducer(`PDFX ${PDFX_VERSION}`);
   output.setKeywords(['PDFX']);
 
-  return saveWithFormatDeclarations(output);
+  return saveReachable(output);
 }

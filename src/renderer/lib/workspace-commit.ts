@@ -116,7 +116,7 @@ export function planCommit(
           ...(authored.length
             ? {
                 annotations: authored.map(
-                  ({ kind, x, y, w, h, color, note, points, strokes, inkStyle, imageData, signatureFont, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, strokes, inkStyle, imageData, signatureFont, noRotate, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -134,6 +134,8 @@ export function planCommit(
                     // trap again: a field absent here never reaches the
                     // builder, however faithfully the type carries it).
                     signatureFont,
+                    // The frame a carried stamp's box is read in.
+                    noRotate,
                     markupType,
                     quads,
                     measureKind,

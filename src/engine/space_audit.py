@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
+from engine.default_fonts import is_font_holder
 
 from engine.pdf_tree import token_text
 
@@ -333,6 +334,13 @@ def _attribute(pdf) -> _Attribution:
         except Exception:
             continue
 
+    # A form dictionary that registers no field and holds no XFA is no form:
+    # it holds the font an annotation's /DA names (ISO 32000-2 12.7.4.3).
+    try:
+        holder = is_font_holder(pdf.Root.get("/AcroForm"))
+    except Exception:
+        holder = False
+
     # (object, inherited category, page, edge key, inside a sticky subtree)
     stack = [(pdf.trailer, None, None, "", False)]
     guard = 0
@@ -347,6 +355,8 @@ def _attribute(pdf) -> _Attribution:
         indirect = og is not None and og != (0, 0)
 
         claimed = _edge_category(key, obj) or _own_category(obj)
+        if holder and claimed == "forms" and key in ("/AcroForm", "/DR"):
+            claimed = "document_structure"
         if sticky and claimed not in _STRONG:
             claimed = None
         category = claimed or inherited

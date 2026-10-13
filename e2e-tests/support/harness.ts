@@ -1143,6 +1143,10 @@ export interface PageAnnotationSnapshot {
    * artwork survives save + reopen even where the SET does not). */
   symbolId?: string;
   symbolParts?: number;
+  /** An imported stamp whose own appearance the commit keeps. */
+  carriedAppearance?: boolean;
+  /** Such a stamp with the NoRotate flag: its box is its upright box. */
+  noRotate?: boolean;
 }
 
 /** Every pending annotation on one page, workspace order (= z-order). */

@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
+from engine.default_fonts import hold_standard_font
 
 from .incremental import finalize_preserving_signatures, signature_outcome
 from .inplace import is_same_file, staged_write
@@ -243,6 +244,8 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
         _refuse_unreadable(scanned)
         removed = _strip_redact_annots(pdf, scanned)
         added = 0
+        # The /DR name of the font an overlay /DA written here selects.
+        overlay_font = None
         for spec in regions or []:
             page_no = int(spec["page"])
             if not (1 <= page_no <= len(pdf.pages)):
@@ -288,8 +291,12 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
                 # /DA is a content-stream fragment, and a size of 0 is the
                 # format's own "fit the box" — the same meaning `redact()`
                 # gives font_size 0, so the two agree without a second rule.
+                # Its font is a name of the form's default resources (ISO
+                # 32000-2 Table 195 reads /DA by 12.7.4.3).
+                if overlay_font is None:
+                    overlay_font = hold_standard_font(pdf)
                 annot["/DA"] = pikepdf.String(
-                    f"/Helv {size:g} Tf {r:.6g} {g:.6g} {b:.6g} rg"
+                    f"/{overlay_font} {size:g} Tf {r:.6g} {g:.6g} {b:.6g} rg"
                 )
             page = pdf.pages[page_no - 1]
             existing = page.obj.get("/Annots")

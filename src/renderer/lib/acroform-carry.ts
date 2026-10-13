@@ -54,6 +54,7 @@ import {
   PDFRef,
   PDFString,
 } from 'pdf-lib';
+import { defaultAppearanceString, interchangeableFontKey, rewriteDaFonts } from './annotation-default-resources';
 
 // Transient root marker. Set on source /Fields entries so the output-side
 // walk can tell a genuine field root from an orphan widget chain (a widget
@@ -79,9 +80,6 @@ const NAME_P = PDFName.of('P');
 const NAME_SIGFLAGS = PDFName.of('SigFlags');
 const NAME_NEEDAPPEARANCES = PDFName.of('NeedAppearances');
 const NAME_CO = PDFName.of('CO');
-const NAME_BASEFONT = PDFName.of('BaseFont');
-const NAME_ENCODING = PDFName.of('Encoding');
-const NAME_FONTDESCRIPTOR = PDFName.of('FontDescriptor');
 
 // Defensive cap on /Parent / /Kids recursion — matches the field-tree depth
 // cap posture in engine/forms.py (MAX_FIELD_DEPTH).
@@ -108,13 +106,6 @@ function asArray(doc: PDFDocument, value: unknown): PDFArray | null {
     return resolved instanceof PDFArray ? resolved : null;
   }
   return value instanceof PDFArray ? value : null;
-}
-
-// Resolve one level of indirection, returning whatever the entry actually is
-// (undefined stays undefined) — for values whose TYPE matters, like /Encoding
-// being a simple name vs a dict.
-function resolveDirect(doc: PDFDocument, value: unknown): unknown {
-  return value instanceof PDFRef ? doc.context.lookup(value) : value;
 }
 
 function acroFormOf(doc: PDFDocument): PDFDict | null {
@@ -266,53 +257,8 @@ function daStringOf(dict: PDFDict): string | null {
   return null;
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Replace /oldName tokens in a /DA appearance string. A PDF name token ends
-// at whitespace or a delimiter, so "/Helv" must not rewrite "/HelvB".
-// ONE pass over the original string, all renames as a single alternation
-// with a replacer FUNCTION (regression, both verified live):
-// (1) sequential per-rename .replace() passes feed each other — when a
-//     rename's TARGET equals another rename's OLD name (the natural shape of
-//     a document that already went through one merge, e.g. F1→F1_1 alongside
-//     a pre-existing F1_1→F1_1_1), the second pass re-matches the first
-//     pass's output and a field silently lands on a DIFFERENT field's font;
-//     a single pass can never re-match its own substitutions.
-// (2) a plain replacement STRING treats $$ / $& as patterns — a legal PDF
-//     name containing '$' mangled the rewrite; a function's return value is
-//     always literal.
-function rewriteDaFonts(da: string, renames: Map<string, string>): string {
-  if (renames.size === 0) return da;
-  const alternation = [...renames.keys()]
-    .sort((a, b) => b.length - a.length) // longest-first; belt to the lookahead's braces
-    .map(escapeRegExp)
-    .join('|');
-  return da.replace(
-    new RegExp(`/(${alternation})(?=[\\s/\\[\\]()<>{}%]|$)`, 'g'),
-    (_m, name: string) => `/${renames.get(name)!}`,
-  );
-}
-
-// Font subtypes that MAY be treated as interchangeable when everything else
-// agrees — the simple, metadata-describable kinds. An ALLOW-list, not a
-// deny-list (regression): rendering-defining data hides in
-// subtype-specific places a top-level check can't see — Type0/CID fonts
-// carry /FontDescriptor nested under /DescendantFonts (two different
-// embedded CJK fonts deduped to one entry produce GARBLED index-based
-// glyphs, not just a wrong face), and Type3 fonts have no descriptor at all
-// (their rendering IS their /CharProcs streams). Any subtype not listed —
-// including future/unknown ones — defaults to "never equivalent": a
-// duplicate /DR entry is bloat; a false merge corrupts a field's glyphs.
-const SIMPLE_FONT_SUBTYPES = new Set([
-  PDFName.of('Type1'),
-  PDFName.of('TrueType'),
-  PDFName.of('MMType1'),
-]);
-
 // Two /DR font entries are interchangeable only when they are SIMPLE fonts
-// (allow-list above) whose BaseFont, Subtype, and Encoding all agree and
+// (the allow-list of `interchangeableFontKey`) whose BaseFont, Subtype, and Encoding all agree and
 // neither embeds a font program — the ubiquitous case of every source
 // defining /Helv as unembedded WinAnsi Helvetica. Anything else stays
 // "different" and gets renamed; claiming a wrong face — or a wrong glyph MAP
@@ -320,33 +266,8 @@ const SIMPLE_FONT_SUBTYPES = new Set([
 // e.g. a custom /Differences remap, were deduplicated onto the first
 // source's encoding) — is the failure this comparison must never allow.
 function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {
-  const da = asDict(output, a);
-  const db = asDict(output, b);
-  if (!da || !db) return false;
-  const subA = da.get(NAME_SUBTYPE);
-  const subB = db.get(NAME_SUBTYPE);
-  if (!(subA instanceof PDFName) || subB !== subA || !SIMPLE_FONT_SUBTYPES.has(subA)) {
-    return false;
-  }
-  // An embedded font program is never assumed equivalent to anything — only
-  // the subset-tag naming convention would distinguish two, and that is a
-  // convention, not a guarantee.
-  if (da.get(NAME_FONTDESCRIPTOR) !== undefined || db.get(NAME_FONTDESCRIPTOR) !== undefined) {
-    return false;
-  }
-  const encA = resolveDirect(output, da.get(NAME_ENCODING));
-  const encB = resolveDirect(output, db.get(NAME_ENCODING));
-  // Encodings must be the SAME simple name, or both absent (both then fall
-  // to the same standard font's built-in). A dict encoding (custom
-  // /Differences) never matches — deep-comparing one is not worth a
-  // wrong-glyph-map risk.
-  const encodingsMatch =
-    (encA === undefined && encB === undefined) ||
-    (encA instanceof PDFName && encB instanceof PDFName && encA === encB);
-  if (!encodingsMatch) return false;
-  const baseA = da.get(NAME_BASEFONT);
-  const baseB = db.get(NAME_BASEFONT);
-  return baseA instanceof PDFName && baseB instanceof PDFName && baseA === baseB;
+  const key = interchangeableFontKey(output, a);
+  return key !== null && key === interchangeableFontKey(output, b);
 }
 
 // Does any field in this root's tree resolve to /FT /Sig (with inheritance —
@@ -404,8 +325,13 @@ function subtreeHasWidget(doc: PDFDocument, root: PDFDict): boolean {
  * Rebuild the output /AcroForm from the copied pages' widgets. Call after
  * every page has been copied and added. No marked roots anywhere -> no-op
  * (a non-form rebuild gains no /AcroForm key).
+ *
+ * Returns, per contribution whose /DR was merged, the output name of each
+ * font name of that /DR: the name itself, or the name a collision gave it.
+ * An annotation /DA of that source follows the same names.
  */
-export function carryAcroForm(output: PDFDocument, contributions: FormContribution[]): void {
+export function carryAcroForm(output: PDFDocument, contributions: FormContribution[]): Map<number, Map<string, string>> {
+  const fontBindings = new Map<number, Map<string, string>>();
   // ---- collect marked roots, in contribution order then first-seen order --
   const roots: CollectedRoot[] = [];
   const seenRootTags = new Set<string>();
@@ -448,7 +374,7 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
       roots.push({ ref: output.context.register(copied), dict: copied, contribution: ci });
     }
   });
-  if (roots.length === 0) return;
+  if (roots.length === 0) return fontBindings;
 
   // ---- resolve cross-source field-NAME collisions ------------------------
   // Two roots sharing a fully-qualified /T would make readers treat unrelated
@@ -511,7 +437,10 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
         mergedDR.set(groupName, target);
       }
       const isFontGroup = groupName === PDFName.of('Font');
+      const bound = isFontGroup ? new Map<string, string>() : null;
+      if (bound) fontBindings.set(ci, bound);
       for (const [resName, resVal] of group.entries()) {
+        bound?.set(resName.decodeText(), resName.decodeText());
         const existing = target.get(resName);
         if (existing === undefined) {
           target.set(resName, resVal);
@@ -531,6 +460,7 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
           const forSource = daRenames.get(ci) ?? new Map<string, string>();
           forSource.set(base, renamed);
           daRenames.set(ci, forSource);
+          bound?.set(base, renamed);
         }
       }
     }
@@ -544,7 +474,7 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
       const da = daStringOf(d);
       if (da === null) return;
       const rewritten = rewriteDaFonts(da, renames);
-      if (rewritten !== da) d.set(NAME_DA, PDFHexString.fromText(rewritten));
+      if (rewritten !== da) d.set(NAME_DA, defaultAppearanceString(rewritten));
     });
   }
 
@@ -576,7 +506,7 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
     for (const root of roots) {
       if (root.contribution !== ci) continue;
       if (daDiffers && daStringOf(root.dict) === null) {
-        root.dict.set(NAME_DA, PDFHexString.fromText(own.da!));
+        root.dict.set(NAME_DA, defaultAppearanceString(own.da!));
       }
       if (qDiffers && root.dict.get(NAME_Q) === undefined) {
         root.dict.set(NAME_Q, PDFNumber.of(own.q!));
@@ -664,10 +594,11 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
   const acroDict = output.context.obj({}) as PDFDict;
   acroDict.set(NAME_FIELDS, fieldsArr);
   if (mergedAny) acroDict.set(NAME_DR, mergedDR);
-  if (first.da !== null) acroDict.set(NAME_DA, PDFHexString.fromText(first.da));
+  if (first.da !== null) acroDict.set(NAME_DA, defaultAppearanceString(first.da));
   if (first.q !== null) acroDict.set(NAME_Q, PDFNumber.of(first.q));
   if (needAppearances) acroDict.set(NAME_NEEDAPPEARANCES, PDFBool.True);
   if (hasSig) acroDict.set(NAME_SIGFLAGS, PDFNumber.of(1));
   if (coRefs.length > 0) acroDict.set(NAME_CO, output.context.obj(coRefs));
   output.catalog.set(NAME_ACROFORM, output.context.register(acroDict));
+  return fontBindings;
 }
