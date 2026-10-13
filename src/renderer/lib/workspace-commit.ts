@@ -1,5 +1,5 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFRef } from 'pdf-lib';
-import { normalizeEscapedNames } from './pdf-name-normalize';
+import { PDFDocument } from 'pdf-lib';
+import { docCarriesLiveSignature } from './signature-presence';
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import { baseName } from './create-pdf';
@@ -170,6 +170,9 @@ export function planCommit(
           ...(p.removedImportedOriginals?.length
             ? { removedImportedOriginals: p.removedImportedOriginals }
             : {}),
+          ...(p.untouchedAnnotationSlots?.length
+            ? { untouchedAnnotationSlots: p.untouchedAnnotationSlots }
+            : {}),
         };
       }),
     }));
@@ -236,13 +239,6 @@ export async function buildCommitBytes(plan: CommitFilePlan): Promise<Uint8Array
     : buildPdf(plan.documents[0].pages, plan.ownBytes, plan.path);
 }
 
-const NAME_ACROFORM = PDFName.of('AcroForm');
-const NAME_FIELDS = PDFName.of('Fields');
-const NAME_KIDS = PDFName.of('Kids');
-const NAME_FT = PDFName.of('FT');
-const NAME_SIG = PDFName.of('Sig');
-const NAME_V = PDFName.of('V');
-const MAX_FIELD_DEPTH = 32;
 
 /** Whether these bytes carry, or cannot exclude, a FILLED signature field — a terminal
  * `/FT /Sig` (inheritable) with a `/V`. An empty signature field is not a
@@ -258,53 +254,7 @@ const MAX_FIELD_DEPTH = 32;
 export async function carriesLiveSignature(bytes: Uint8Array): Promise<boolean> {
   try {
     const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
-    // Read as the commit reads the same bytes: a catalog key such as
-    // /Acr#6fForm is the /AcroForm the rebuilt file will hold.
-    normalizeEscapedNames(doc);
-    const resolve = (value: unknown): unknown => {
-      if (!(value instanceof PDFRef)) return value;
-      const resolved = doc.context.lookup(value);
-      if (resolved === undefined) throw new Error('unresolved policy reference');
-      return resolved;
-    };
-    const asDict = (value: unknown): PDFDict | null => {
-      const r = resolve(value);
-      return r instanceof PDFDict ? r : null;
-    };
-    const asArray = (value: unknown): PDFArray | null => {
-      const r = resolve(value);
-      return r instanceof PDFArray ? r : null;
-    };
-    // Depth-bounded: a /Kids cycle in a damaged field tree would otherwise
-    // recur forever.
-    const walk = (field: PDFDict, inheritedFt: unknown, depth: number): boolean => {
-      if (depth > MAX_FIELD_DEPTH) return true;
-      const own = resolve(field.get(NAME_FT));
-      const ft = own === undefined ? inheritedFt : own;
-      if (ft !== undefined && ![NAME_SIG, PDFName.of('Tx'), PDFName.of('Btn'), PDFName.of('Ch')].includes(ft as PDFName)) return true;
-      // /Kids may be separate widget annotations: /V belongs to their
-      // terminal field, not to the leaf widgets. Match the engine's walk.
-      const value = resolve(field.get(NAME_V));
-      if (ft === NAME_SIG && value !== undefined && value !== PDFNull) return true;
-      const kids = asArray(field.get(NAME_KIDS));
-      if (!kids) return field.has(NAME_KIDS) || ft === undefined;
-      if (kids.size() === 0 && ft === undefined) return true;
-      for (let i = 0; i < kids.size(); i++) {
-        const kid = asDict(kids.get(i));
-        if (!kid || walk(kid, ft, depth + 1)) return true;
-      }
-      return false;
-    };
-    const acro = asDict(doc.catalog.get(NAME_ACROFORM));
-    // Catalog certification and unreadable structures are not unsignedness.
-    if (doc.catalog.has(PDFName.of('Perms'))) return true;
-    const fields = acro && asArray(acro.get(NAME_FIELDS));
-    if (!fields) return doc.catalog.has(NAME_ACROFORM);
-    for (let i = 0; i < fields.size(); i++) {
-      const field = asDict(fields.get(i));
-      if (!field || walk(field, undefined, 0)) return true;
-    }
-    return false;
+    return docCarriesLiveSignature(doc);
   } catch {
     // Asked after the engine failed. A document this fallback cannot read
     // is not proven unsigned, so it cannot authorize publication.

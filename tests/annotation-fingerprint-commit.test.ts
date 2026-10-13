@@ -1,15 +1,22 @@
 import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { deflateSync } from 'node:zlib';
+import { execFileSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFObjectParser, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream } from 'pdf-lib';
 import type { PDFContext } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
+import { importPage } from '../src/renderer/lib/annotation-import';
 import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
 import { entryOf, importedRect } from '../src/renderer/lib/annotation-fingerprint';
-import { holdsLowercaseEscape, normalizeEscapedNames } from '../src/renderer/lib/pdf-name-normalize';
+import { nameIsUnresolved, nameReading, normalizeEscapedNames, pdfjsNameReading, scanNameTokens } from '../src/renderer/lib/pdf-name-normalize';
 import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
+import { addFormFields } from '../src/renderer/lib/form-authoring';
+import { testPython } from './support/python';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef, Workspace } from '../src/renderer/state/types';
 
 const require = createRequire(import.meta.url);
@@ -33,23 +40,32 @@ function appearance(ctx: PDFContext): PDFDict {
   return ctx.obj({ N: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })) });
 }
 
-async function importAll(bytes: Uint8Array): Promise<PageAnnotation[]> {
+/** The first page's import as the workspace index records it. */
+async function importFirstPage(bytes: Uint8Array): Promise<{ annotations: PageAnnotation[]; untouchedSlots: number[] }> {
   const pdf = await loadPdf(bytes);
   const styles = await readRawAnnotationStyles(bytes);
-  const imported = await importPageAnnotations(await pdf.getPage(1), styles?.[0]);
+  const imported = await importPage(await pdf.getPage(1), styles?.[0]);
   await pdf.loadingTask.destroy();
   return imported;
+}
+
+async function importAll(bytes: Uint8Array): Promise<PageAnnotation[]> {
+  return (await importFirstPage(bytes)).annotations;
 }
 
 function makeFile(path: string, buffer: Uint8Array): OpenFile {
   return { path, workingPath: `${path}.working`, name: path, pageCount: 1, buffer, dirty: false, undoStack: [], redoStack: [] };
 }
 
-/** One import + commit cycle of every annotation the page holds. */
-async function commitCycle(bytes: Uint8Array): Promise<Uint8Array> {
-  const imported = await importAll(bytes);
+/** One import + commit cycle of every annotation the page holds; `edit`
+ *  may change the page the index recorded. */
+async function commitCycle(bytes: Uint8Array, edit: (page: PageRef) => PageRef = (page) => page): Promise<Uint8Array> {
+  const { annotations, untouchedSlots } = await importFirstPage(bytes);
   const file = makeFile('a.pdf', bytes);
-  const page: PageRef = { id: 'a.pdf#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0, annotations: imported };
+  const page: PageRef = edit({
+    id: 'a.pdf#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0, annotations,
+    ...(untouchedSlots.length ? { untouchedAnnotationSlots: untouchedSlots } : {}),
+  });
   const doc: OpenDocument = { ...file, id: 'a.pdf#0', name: file.name, pages: [page], pageCount: 1 };
   const workspace: Workspace = { documents: [doc] };
   const [plan] = planCommit(workspace, new Map([['a.pdf', file]]), ['a.pdf']);
@@ -503,7 +519,7 @@ describe('dictionary keys written with hex escapes (7.3.5)', () => {
 });
 
 describe('the decoded-key scan', () => {
-  it('decodes no key in a dictionary whose keys carry no escape, and every key once one does', async () => {
+  it('decodes no key in a dictionary whose keys carry no escape, and only the escaped key once one does', async () => {
     const doc = await PDFDocument.create();
     const dict = doc.context.obj({ Type: 'Annot', Subtype: 'Ink', Rect: [0, 0, 1, 1], C: [0, 0, 1] });
     const decode = vi.spyOn(PDFName.prototype, 'asBytes');
@@ -512,10 +528,10 @@ describe('the decoded-key scan', () => {
       expect(entryOf(dict, 'Border')).toBeUndefined();
       expect(decode).not.toHaveBeenCalled();
       dict.set(PDFName.of('B#6frder'), doc.context.obj([0, 0, 3]));
-      // With an escaped key present every key is read by decoded spelling, so
-      // the later of two spellings can win.
+      // With an escaped key present every key is compared by its reading, and
+      // only a key holding `#` is read from its bytes.
       expect(entryOf(dict, 'Border')).toBeInstanceOf(PDFArray);
-      expect(decode).toHaveBeenCalledTimes(dict.entries().length);
+      expect(decode).toHaveBeenCalledTimes(1);
     } finally {
       decode.mockRestore();
     }
@@ -653,6 +669,8 @@ async function commitUntouched(bytes: Uint8Array): Promise<Uint8Array> {
   return buildCommitBytes(plan);
 }
 
+const holdsHash = (name: PDFName): boolean => name.asString().includes('#');
+
 const inkWith = (extra: (ctx: PDFContext) => Record<string, unknown>) => (ctx: PDFContext) => ctx.obj({
   Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...extra(ctx),
 });
@@ -661,7 +679,7 @@ describe('names the parser left with a lowercase escape are rewritten at load (7
   it('/B#6frder becomes /Border: the model, the saved bytes and pdf.js agree on width 3', async () => {
     const source = withKeys(await pageWith(inkWith(() => ({ BZZZrder: [0, 0, 3] }))), [['/BZZZrder', '/B#6frder']]);
     const doc = await PDFDocument.load(source);
-    normalizeEscapedNames(doc);
+    normalizeEscapedNames(doc, source, 'all');
     const annot = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
     expect(annot.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
     const names: PDFName[] = [];
@@ -675,14 +693,14 @@ describe('names the parser left with a lowercase escape are rewritten at load (7
       } else if (value instanceof PDFArray) value.asArray().forEach(collect);
     };
     for (const [, object] of doc.context.enumerateIndirectObjects()) collect(object);
-    expect(names.some(holdsLowercaseEscape)).toBe(false);
+    expect(names.some(holdsHash)).toBe(false);
 
     expect((await bothRects(source)).pdfjs).toEqual([94, 94, 156, 156]);
     // Read back without the load rewrite: the writer emitted /Border itself.
     const out = await commitUntouched(source);
     const saved = (await PDFDocument.load(out)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
     expect(saved.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
-    expect(saved.keys().some(holdsLowercaseEscape)).toBe(false);
+    expect(saved.keys().some(holdsHash)).toBe(false);
     expect((await bothRects(out)).pdfjs).toEqual([94, 94, 156, 156]);
   });
 
@@ -714,12 +732,10 @@ describe('names the parser left with a lowercase escape are rewritten at load (7
     const out = await commitCycle(source);
     const annot = (await PDFDocument.load(out)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
     expect(annot.get(PDFName.of('Measure'))).toBeDefined();
-    expect(annot.keys().some(holdsLowercaseEscape)).toBe(false);
+    expect(annot.keys().some(holdsHash)).toBe(false);
   });
 
-  it('a file that wrote #23 before a lowercase pair is read as the decoded name, the stated limit', async () => {
-    // pdf.js reads this key as `#4fC`; the load rewrites it to /OC, so the
-    // replacement carries the layer.
+  it('a file that wrote #23 before a lowercase pair keeps it: /#234fC is not /OC, as pdf.js reads it', async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([300, 400]);
     const ctx = doc.context;
@@ -734,14 +750,15 @@ describe('names the parser left with a lowercase escape are rewritten at load (7
     const out = await commitCycle(source);
     expect(await subtypes(out)).toEqual(['Ink']);
     const annot = (await PDFDocument.load(out)).getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
-    expect(annot.get(PDFName.of('OC'))).toBeInstanceOf(PDFRef);
+    expect(annot.get(PDFName.of('OC'))).toBeUndefined();
   });
 
   it('a plain document gains no new name', async () => {
-    const doc = await PDFDocument.load(await pageWith(inkWith(() => ({ BS: { W: 3 } }))));
+    const plain = await pageWith(inkWith(() => ({ BS: { W: 3 } })));
+    const doc = await PDFDocument.load(plain);
     const created = vi.spyOn(PDFName, 'of');
     try {
-      normalizeEscapedNames(doc);
+      normalizeEscapedNames(doc, plain, 'all');
       expect(created).not.toHaveBeenCalled();
     } finally {
       created.mockRestore();
@@ -751,7 +768,7 @@ describe('names the parser left with a lowercase escape are rewritten at load (7
   it('keeps a # the file wrote as #23 and rewrites only the lowercase escape after it', async () => {
     const source = withKeys(await pageWith(inkWith(() => ({ BZZZZZZZZx: 1 }))), [['/BZZZZZZZZx', '/B#2353#6fx']]);
     const doc = await PDFDocument.load(source);
-    normalizeEscapedNames(doc);
+    normalizeEscapedNames(doc, source, 'all');
     const annot = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
     const keys = annot.keys().map((key) => Buffer.from(key.asBytes()).toString('latin1'));
     expect(keys).toContain('B#53ox');
@@ -760,8 +777,6 @@ describe('names the parser left with a lowercase escape are rewritten at load (7
 
 describe('an annotation whose reading the parse has lost is left untouched', () => {
   const cases: [string, () => Promise<Uint8Array>][] = [
-    ['/B#236frder (pdf.js width 1, rewritten to /Border at load)', async () =>
-      withKeys(await pageWith(inkWith(() => ({ BZZZZZrder: [0, 0, 3] }))), [['/BZZZZZrder', '/B#236frder']])],
     ['/Border [0 0 1] /B#6frder [0 0 3] /Border [0 0 5]', async () => withKeys(
       await pageWith(inkWith(() => ({ QQQQQQ: [0, 0, 1], BZZZrder: [0, 0, 3], WWWWWW: [0, 0, 5] }))),
       [['/QQQQQQ', '/Border'], ['/BZZZrder', '/B#6frder'], ['/WWWWWW', '/Border']])],
@@ -811,5 +826,666 @@ describe('a popup with no width or height', () => {
     page.node.set(PDFName.of('Annots'), ctx.obj([noteRef, popupRef]));
     const imported = await importAll(await doc.save());
     expect(imported.map((a) => a.importedOriginal?.subtype)).toEqual(['Text']);
+  });
+});
+
+describe('names settled by the tokens the file wrote (7.3.5)', () => {
+  it('an image keyed /Im#236f1 and drawn as /Im#236f1 still draws after a field is added', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const image = ctx.register(ctx.stream(new Uint8Array([255, 0, 0]), {
+      Type: 'XObject', Subtype: 'Image', Width: 1, Height: 1, BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+    }));
+    page.node.set(PDFName.of('Resources'), ctx.obj({ XObject: { ImQQQQQ1: image } }));
+    page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream('q 100 0 0 100 0 0 cm /ImQQQQQ1 Do Q')));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/ImQQQQQ1', '/Im#236f1']]);
+    const draws = async (bytes: Uint8Array): Promise<boolean> => {
+      const pdf = await loadPdf(bytes);
+      const ops = await (await pdf.getPage(1)).getOperatorList();
+      await pdf.loadingTask.destroy();
+      return ops.fnArray.includes(pdfjs.OPS.paintImageXObject);
+    };
+    expect(await draws(source)).toBe(true);
+    const saved = await addFormFields(source, [{ name: 'notes', type: 'text', pageIndex: 0, rect: [150, 300, 250, 330] }]);
+    expect(await draws(saved)).toBe(true);
+  });
+
+  it('a file holding both /B#6frder and /B#236frder leaves both, and imports neither', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const ink = (key: string) => ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], [key]: [0, 0, 3],
+    }));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ink('BZZZrder'), ink('BQQQQQrder')]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/BZZZrder', '/B#6frder'], ['/BQQQQQrder', '/B#236frder']]);
+    const loaded = await PDFDocument.load(source);
+    normalizeEscapedNames(loaded, source, 'all');
+    const annots = loaded.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    for (let i = 0; i < 2; i++) {
+      const keys = annots.lookup(i, PDFDict).keys().map((key) => Buffer.from(key.asBytes()).toString('latin1'));
+      expect(keys).toContain('B#6frder');
+      expect(keys).not.toContain('Border');
+    }
+    expect(await importAll(source)).toHaveLength(0);
+  });
+
+  it('a destination named by an indirect name object resolves after a rotation commit', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    doc.catalog.set(PDFName.of('Dests'), ctx.obj({ GZZZ: [page.ref, PDFName.of('Fit')] }));
+    const outlines = ctx.nextRef();
+    const item = ctx.register(ctx.obj({ Title: PDFString.of('Go there'), Parent: outlines, Dest: ctx.register(PDFName.of('GZZZ')) }));
+    ctx.assign(outlines, ctx.obj({ Type: 'Outlines', First: item, Last: item, Count: 1 }));
+    doc.catalog.set(PDFName.of('Outlines'), outlines);
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/GZZZ', '/G#6f']]);
+    const out = await commitCycle(source, (p) => ({ ...p, rotation: 90 }));
+    const pdf = await loadPdf(out);
+    const [entry] = (await pdf.getOutline()) as { dest: string | unknown[] }[];
+    const dest = typeof entry.dest === 'string' ? await pdf.getDestination(entry.dest) : entry.dest;
+    await pdf.loadingTask.destroy();
+    expect(Array.isArray(dest)).toBe(true);
+  });
+
+  it('a name ending in # and one hex digit reads the same on both sides and imports', async () => {
+    const byReference = withKeys(await pageWith(inkWith(() => ({ RevZZ: 1 }))), [['/RevZZ', '/Rev#1']]);
+    expect(await importAll(byReference)).toHaveLength(1);
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    page.node.set(PDFName.of('Annots'), doc.context.obj([inkWith(() => ({ RevZZ: 1 }))(doc.context)]));
+    const direct = withKeys(await doc.save({ useObjectStreams: false }), [['/RevZZ', '/Rev#1']]);
+    expect(await importAll(direct)).toHaveLength(1);
+  });
+
+  it('a signed append still pairs the page: /F#6f1 is rewritten to /Fo1, the name qpdf reads in the original', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const font = ctx.register(ctx.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' }));
+    page.node.set(PDFName.of('Resources'), ctx.obj({ Font: { FQQQ1: font } }));
+    page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream('BT /FQQQ1 12 Tf 20 300 Td (Hello) Tj ET')));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/FQQQ1', '/F#6f1']]);
+    const modified = await commitCycle(source, (p) => ({
+      ...p, annotations: [{ id: 'h', kind: 'highlight', x: 0.1, y: 0.1, w: 0.2, h: 0.05, color: '#ffd54a' }],
+    }));
+    const directory = mkdtempSync(join(tmpdir(), 'spectra-fingerprint-'));
+    try {
+      const originalPath = join(directory, 'original.pdf');
+      const modifiedPath = join(directory, 'modified.pdf');
+      writeFileSync(originalPath, source);
+      writeFileSync(modifiedPath, modified);
+      const plan = JSON.parse(execFileSync(testPython(), ['-B', '-c',
+        'import json,sys,pikepdf; from engine.incremental import _plan_pages; '
+          + 'o = pikepdf.open(sys.argv[1]); m = pikepdf.open(sys.argv[2]); p = _plan_pages(o, m); '
+          + 'print(json.dumps({"pairs": p["pairs"], "fonts": sorted(str(k) for k in m.pages[0].Resources.Font.keys())}))',
+        originalPath, modifiedPath],
+      { env: { ...process.env, PYTHONPATH: resolve('src'), PYTHONDONTWRITEBYTECODE: '1' }, encoding: 'utf8', timeout: 15_000 })) as { pairs: number[][]; fonts: string[] };
+      expect(plan.fonts).toEqual(['/Fo1']);
+      expect(plan.pairs).toEqual([[0, 0]]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+});
+
+describe('an annotation the import left untouched is never stripped', () => {
+  /** A and B share /Rect and /Contents; A draws inside the rectangle, B far
+   *  outside it. */
+  async function pair(b: (ctx: PDFContext) => Record<string, unknown>, keys: [string, string][] = []): Promise<Uint8Array> {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const ink = (inkList: number[], extra: Record<string, unknown>) => {
+      const dict = ctx.obj({ Type: 'Annot', Subtype: 'Ink', InkList: [inkList], Rect: [10, 10, 20, 20], C: [0, 0, 1], ...extra });
+      dict.set(PDFName.of('Contents'), PDFHexString.fromText('same'));
+      return ctx.register(dict);
+    };
+    page.node.set(PDFName.of('Annots'), ctx.obj([ink([12, 12, 18, 18], { AP: appearance(ctx) }), ink([100, 100, 150, 150], b(ctx))]));
+    return withKeys(await doc.save({ useObjectStreams: false }), keys);
+  }
+
+  const inkLists = async (bytes: Uint8Array): Promise<number[][]> => {
+    const loaded = await PDFDocument.load(bytes);
+    const annots = loaded.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    return annots.asArray().map((ref) => {
+      const list = loaded.context.lookup(ref, PDFDict).lookup(PDFName.of('InkList'), PDFArray).lookup(0, PDFArray);
+      return list.asArray().map((n) => Number(n.toString()));
+    });
+  };
+
+  it('B left untouched by its unresolved names keeps its stroke while A is re-authored once', async () => {
+    const source = await pair((ctx) => ({
+      AS: 'ZZZZZ',
+      AP: ctx.obj({ N: ctx.obj({ YYYYY: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })) }) }),
+    }), [['/ZZZZZ', '/#6#41'], ['/YYYYY', '/#236A']]);
+    const { annotations, untouchedSlots } = await importFirstPage(source);
+    expect(annotations).toHaveLength(1);
+    expect(untouchedSlots).toEqual([1]);
+    const out = await commitCycle(source);
+    expect(await subtypes(out)).toEqual(['Ink', 'Ink']);
+    expect(await inkLists(out)).toContainEqual([100, 100, 150, 150]);
+  });
+
+  it('a slot left untouched is not stripped under a fingerprint it fits', async () => {
+    // B fits A's fingerprint exactly; only its slot keeps it, as for an
+    // annotation the rectangle cross-check refused.
+    const source = await pair((ctx) => ({ AP: appearance(ctx) }));
+    const out = await commitCycle(source, (p) => ({ ...p, annotations: p.annotations!.slice(0, 1), untouchedAnnotationSlots: [1] }));
+    expect(await subtypes(out)).toEqual(['Ink', 'Ink']);
+    expect(await inkLists(out)).toContainEqual([100, 100, 150, 150]);
+  });
+
+  it('deleting A strips A only, and B stays', async () => {
+    const source = await pair((ctx) => ({ AP: appearance(ctx) }));
+    const out = await commitCycle(source, (p) => ({
+      ...p, annotations: [], removedImportedOriginals: [p.annotations![0].importedOriginal!], untouchedAnnotationSlots: [1],
+    }));
+    expect(await inkLists(out)).toEqual([[100, 100, 150, 150]]);
+  });
+});
+
+/** A one-page file whose page /Resources live in a compressed object stream,
+ *  written by hand: pdf-lib writes every `#` of a name as `#23`. */
+function objectStreamPdf(resources: string, content: string, pad = ''): Uint8Array {
+  const parts: Buffer[] = [];
+  const offsets: number[] = [];
+  let length = 0;
+  const push = (bytes: Buffer): void => { parts.push(bytes); length += bytes.length; };
+  const object = (n: number, body: Buffer): void => {
+    offsets[n] = length;
+    push(Buffer.concat([Buffer.from(`${n} 0 obj\n`), body, Buffer.from('\nendobj\n')]));
+  };
+  const stream = (dict: string, data: Buffer): Buffer =>
+    Buffer.concat([Buffer.from(`<< ${dict} /Length ${data.length} >>\nstream\n`), data, Buffer.from('\nendstream')]);
+  push(Buffer.from('%PDF-1.7\n'));
+  object(1, Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'));
+  object(2, Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'));
+  object(3, Buffer.from('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources 4 0 R /Contents 6 0 R >>'));
+  object(5, Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'));
+  object(6, stream('/Filter /FlateDecode', deflateSync(Buffer.from(content, 'latin1'))));
+  const header = '4 0 ';
+  object(7, stream(`${pad}/Type /ObjStm /N 1 /First ${header.length} /Filter /FlateDecode`, deflateSync(Buffer.from(header + resources, 'latin1'))));
+  const rows = [[0, 0, 65535], [1, offsets[1], 0], [1, offsets[2], 0], [1, offsets[3], 0], [2, 7, 0],
+    [1, offsets[5], 0], [1, offsets[6], 0], [1, offsets[7], 0], [1, length, 0]];
+  const table = Buffer.alloc(rows.length * 7);
+  rows.forEach(([type, field, gen], i) => {
+    table.writeUInt8(type, i * 7);
+    table.writeUInt32BE(field, i * 7 + 1);
+    table.writeUInt16BE(gen, i * 7 + 5);
+  });
+  const xrefAt = length;
+  object(8, stream('/Type /XRef /Size 9 /W [1 4 2] /Root 1 0 R', table));
+  push(Buffer.from(`startxref\n${xrefAt}\n%%EOF\n`));
+  return new Uint8Array(Buffer.concat(parts));
+}
+
+describe('evidence read from object streams and indirect values', () => {
+  it('a key inside a compressed object stream is settled: /F#6f1 becomes /Fo1, /G#236f1 stays', async () => {
+    const bytes = objectStreamPdf('<< /Font << /F#6f1 5 0 R /G#236f1 5 0 R >> >>', 'BT /F#6f1 12 Tf 20 300 Td (Hi) Tj ET');
+    const doc = await PDFDocument.load(bytes);
+    normalizeEscapedNames(doc, bytes, 'all');
+    const fonts = doc.getPage(0).node.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('Font'), PDFDict);
+    expect(fonts.keys().map((key) => Buffer.from(key.asBytes()).toString('latin1')).sort()).toEqual(['Fo1', 'G#6f1']);
+  });
+
+  it('a document whose only escaped names carry spaces reads no evidence', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([300, 400]);
+    const ctx = source.context;
+    page.node.set(PDFName.of('Resources'), ctx.obj({
+      Font: { F1: ctx.register(ctx.obj({ Type: 'Font', Subtype: 'TrueType', BaseFont: PDFName.of('Times New Roman') })) },
+    }));
+    const bytes = await source.save();
+    expect(Buffer.from(bytes).toString('latin1')).toContain('ObjStm');
+    const doc = await PDFDocument.load(bytes);
+    const parse = vi.spyOn(PDFObjectParser, 'forBytes');
+    try {
+      normalizeEscapedNames(doc, bytes, 'all');
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('an /AS held by reference is settled for the sidecar as the build settles it', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1],
+      AS: ctx.register(PDFName.of('OQQQ')),
+      AP: ctx.obj({ N: ctx.obj({ On: ctx.register(ctx.stream('', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] })) }) }),
+    }))]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/OQQQ', '/O#6e']]);
+    const { pdfjs: theirs } = await bothRects(source);
+    expect(theirs).toEqual([10, 10, 20, 20]);
+    expect(await importAll(source)).toHaveLength(1);
+    const once = await commitCycle(source);
+    expect(await subtypes(once)).toEqual(['Ink']);
+    expect(await subtypes(await commitCycle(once))).toEqual(['Ink']);
+  });
+});
+
+describe('an annotation value that refers to itself', () => {
+  it('a self-referencing /LE array beside an escaped key settles without failing, and the sidecar records the Ink', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const le = ctx.nextRef();
+    ctx.assign(le, ctx.obj([le]));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], LE: le, BZZZrder: [0, 0, 3],
+    }))]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/BZZZrder', '/B#6frder']]);
+    const loaded = await PDFDocument.load(source);
+    expect(() => normalizeEscapedNames(loaded, source, 'annotations')).not.toThrow();
+    const annot = loaded.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
+    expect(annot.keys().some(holdsHash)).toBe(false);
+    const styles = await readRawAnnotationStyles(source);
+    expect(styles?.[0].map((style) => style.subtype)).toEqual(['Ink']);
+  });
+
+  it('an /LE array of 1000 references to itself, with no escaped name, is probed in a linear number of lookups and reads no evidence', async () => {
+    const count = 1000;
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const le = ctx.nextRef();
+    ctx.assign(le, ctx.obj(Array.from({ length: count }, () => le)));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], LE: le,
+    }))]));
+    const source = await doc.save({ useObjectStreams: false });
+    expect(Buffer.from(source).includes('#')).toBe(false);
+    const loaded = await PDFDocument.load(source);
+    expect(loaded.context.lookup(le, PDFArray).size()).toBe(count);
+
+    const context = loaded.context;
+    const lookup = context.lookup.bind(context) as (ref: unknown) => unknown;
+    const bound = 4 * count;
+    let lookups = 0;
+    (context as unknown as { lookup: (ref: unknown) => unknown }).lookup = (ref) => {
+      lookups += 1;
+      if (lookups > bound) throw new Error(`more than ${bound} lookups`);
+      return lookup(ref);
+    };
+    const scan = vi.spyOn(source, 'indexOf');
+    const parse = vi.spyOn(PDFObjectParser, 'forBytes');
+    try {
+      expect(() => normalizeEscapedNames(loaded, source, 'annotations')).not.toThrow();
+      expect(lookups).toBeLessThanOrEqual(bound);
+      expect(scan).not.toHaveBeenCalled();
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      scan.mockRestore();
+      parse.mockRestore();
+      delete (context as unknown as { lookup?: unknown }).lookup;
+    }
+  });
+
+  it('two /LE arrays that hold each other beside an escaped key settle without failing, and the sidecar records the Ink', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const first = ctx.nextRef();
+    const second = ctx.nextRef();
+    ctx.assign(first, ctx.obj([second]));
+    ctx.assign(second, ctx.obj([first]));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(ctx.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], LE: first, BZZZrder: [0, 0, 3],
+    }))]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/BZZZrder', '/B#6frder']]);
+    const loaded = await PDFDocument.load(source);
+    expect(() => normalizeEscapedNames(loaded, source, 'annotations')).not.toThrow();
+    const annot = loaded.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
+    const styles = await readRawAnnotationStyles(source);
+    expect(styles?.[0].map((style) => style.subtype)).toEqual(['Ink']);
+  });
+});
+
+describe('an indirect value reached more than once', () => {
+  const line = (ctx: PDFContext, extra: Record<string, unknown>): PDFDict => ctx.obj({
+    Type: 'Annot', Subtype: 'Line', L: [40, 100, 160, 140], Rect: [36, 96, 164, 144], C: [0, 0, 0], ...extra,
+  });
+
+  it('two annotations sharing one /LE array of an indirect escaped name both read the settled name', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const ending = ctx.register(PDFName.of('OpZZZnArrow'));
+    const le = ctx.register(ctx.obj([ending, ending]));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(line(ctx, { LE: le })), ctx.register(line(ctx, { LE: le }))]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/OpZZZnArrow', '/Op#65nArrow']]);
+    const loaded = await PDFDocument.load(source);
+    normalizeEscapedNames(loaded, source, 'annotations');
+    const annots = loaded.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    for (const slot of [0, 1]) {
+      const endings = annots.lookup(slot, PDFDict).lookup(PDFName.of('LE'), PDFArray);
+      expect([endings.lookup(0), endings.lookup(1)]).toEqual([PDFName.of('OpenArrow'), PDFName.of('OpenArrow')]);
+    }
+    const styles = await readRawAnnotationStyles(source);
+    expect(styles?.[0].map((style) => style.subtype)).toEqual(['Line', 'Line']);
+  });
+
+  it('a reference met first below the probe depth and then within it still triggers the evidence read', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const le = ctx.register(ctx.obj([PDFName.of('OpZZZnArrow'), PDFName.of('None')]));
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(line(ctx, { Deep: [[[le]]], LE: le }))]));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [['/OpZZZnArrow', '/Op#65nArrow']]);
+    const loaded = await PDFDocument.load(source);
+    const annot = loaded.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.keys().map((key) => key.asString())).toEqual(expect.arrayContaining(['/Deep', '/LE']));
+    expect(annot.keys().findIndex((key) => key === PDFName.of('Deep'))).toBeLessThan(annot.keys().findIndex((key) => key === PDFName.of('LE')));
+    normalizeEscapedNames(loaded, source, 'annotations');
+    expect(annot.lookup(PDFName.of('LE'), PDFArray).lookup(0)).toBe(PDFName.of('OpenArrow'));
+  });
+});
+
+describe('a name token of any length is evidence', () => {
+  it('an image keyed by a 603-byte name ending in #6a still draws after a field is added', async () => {
+    const placeholder = `I${'a'.repeat(599)}ZZZ`;
+    const written = `I${'a'.repeat(599)}#6a`;
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const image = ctx.register(ctx.stream(new Uint8Array([255, 0, 0]), {
+      Type: 'XObject', Subtype: 'Image', Width: 1, Height: 1, BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+    }));
+    page.node.set(PDFName.of('Resources'), ctx.obj({ XObject: { [placeholder]: image } }));
+    page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(`q 100 0 0 100 0 0 cm /${placeholder} Do Q`)));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [[`/${placeholder}`, `/${written}`]]);
+    const draws = async (bytes: Uint8Array): Promise<boolean> => {
+      const pdf = await loadPdf(bytes);
+      const ops = await (await pdf.getPage(1)).getOperatorList();
+      await pdf.loadingTask.destroy();
+      return ops.fnArray.includes(pdfjs.OPS.paintImageXObject);
+    };
+    expect(await draws(source)).toBe(true);
+    const loaded = await PDFDocument.load(source);
+    normalizeEscapedNames(loaded, source, 'all');
+    const xobjects = loaded.getPage(0).node.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('XObject'), PDFDict);
+    expect(xobjects.keys().map((key) => key.asString())).toEqual([`/I${'a'.repeat(599)}j`]);
+    const saved = await addFormFields(source, [{ name: 'notes', type: 'text', pageIndex: 0, rect: [150, 300, 250, 330] }]);
+    expect(await draws(saved)).toBe(true);
+  });
+
+  it('a # after 2000 regular bytes and before 2000 more yields the whole token', () => {
+    const token = `${'a'.repeat(2000)}#6a${'b'.repeat(2000)}`;
+    const tokens = new Set<string>();
+    scanNameTokens(new Uint8Array(Buffer.from(`<< /${token} 1 >>`, 'latin1')), tokens);
+    expect([...tokens]).toEqual([token]);
+  });
+
+  it('an object stream whose /Type is 5000 bytes after its obj keyword is read: /F#6f1 becomes /Fo1', async () => {
+    const bytes = objectStreamPdf('<< /Font << /F#6f1 5 0 R >> >>', 'BT /F#6f1 12 Tf 20 300 Td (Hi) Tj ET', `/Pad (${'x'.repeat(5000)}) `);
+    const doc = await PDFDocument.load(bytes);
+    normalizeEscapedNames(doc, bytes, 'all');
+    const fonts = doc.getPage(0).node.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('Font'), PDFDict);
+    expect(fonts.keys().map((key) => key.asString())).toEqual(['/Fo1']);
+  });
+
+  it('an image keyed by a name of 3 MB ending in #6a is settled in slices, and still draws after a field is added', async () => {
+    const run = 3 * 1024 * 1024;
+    const placeholder = `I${'a'.repeat(run)}ZZZ`;
+    const written = `I${'a'.repeat(run)}#6a`;
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const image = ctx.register(ctx.stream(new Uint8Array([255, 0, 0]), {
+      Type: 'XObject', Subtype: 'Image', Width: 1, Height: 1, BitsPerComponent: 8, ColorSpace: 'DeviceRGB',
+    }));
+    page.node.set(PDFName.of('Resources'), ctx.obj({ XObject: { [placeholder]: image } }));
+    page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(`q 100 0 0 100 0 0 cm /${placeholder} Do Q`)));
+    const source = withKeys(await doc.save({ useObjectStreams: false }), [[`/${placeholder}`, `/${written}`]]);
+    const draws = async (bytes: Uint8Array): Promise<boolean> => {
+      const pdf = await loadPdf(bytes);
+      const ops = await (await pdf.getPage(1)).getOperatorList();
+      await pdf.loadingTask.destroy();
+      return ops.fnArray.includes(pdfjs.OPS.paintImageXObject);
+    };
+    const loaded = await PDFDocument.load(source);
+    // Each string the normaliser builds from bytes goes through
+    // String.fromCharCode: once per slice of 8192, never once per byte.
+    const built = vi.spyOn(String, 'fromCharCode');
+    let calls: number;
+    try {
+      normalizeEscapedNames(loaded, source, 'all');
+      calls = built.mock.calls.length;
+    } finally {
+      built.mockRestore();
+    }
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(4 * Math.ceil(written.length / 8192) + 16);
+    const xobjects = loaded.getPage(0).node.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('XObject'), PDFDict);
+    const [key] = xobjects.keys();
+    expect(xobjects.keys()).toHaveLength(1);
+    expect(key.asString() === `/I${'a'.repeat(run)}j`).toBe(true);
+    const saved = await addFormFields(source, [{ name: 'notes', type: 'text', pageIndex: 0, rect: [150, 300, 250, 330] }]);
+    const again = (await PDFDocument.load(saved)).getPage(0).node.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('XObject'), PDFDict);
+    expect(again.keys()).toEqual([key]);
+    expect(await draws(saved)).toBe(true);
+  }, 120_000);
+});
+
+describe('the pdf.js reading of a name token, built by slices', () => {
+  /** One character at a time: the reading the sliced form must equal. */
+  const perCharacter = (raw: string): string => {
+    const hex = (code: number): number => {
+      if (code >= 0x30 && code <= 0x39) return code - 0x30;
+      if (code >= 0x41 && code <= 0x46) return code - 0x37;
+      if (code >= 0x61 && code <= 0x66) return code - 0x57;
+      return -1;
+    };
+    let out = '';
+    for (let i = 0; i < raw.length; i++) {
+      if (raw.charCodeAt(i) !== 0x23) {
+        out += raw[i];
+        continue;
+      }
+      if (i + 1 >= raw.length) {
+        out += '#';
+        break;
+      }
+      const high = hex(raw.charCodeAt(i + 1));
+      if (high === -1) {
+        out += '#' + raw[i + 1];
+        i += 1;
+        continue;
+      }
+      if (i + 2 >= raw.length) {
+        out += '#' + raw[i + 1];
+        break;
+      }
+      const low = hex(raw.charCodeAt(i + 2));
+      if (low === -1) {
+        out += '#' + raw[i + 1] + raw[i + 2];
+        i += 2;
+        continue;
+      }
+      out += String.fromCharCode((high << 4) | low);
+      i += 2;
+    }
+    return out;
+  };
+
+  const edges = [
+    '', 'abc', '#', 'a#', '##', '###', '#4', 'a#4', '#g', '#g1', '#gg', '#4g', '#4g41', '#4#41', '##41', '#g#41',
+    '#41', '#6f', '#6F', '#aB', '#Ab', '#ff', '#FF', '#00', 'a#00b', '#23', '#2341', '#23#41', '#41#42#43', '#41#4',
+    '#41#', '#41#g', 'a#41b#6fc', '#4#4#41', '#4g#41', '\u00e9#e9', 'Name#20With#20Spaces',
+  ];
+  for (const raw of edges) {
+    it(`${JSON.stringify(raw)} reads as the per-character form reads it`, () => {
+      expect(pdfjsNameReading(raw)).toBe(perCharacter(raw));
+    });
+  }
+
+  it('a run of 20,000 characters reads the same with an escape, or a # that starts none, at each slice boundary', () => {
+    for (const at of [8189, 8190, 8191, 8192, 8193, 8194, 16383, 16384, 16385]) {
+      for (const piece of ['#6a', '#6A', '#00', '#4g', '#g1', '##', '#41#42', '#4#41']) {
+        const raw = `${'a'.repeat(at)}${piece}${'b'.repeat(20000 - at - piece.length)}`;
+        expect(raw).toHaveLength(20000);
+        expect(pdfjsNameReading(raw) === perCharacter(raw)).toBe(true);
+      }
+    }
+    const every = `${'a'.repeat(8191)}#6a#6b#6c${'b'.repeat(8180)}#4${'c'.repeat(3617)}#`;
+    expect(every).toHaveLength(20000);
+    expect(pdfjsNameReading(every) === perCharacter(every)).toBe(true);
+  });
+
+  it('5000 generated tokens over # and hex and non-hex characters read the same', () => {
+    const alphabet = ['#', '#', '4', '6', 'a', 'F', 'g', 'Z', '0'];
+    let seed = 0x2f6e2b1;
+    const next = (): number => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+    for (let n = 0; n < 5000; n++) {
+      let raw = '';
+      const length = (next() >>> 8) % 14;
+      for (let i = 0; i < length; i++) raw += alphabet[(next() >>> 8) % alphabet.length];
+      expect(pdfjsNameReading(raw), JSON.stringify(raw)).toBe(perCharacter(raw));
+    }
+  });
+});
+
+describe('a key whose rewrite would meet another key of its dictionary', () => {
+  const collision = async (borders: Record<string, unknown>): Promise<Uint8Array> => withKeys(
+    await pageWith(inkWith(() => ({ ...borders, CZZZ: true, DZZZ: 'EZZZ' }))),
+    [['/BZZZrder', '/B#6frder'], ['/CZZZ', '/C#6f'], ['/DZZZ', '/D#6f'], ['/EZZZ', '/E#6f']]);
+  const cases: [string, Record<string, unknown>, number][] = [
+    ['plain then escaped', { Border: [0, 0, 1], BZZZrder: [0, 0, 3] }, 3],
+    ['escaped then plain', { BZZZrder: [0, 0, 3], Border: [0, 0, 1] }, 1],
+  ];
+  for (const [label, borders, width] of cases) {
+    it(`${label}: the other names of the dictionary are settled, and the two keys keep their order`, async () => {
+      const source = await collision(borders);
+      const doc = await PDFDocument.load(source);
+      normalizeEscapedNames(doc, source, 'all');
+      const annot = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+      expect(annot.get(PDFName.of('Co'))).toBeDefined();
+      expect(annot.get(PDFName.of('Do'))).toBe(PDFName.of('Eo'));
+      const written = annot.keys().map((key) => key.asString());
+      expect(written.filter((key) => key.includes('#'))).toEqual(['/B#6frder']);
+      expect(written.indexOf('/Border') < written.indexOf('/B#6frder')).toBe(width === 3);
+      expect(await importAll(source)).toHaveLength(0);
+    });
+
+    it(`${label}: a commit leaves the width pdf.js reads at ${width}`, async () => {
+      const source = await collision(borders);
+      const box = [100 - 2 * width, 100 - 2 * width, 150 + 2 * width, 150 + 2 * width];
+      expect((await bothRects(source)).pdfjs).toEqual(box);
+      const once = await commitUntouched(source);
+      expect((await bothRects(once)).pdfjs).toEqual(box);
+      const twice = await commitCycle(once);
+      expect(await subtypes(twice)).toEqual(['Ink']);
+      expect((await bothRects(twice)).pdfjs).toEqual(box);
+    });
+  }
+
+  it('two escaped keys with one reading are both kept as written', async () => {
+    const source = withKeys(
+      await pageWith(inkWith(() => ({ CZZZntents: PDFString.of('first'), CoZZZtents: PDFString.of('second') }))),
+      [['/CZZZntents', '/C#6fntents'], ['/CoZZZtents', '/Co#6etents']]);
+    const doc = await PDFDocument.load(source);
+    normalizeEscapedNames(doc, source, 'all');
+    const annot = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
+    expect(annot.keys().map((key) => key.asString()).filter((key) => key.includes('#'))).toEqual(['/C#6fntents', '/Co#6etents']);
+    const contents = async (bytes: Uint8Array): Promise<string | undefined> => {
+      const pdf = await loadPdf(bytes);
+      const [read] = (await (await pdf.getPage(1)).getAnnotations()) as { contentsObj?: { str?: string } }[];
+      await pdf.loadingTask.destroy();
+      return read.contentsObj?.str;
+    };
+    expect(await contents(source)).toBe('second');
+    expect(await contents(await commitUntouched(source))).toBe('second');
+  });
+
+  /** Two Inks on one page, each with /Border beside /B#6frder. */
+  const twoCollisions = async (): Promise<Uint8Array> => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ink = inkWith(() => ({ Border: [0, 0, 1], BZZZrder: [0, 0, 3] }));
+    page.node.set(PDFName.of('Annots'), doc.context.obj([doc.context.register(ink(doc.context)), doc.context.register(ink(doc.context))]));
+    return withKeys(await doc.save({ useObjectStreams: false }), [['/BZZZrder', '/B#6frder']]);
+  };
+  const heldBack = (doc: PDFDocument, slot: number): { dict: PDFDict; key: PDFName } => {
+    const dict = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(slot, PDFDict);
+    const keys = dict.keys().filter((key) => key.asString() === '/B#6frder');
+    expect(keys).toHaveLength(1);
+    return { dict, key: keys[0] };
+  };
+
+  it('one token is one key object within a document, and another object in each other document', async () => {
+    const source = await twoCollisions();
+    const first = await PDFDocument.load(source);
+    normalizeEscapedNames(first, source, 'all');
+    expect(heldBack(first, 0).key).toBe(heldBack(first, 1).key);
+    const second = await PDFDocument.load(source);
+    normalizeEscapedNames(second, source, 'all');
+    expect(heldBack(second, 0).key).toBe(heldBack(second, 1).key);
+    expect(heldBack(second, 0).key).not.toBe(heldBack(first, 0).key);
+  });
+
+  it('a held-back key copied into a second document is the same object there and is written as the token of the file', async () => {
+    const source = await twoCollisions();
+    const from = await PDFDocument.load(source);
+    normalizeEscapedNames(from, source, 'all');
+    const { key } = heldBack(from, 0);
+    const out = await PDFDocument.create();
+    const [page] = await out.copyPages(from, [0]);
+    out.addPage(page);
+    for (const slot of [0, 1]) {
+      const copy = heldBack(out, slot);
+      expect(copy.key).toBe(key);
+      expect(copy.dict.get(key)).toBeInstanceOf(PDFArray);
+      expect(copy.dict.get(PDFName.of('Border'))).toBeInstanceOf(PDFArray);
+    }
+    expect(nameReading(key, out.context)).toBe('B#6frder');
+    expect(nameIsUnresolved(key, out.context)).toBe(true);
+    const saved = Buffer.from(await out.save({ useObjectStreams: false })).toString('latin1');
+    expect(saved.split('/B#6frder').length - 1).toBe(2);
+    expect(saved).not.toContain('#23');
+    const pdf = await loadPdf(new Uint8Array(Buffer.from(saved, 'latin1')));
+    const annots = (await (await pdf.getPage(1)).getAnnotations()) as { borderStyle: { width: number } }[];
+    await pdf.loadingTask.destroy();
+    expect(annots.map((annot) => annot.borderStyle.width)).toEqual([3, 3]);
+  });
+});
+
+describe('a name unresolved in one source document', () => {
+  it('does not keep the commit from replacing an annotation of another source that wrote the same spelling one way', async () => {
+    // a.pdf writes /K#236f only, which reads K#6f on both sides. b.pdf
+    // writes /K#6f and /K#236f, so K#6f is unresolved there.
+    const a = withKeys(await pageWith(inkWith(() => ({ KQQQQQ: true }))), [['/KQQQQQ', '/K#236f']]);
+    const other = await PDFDocument.create();
+    const otherPage = other.addPage([300, 400]);
+    const ink = (key: string) => other.context.register(other.context.obj({
+      Type: 'Annot', Subtype: 'Ink', InkList: [[100, 100, 150, 150]], Rect: [10, 10, 20, 20], C: [0, 0, 1], [key]: true,
+    }));
+    otherPage.node.set(PDFName.of('Annots'), other.context.obj([ink('KZZZ'), ink('KQQQQQ')]));
+    const b = withKeys(await other.save({ useObjectStreams: false }), [['/KZZZ', '/K#6f'], ['/KQQQQQ', '/K#236f']]);
+
+    const fromA = await importFirstPage(a);
+    expect(fromA.annotations).toHaveLength(1);
+    expect(fromA.untouchedSlots).toEqual([]);
+    const fromB = await importFirstPage(b);
+    expect(fromB.annotations).toHaveLength(0);
+    expect([...fromB.untouchedSlots].sort()).toEqual([0, 1]);
+
+    const files = new Map([['a.pdf', makeFile('a.pdf', a)], ['b.pdf', makeFile('b.pdf', b)]]);
+    const own: PageRef = { id: 'a.pdf#p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0,
+      annotations: fromA.annotations };
+    const inserted: PageRef = { id: 'b.pdf#p0', sourceDocId: 'b.pdf', sourcePageIndex: 0, rotation: 0, width: 0, height: 0,
+      untouchedAnnotationSlots: fromB.untouchedSlots };
+    const doc: OpenDocument = { ...files.get('a.pdf')!, id: 'a.pdf#0', pages: [own, inserted], pageCount: 2 };
+    const [plan] = planCommit({ documents: [doc] }, files, ['a.pdf']);
+    const out = await loadPdf(await buildCommitBytes(plan));
+    const counts: number[] = [];
+    for (let i = 1; i <= out.numPages; i++) counts.push(((await (await out.getPage(i)).getAnnotations()) as unknown[]).length);
+    await out.loadingTask.destroy();
+    expect(counts).toEqual([1, 2]);
   });
 });

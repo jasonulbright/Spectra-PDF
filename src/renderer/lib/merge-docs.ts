@@ -36,6 +36,7 @@ export function buildMergedPageRefs(doc: OpenDocument): PageRef[] {
         return annotation;
       });
     }
+    if (page.untouchedAnnotationSlots) copy.untouchedAnnotationSlots = [...page.untouchedAnnotationSlots];
     if (page.removedImportedOriginals) {
       copy.removedImportedOriginals = page.removedImportedOriginals.map((f) => ({
         ...f,

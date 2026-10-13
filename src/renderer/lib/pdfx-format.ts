@@ -113,6 +113,9 @@ export interface ExportPage {
   // original from the copied page's real /Annots WITHOUT re-appending them
   // (unlike `annotations`, which is always re-appended after stripping).
   removedImportedOriginals?: NonNullable<ExportAnnotation['importedOriginal']>[];
+  // See PageRef.untouchedAnnotationSlots: positions in the source page's
+  // /Annots the builder never strips.
+  untouchedAnnotationSlots?: number[];
 }
 
 export interface ExportDocument {

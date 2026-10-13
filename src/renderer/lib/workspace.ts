@@ -3,8 +3,8 @@ import { getDocumentProxy } from './pdfDocCache';
 import { loadDocument } from './pdfRenderer';
 import { documentPassword } from './document-passwords';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
-import { importPageAnnotations } from './annotation-import';
-import { readRawAnnotationStyles } from './annotation-raw-style';
+import { importPage } from './annotation-import';
+import { readRawAnnotationStyles, type RawAnnotStyle } from './annotation-raw-style';
 import { readableBytes, SealedDecryptError } from './sealed-edit';
 import {
   adoptAuthoredIdentity,
@@ -79,34 +79,67 @@ function toUint8(buffer: PdfBuffer): Uint8Array {
   return buffer instanceof Uint8Array ? buffer : buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : Uint8Array.from(buffer);
 }
 
-async function rawStylesOf(file: OpenFile, buffer: PdfBuffer) {
-  let bytes: Uint8Array;
+/** The bytes pdf-lib can read of `buffer`: `buffer` itself, a user-opened
+ *  file's decrypted bytes, or null when that decrypt failed. */
+async function sidecarBytes(file: OpenFile, shown: Uint8Array): Promise<Uint8Array | null> {
   try {
-    bytes = await readableBytes(file, toUint8(buffer));
+    return await readableBytes(file, shown);
   } catch (e) {
     if (e instanceof SealedDecryptError) return null;
     throw e;
   }
-  return readRawAnnotationStyles(bytes);
+}
+
+interface PageImport {
+  annotations: PageAnnotation[];
+  untouchedSlots: number[];
+}
+
+async function importPages(doc: PDFDocumentProxy, rawStyles: RawAnnotStyle[][] | null): Promise<PageImport[]> {
+  const out: PageImport[] = [];
+  for (let i = 1; i <= doc.numPages; i++) out.push(await importPage(await doc.getPage(i), rawStyles?.[i - 1]));
+  return out;
+}
+
+// The raw-style sidecar: pdf-lib reads the /Annots entries pdf.js
+// hides (/IC /CA /BE /CL /RD /LE), so shape/callout imports are faithful.
+// null (unparseable) degrades those imports to untouched. A user-opened
+// file's text entries are read from its decrypted bytes; a failed decrypt
+// takes the same null, since ciphertext strings would import as garbage.
+//
+// The import pairs a pdf.js annotation with its sidecar entry by object
+// number, so both are read from the same bytes. The engine's decrypting save
+// renumbers every object: the decrypted bytes of a user-opened file get a
+// pdf.js document of their own, and the shown document's annotation ids are
+// never compared with them. Decrypted bytes pdf.js cannot read, or reads with
+// another page count, are no sidecar.
+async function importAnnotations(file: OpenFile, buffer: PdfBuffer, doc: PDFDocumentProxy): Promise<PageImport[]> {
+  const shown = toUint8(buffer);
+  const bytes = await sidecarBytes(file, shown);
+  if (bytes === null) return importPages(doc, null);
+  if (bytes === shown) return importPages(doc, await readRawAnnotationStyles(bytes));
+  try {
+    const imported = await withOwnDocument(bytes, undefined, async (own) =>
+      own.numPages === doc.numPages ? importPages(own, await readRawAnnotationStyles(bytes)) : null);
+    if (imported) return imported;
+  } catch {
+    // Falls through to the import without a sidecar.
+  }
+  return importPages(doc, null);
 }
 
 async function indexDocument(file: OpenFile, buffer: PdfBuffer, doc: PDFDocumentProxy): Promise<OpenDocument[]> {
   const manifest = await readManifest(doc);
   const partitions = partitionPages(manifest, doc.numPages, stripExtension(file.name));
-  // The raw-style sidecar: pdf-lib reads the /Annots entries pdf.js
-  // hides (/IC /CA /BE /CL /RD /LE), so shape/callout imports are faithful.
-  // null (unparseable) degrades those imports to untouched. A user-opened
-  // file's text entries are read from its decrypted bytes; a failed decrypt
-  // takes the same null, since ciphertext strings would import as garbage.
-  const rawStyles = await rawStylesOf(file, buffer);
   const dims: { width: number; height: number }[] = [];
-  const annotations: PageAnnotation[][] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const { width, height } = page.getViewport({ scale: 1 });
     dims.push({ width, height });
-    annotations.push(await importPageAnnotations(page, rawStyles?.[i - 1]));
   }
+  const imported = await importAnnotations(file, buffer, doc);
+  const annotations = imported.map((page) => page.annotations);
+  const untouched = imported.map((page) => page.untouchedSlots);
   const generation = nextGeneration(file.path);
   const positional = partitions.map((partition, docIndex) => ({
     ...file,
@@ -122,6 +155,7 @@ async function indexDocument(file: OpenFile, buffer: PdfBuffer, doc: PDFDocument
         width: dims[pageIndex]?.width ?? 0,
         height: dims[pageIndex]?.height ?? 0,
         ...(annotations[pageIndex]?.length ? { annotations: annotations[pageIndex] } : {}),
+        ...(untouched[pageIndex]?.length ? { untouchedAnnotationSlots: untouched[pageIndex] } : {}),
       }),
     ),
   }));
