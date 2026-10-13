@@ -5,7 +5,7 @@ import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
 import {
-  annotationStoredBox, annotationViewBox, bodyTurnsWithView, pendingPageRotation, resizedInView, resizesInView,
+  annotationStoredBox, annotationViewBox, bodyTurnsWithView, handleInsets, pendingPageRotation, resizedInView, resizesInView,
   translatedInView, turnedFrame,
 } from '../../lib/annotation-view';
 import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
@@ -4257,18 +4257,34 @@ function PageCellImpl({
             isResizable(a) &&
             // A two-point line's box handles are its vertex handles' worse
             // twin (a flat bbox has no height to grab) — vertices only.
-            !(a.kind === 'shape' && (a.shapeType === 'line' || a.shapeType === 'arrow')) && (
-              <>
-                {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((h) => (
-                  <div
-                    key={h}
-                    className={`annot-handle annot-handle-${h}`}
-                    data-testid={`annot-handle-${h}`}
-                    onPointerDown={(e) => handleResizeDown(raw, h, e)}
-                  />
-                ))}
-              </>
-            )}
+            !(a.kind === 'shape' && (a.shapeType === 'line' || a.shapeType === 'arrow')) && (() => {
+              const handles = (['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((h) => (
+                <div
+                  key={h}
+                  className={`annot-handle annot-handle-${h}`}
+                  data-testid={`annot-handle-${h}`}
+                  onPointerDown={(e) => handleResizeDown(raw, h, e)}
+                />
+              ));
+              // The cell shows nothing outside the page: the handles of a box
+              // that reaches past the page edge stand on its part on the page.
+              const insets = handleInsets(da);
+              return insets ? (
+                <div
+                  data-testid="annot-handle-frame"
+                  style={{
+                    position: 'absolute',
+                    left: `${insets.left * 100}%`,
+                    top: `${insets.top * 100}%`,
+                    right: `${insets.right * 100}%`,
+                    bottom: `${insets.bottom * 100}%`,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {handles}
+                </div>
+              ) : handles;
+            })()}
           {tool === 'select' &&
             selectedAnnotationIds.length === 1 &&
             selectedAnnotationIds[0] === a.id &&

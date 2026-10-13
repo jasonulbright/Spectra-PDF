@@ -11,6 +11,7 @@ import { applyReadingOrder } from '../../lib/text-layer-order';
 import { clearTextLayer, swapTextLayer } from '../../lib/text-layer-selection';
 import { subscribeTextLayerRebuild, textLayerRebuildRevision } from '../../lib/text-layer-rebuild';
 import { contentKeyOf, replacementOf } from '../../lib/pdfDocCache';
+import { renderPageUpright } from '../../lib/upright-stamps';
 import {
   peekSelectionCache,
   rasterScaleFor,
@@ -102,13 +103,13 @@ async function pageDrawsImages(page: PDFPageProxy): Promise<boolean> {
  *  scale (bounded — see `rasterScaleFor`) and at the orientation the layer is
  *  laid out at, so the boxes that come back are already normalised to the page
  *  AS DISPLAYED. */
-async function renderPageToPng(page: PDFPageProxy, spin: number): Promise<Uint8Array | null> {
+async function renderPageToPng(pdf: PDFDocumentProxy, page: PDFPageProxy, spin: number): Promise<Uint8Array | null> {
   const base = page.getViewport({ scale: 1, rotation: spin });
   const viewport = page.getViewport({ scale: rasterScaleFor(base.width, base.height), rotation: spin });
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.floor(viewport.width));
   canvas.height = Math.max(1, Math.floor(viewport.height));
-  await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;
+  await renderPageUpright(pdf, page, { canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
   if (!blob) return null;
   return new Uint8Array(await blob.arrayBuffer());
@@ -404,7 +405,7 @@ export function PageTextLayer({
             if (destroyed()) throw new RecognitionCancelled();
             let png: Uint8Array | null;
             try {
-              png = await renderPageToPng(page, spin);
+              png = await renderPageToPng(pdf, page, spin);
             } catch (error) {
               if (destroyed()) throw new RecognitionCancelled();
               throw error;

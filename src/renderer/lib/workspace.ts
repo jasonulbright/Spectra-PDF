@@ -1,9 +1,11 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { getDocumentProxy } from './pdfDocCache';
+import { contentKeyOf, contentKeyOfPlaced, getDocumentProxy } from './pdfDocCache';
 import { loadDocument } from './pdfRenderer';
 import { documentPassword } from './document-passwords';
 import { readManifest, partitionPages, stripExtension } from './pdfx-format';
 import { importPage } from './annotation-import';
+import { NO_UPRIGHT_STAMPS, recordUprightStamps, uprightStampsAmong } from './upright-record';
+import type { UprightStamp } from './upright-record';
 import { readRawAnnotationStyles, type RawAnnotStyle } from './annotation-raw-style';
 import { readableBytes, SealedDecryptError } from './sealed-edit';
 import {
@@ -93,6 +95,8 @@ async function sidecarBytes(file: OpenFile, shown: Uint8Array): Promise<Uint8Arr
 interface PageImport {
   annotations: PageAnnotation[];
   untouchedSlots: number[];
+  /** The stamps a render of the page draws upright. */
+  uprightStamps: readonly UprightStamp[];
 }
 
 async function importPages(doc: PDFDocumentProxy, rawStyles: RawAnnotStyle[][] | null): Promise<PageImport[]> {
@@ -113,6 +117,10 @@ async function importPages(doc: PDFDocumentProxy, rawStyles: RawAnnotStyle[][] |
 // pdf.js document of their own, and the shown document's annotation ids are
 // never compared with them. Decrypted bytes pdf.js cannot read, or reads with
 // another page count, are no sidecar.
+//
+// A render names an upright stamp by its id in the shown document. A page the
+// other document lists such a stamp for is listed again from the shown one; a
+// read that fails lists none.
 async function importAnnotations(file: OpenFile, buffer: PdfBuffer, doc: PDFDocumentProxy): Promise<PageImport[]> {
   const shown = toUint8(buffer);
   const bytes = await sidecarBytes(file, shown);
@@ -121,11 +129,41 @@ async function importAnnotations(file: OpenFile, buffer: PdfBuffer, doc: PDFDocu
   try {
     const imported = await withOwnDocument(bytes, undefined, async (own) =>
       own.numPages === doc.numPages ? importPages(own, await readRawAnnotationStyles(bytes)) : null);
-    if (imported) return imported;
+    if (imported) return withShownUprightStamps(doc, imported);
   } catch {
     // Falls through to the import without a sidecar.
   }
   return importPages(doc, null);
+}
+
+async function withShownUprightStamps(doc: PDFDocumentProxy, imported: PageImport[]): Promise<PageImport[]> {
+  const out: PageImport[] = [];
+  for (const [index, page] of imported.entries()) {
+    if (page.uprightStamps.length === 0) {
+      out.push(page);
+      continue;
+    }
+    let uprightStamps = NO_UPRIGHT_STAMPS;
+    try {
+      uprightStamps = uprightStampsAmong(await (await doc.getPage(index + 1)).getAnnotations());
+    } catch {
+      // No upright stamp is recorded for the page.
+    }
+    out.push({ ...page, uprightStamps });
+  }
+  return out;
+}
+
+// The record a render reads is keyed by the content key of the bytes. A
+// cached document has its key. Bytes read through a document of their own
+// are hashed only when a page of them holds an upright stamp: a page with no
+// record renders as a page with none. The key promise is the one the cache
+// takes for the same buffer object when the bytes are placed, so the record
+// is written before the cache binds the key to its document.
+function recordUprightPages(buffer: PdfBuffer, doc: PDFDocumentProxy, imported: PageImport[]): void {
+  const pages = imported.map((page) => page.uprightStamps);
+  const key = contentKeyOf(doc) ?? (pages.some((stamps) => stamps.length > 0) ? contentKeyOfPlaced(buffer) : null);
+  if (key) recordUprightStamps(key, pages);
 }
 
 async function indexDocument(file: OpenFile, buffer: PdfBuffer, doc: PDFDocumentProxy): Promise<OpenDocument[]> {
@@ -138,6 +176,7 @@ async function indexDocument(file: OpenFile, buffer: PdfBuffer, doc: PDFDocument
     dims.push({ width, height });
   }
   const imported = await importAnnotations(file, buffer, doc);
+  recordUprightPages(buffer, doc, imported);
   const annotations = imported.map((page) => page.annotations);
   const untouched = imported.map((page) => page.untouchedSlots);
   const generation = nextGeneration(file.path);

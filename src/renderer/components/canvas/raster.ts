@@ -1,4 +1,6 @@
-import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { renderPageUpright, uprightDrawn } from '../../lib/upright-stamps';
+import type { PageRenderTask } from '../../lib/upright-stamps';
 
 export const BASE_RASTER = 1100;
 export const MAX_DETAIL = 4096;
@@ -30,6 +32,14 @@ export function getRenderTimings(): RenderTiming[] {
 
 export function clearRenderTimings(): void {
   renderTimings.length = 0;
+}
+
+// How many stamps the render behind a painted canvas took as upright, read by
+// the e2e harness. A canvas that has painted nothing has no entry.
+const uprightOfPainted = new WeakMap<HTMLCanvasElement, number>();
+
+export function uprightStampsPainted(canvas: HTMLCanvasElement): number | null {
+  return uprightOfPainted.get(canvas) ?? null;
 }
 
 export const dpr = (): number => Math.min(window.devicePixelRatio || 1, 2);
@@ -95,11 +105,16 @@ interface BaseParams {
   naturalHeight: number;
   baseRef: React.RefObject<HTMLCanvasElement | null>;
   isCancelled: () => boolean;
-  onTask: (task: RenderTask) => void;
+  onTask: (task: PageRenderTask) => void;
   onReady: () => void;
   /** True when this canvas already shows content (a buffer-swap re-render);
    *  routes the blit through the shared batcher instead of landing solo. */
   reblit?: boolean;
+  /** The clockwise quarter turn CSS gives the base canvas. A NoRotate stamp
+   *  is drawn turned back by it, so it stands upright on the screen. */
+  turn?: number;
+  /** How many stamps the painted raster holds upright for `turn`. */
+  onUpright?: (count: number, turn: number) => void;
 }
 
 export async function renderBase({
@@ -112,6 +127,8 @@ export async function renderBase({
   onTask,
   onReady,
   reblit = false,
+  turn = 0,
+  onUpright,
 }: BaseParams): Promise<void> {
   const page = await pdf.getPage(pageNumber);
   if (isCancelled()) return;
@@ -121,9 +138,9 @@ export async function renderBase({
   off.width = Math.max(1, Math.floor(viewport.width));
   off.height = Math.max(1, Math.floor(viewport.height));
   const renderStart = performance.now();
-  const task = page.render({ canvas: off, canvasContext: off.getContext('2d')!, viewport });
+  const task = renderPageUpright(pdf, page, { canvas: off, canvasContext: off.getContext('2d')!, viewport }, turn);
   onTask(task);
-  await task.promise;
+  const upright = uprightDrawn(await task.promise);
   recordTiming('base', pageNumber, performance.now() - renderStart);
   if (isCancelled()) return;
   const paint = (): void => {
@@ -135,7 +152,9 @@ export async function renderBase({
     canvas.width = off.width;
     canvas.height = off.height;
     canvas.getContext('2d')!.drawImage(off, 0, 0);
+    uprightOfPainted.set(canvas, task.upright?.length ?? 0);
     onReady();
+    onUpright?.(upright, turn);
   };
   if (reblit) {
     scheduleReblit(paint);
@@ -221,7 +240,7 @@ interface DetailParams {
   geometry: DetailGeometry;
   detailCanvas: HTMLCanvasElement;
   isCancelled: () => boolean;
-  onTask: (task: RenderTask) => void;
+  onTask: (task: PageRenderTask) => void;
   /** Pending page-tier quarter-turn. Baked into the pdf.js viewport on
    *  TOP of the page's own /Rotate, so the detail pixels arrive
    *  display-oriented and need no CSS rotation — unlike the base raster,
@@ -259,7 +278,7 @@ export async function renderDetail({
   off.width = backingW;
   off.height = backingH;
   const renderStart = performance.now();
-  const task = page.render({
+  const task = renderPageUpright(pdf, page, {
     canvas: off,
     canvasContext: off.getContext('2d')!,
     viewport,
@@ -273,6 +292,7 @@ export async function renderDetail({
   detailCanvas.width = backingW;
   detailCanvas.height = backingH;
   detailCanvas.getContext('2d')!.drawImage(off, 0, 0);
+  uprightOfPainted.set(detailCanvas, task.upright?.length ?? 0);
   const effScale = rect.width / layoutW || 1;
   detailCanvas.style.display = 'block';
   detailCanvas.style.left = `${(visLeft - rect.left) / effScale}px`;

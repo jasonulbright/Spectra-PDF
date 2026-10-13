@@ -4,6 +4,10 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PdfBuffer } from '../state/types';
 import { releaseSelectionCache, retainSelectionCache } from './ocr-selection';
 import { releaseStampRasters, retainStampRasters } from './stamp-raster';
+import {
+  bindUprightDocument, carryUprightPages, expectUprightKey, holdUprightRecord, releaseUprightRecord, uprightDocumentDestroyed,
+  uprightPagesOf,
+} from './upright-record';
 
 // One live pdf.js document per open file, shared by the workspace indexer and
 // the canvas page renderers. Entries are keyed by files-map key and are stale
@@ -18,7 +22,15 @@ interface CacheEntry {
   released: boolean;
   /** The entry that took this one's path for other bytes. */
   successor: CacheEntry | null;
+  /** The loaded document. */
+  proxy: PDFDocumentProxy | null;
+  /** The page indexes the replaced document had an upright stamp on. They
+   * name pages that may hold one in this document, and no stamp. */
+  uprightCarry: readonly number[];
 }
+
+const NO_PAGES: readonly number[] = Object.freeze([]);
+const placedKeys = new WeakMap<object, Promise<string>>();
 
 const cache = new Map<string, CacheEntry>();
 const contentKeys = new WeakMap<PDFDocumentProxy, Promise<string>>();
@@ -45,6 +57,16 @@ export function contentKeyOfBuffer(buffer: PdfBuffer): Promise<string> {
     (hash) => Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join(''),
     () => `unhashed-${++unhashed}`,
   );
+}
+
+/** The content key of `buffer`, one digest and one promise per buffer object.
+ * A reader of bytes that are placed afterwards and the cache that then loads
+ * them share the promise, so what the reader does when the key settles is
+ * done before the cache binds the key to the document. */
+export function contentKeyOfPlaced(buffer: PdfBuffer): Promise<string> {
+  let key = placedKeys.get(buffer);
+  if (!key) placedKeys.set(buffer, (key = contentKeyOfBuffer(buffer)));
+  return key;
 }
 
 /** The content key of a document this cache loaded, settled once its hash is
@@ -99,6 +121,7 @@ function releaseEntry(entry: CacheEntry, after?: Promise<unknown>): void {
   void Promise.all([entry.contentKey, after]).then(([key]) => {
     releaseSelectionCache(key);
     releaseStampRasters(key);
+    releaseUprightRecord(key);
   });
 }
 
@@ -117,29 +140,46 @@ export function subscribeProxyEvictions(listener: EvictionListener): () => void 
 
 function destroyEntry(path: string, entry: CacheEntry, successorKey?: Promise<string>): void {
   releaseEntry(entry, successorKey);
-  void entry.promise.then((proxy) => proxy.loadingTask.destroy()).catch(() => {});
+  // A read of the upright stamps that is pending on the document settles
+  // before the destruction starts: its request may never be answered.
+  void entry.promise.then((proxy) => {
+    uprightDocumentDestroyed(proxy);
+    return proxy.loadingTask.destroy();
+  }).catch(() => {});
   for (const listener of [...evictionListeners]) listener(path, entry.buffer);
 }
 
 export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDocumentProxy> {
   const existing = cache.get(path);
   if (existing && existing.buffer === buffer) return existing.promise;
-  const contentKey = contentKeyOfBuffer(buffer);
+  const contentKey = contentKeyOfPlaced(buffer);
   void contentKey.then((key) => {
     retainSelectionCache(key);
     retainStampRasters(key);
+    holdUprightRecord(key);
   });
+  // The pages the replaced document has an upright stamp on, or the pages it
+  // was told itself when it has not loaded.
+  const uprightCarry = !existing ? NO_PAGES : existing.proxy ? uprightPagesOf(existing.proxy) : existing.uprightCarry;
   if (existing) destroyEntry(path, existing, contentKey);
   const entry: CacheEntry = {
     path, buffer, promise: loadDocument(buffer, documentPassword(path)), contentKey, released: false, successor: null,
+    proxy: null, uprightCarry,
   };
   if (existing) existing.successor = entry;
   // Registered before any holder's reaction to the same promise, so a holder
-  // handed the proxy always finds its key.
+  // handed the proxy always finds its key and the pages it was told.
   void entry.promise.then((proxy) => {
     contentKeys.set(proxy, contentKey);
     entryOf.set(proxy, entry);
+    entry.proxy = proxy;
+    expectUprightKey(proxy, contentKey);
+    if (entry.released) return;
+    carryUprightPages(proxy, entry.uprightCarry);
   }, () => {});
+  // A render looks the record of upright stamps up by document, with no
+  // wait: the settled key is bound to the document here.
+  void Promise.all([entry.promise, contentKey]).then(([proxy, key]) => bindUprightDocument(proxy, key), () => {});
   // A rejected load must not stay cached: retriers (the indexer re-running
   // on state changes, useWorkspaceForms' bounded retry) would replay the
   // same cached rejection forever instead of re-attempting the load.
