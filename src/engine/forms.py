@@ -39,6 +39,7 @@ from pikepdf import Dictionary, Name
 
 from engine import afcalc, fieldactions, formdata, xfa, xfa_datasets
 from engine.acroform import calculation_order_names
+from engine.default_fonts import release_form
 from engine.afscript import recognize
 from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
 from engine.document_js import decode_js
@@ -3041,5 +3042,4 @@ def _flatten_fields(pdf: pikepdf.Pdf) -> None:
             page.obj["/Annots"] = pikepdf.Array(keep)
         elif "/Annots" in page.obj:
             del page.obj["/Annots"]
-    if "/AcroForm" in pdf.Root:
-        del pdf.Root["/AcroForm"]
+    release_form(pdf)

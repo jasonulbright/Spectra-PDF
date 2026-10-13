@@ -652,6 +652,9 @@ function rebuildElem(
       // page copied twice is two renderings, each with its own stream.
       for (const occurrence of occurrences) {
         spend(ctx.budget);
+        // Marked content in a stream the build removed is gone with it.
+        if ((stm instanceof PDFRef && occurrence.removed.has(stm.tag))
+          || (stmOwn instanceof PDFRef && occurrence.removed.has(stmOwn.tag))) continue;
         const mappedStm = stm instanceof PDFRef ? occurrence.objMap.get(stm.tag) : undefined;
         // The page IS in the output, so the content stream is too. Failing to
         // pair it means the correspondence was not proven — depth truncation,
@@ -692,8 +695,10 @@ function rebuildElem(
         ? occurrences
         : [...ctx.source.occurrencesByIndex.values()].flat();
       let paired = 0;
+      let removed = false;
       for (const occurrence of candidates) {
         spend(ctx.budget);
+        if (occurrence.removed.has(obj.tag)) { removed = true; continue; }
         const mapped = occurrence.objMap.get(obj.tag);
         if (!mapped) continue;
         const actual = ctx.output.context.lookup(mapped);
@@ -714,8 +719,9 @@ function rebuildElem(
       // A referenced object whose page was RETAINED must have been paired. If
       // its page went away there is nothing to reference and the item is
       // genuinely gone; if the page is here, an unpaired object is a proof
-      // failure, not a deletion.
-      if (paired === 0 && occurrences.length > 0) throw refuse();
+      // failure, not a deletion. An object the build removed from a retained
+      // page is gone like one on a removed page.
+      if (paired === 0 && !removed && occurrences.length > 0) throw refuse();
       continue;
     }
 

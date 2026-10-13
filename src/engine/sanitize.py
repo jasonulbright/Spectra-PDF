@@ -31,6 +31,7 @@ import pikepdf
 from engine.credentials import open_pdf
 from pikepdf import Name
 
+from engine.default_fonts import release_form
 from engine.docmdp import certification_of_pdf
 from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
@@ -985,8 +986,7 @@ def _remove_form_fields(pdf, mode: str) -> int:
             )
         ]
         _write_annots(page, kept)
-    if "/AcroForm" in pdf.Root:
-        del pdf.Root["/AcroForm"]
+    release_form(pdf)
     return removed
 
 

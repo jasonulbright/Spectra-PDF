@@ -13,6 +13,7 @@ import type { PdfBuffer } from '../state/types';
 import { annotationDictionaryIsAmbiguous, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import { pdfNameKey } from './pdf-text-string';
 import { nameReading, normalizeEscapedNames } from './pdf-name-normalize';
+import { stampAppearanceIsCarried } from './carried-stamp';
 
 export interface RawAnnotStyle {
   subtype: string;
@@ -57,6 +58,12 @@ export interface RawAnnotStyle {
    * appearance already carries the look; this is what lets the drawing
    * re-EDIT as the highlighter it was drawn with. */
   spectraInkStyle?: string;
+  /** The private /SpectraSignatureFont — the bundled face a typed signature
+   * is drawn in. */
+  spectraSignatureFont?: string;
+  /** A stamp whose normal appearance the commit keeps as written
+   *  (`stampAppearanceIsCarried`). */
+  appearanceCarried?: boolean;
   /** The annotation's object, spelt as pdf.js spells an annotation id (`12R`,
    *  `12R3`); absent for an annotation written directly in /Annots. */
   ref?: string;
@@ -225,6 +232,8 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             spectraLegend: text(entryOf(dict, 'SpectraLegend')),
             spectraSymbolParts: text(entryOf(dict, 'SpectraSymbolParts')),
             spectraInkStyle: text(entryOf(dict, 'SpectraInkStyle')),
+            spectraSignatureFont: text(entryOf(dict, 'SpectraSignatureFont')),
+            ...(subtype === 'Stamp' && stampAppearanceIsCarried(dict) ? { appearanceCarried: true } : {}),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

@@ -48,6 +48,7 @@ from xml.sax.saxutils import escape
 
 import pikepdf
 from engine.credentials import open_pdf, require_permission
+from engine.default_fonts import hold_standard_font
 from engine.annotations import (
     _MARKUP,
     relationship_name,
@@ -574,6 +575,8 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
         raise ValueError("the XFDF file has no <annots> section")
 
     added = 0
+    # The /DR name of the font a free text /DA written here selects.
+    text_font = None
     skipped: list[dict] = []
     relationships: dict[str, int] = {}
     dangling = 0
@@ -709,8 +712,12 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
                         a["/RD"] = pikepdf.Array([float(v) for v in el.get("fringe").split(",")])
                     except ValueError:
                         pass
-                # A minimal /DA so viewers can synthesize text (spec-required).
-                a["/DA"] = pikepdf.String("0 0 0 rg /Helv 12 Tf")
+                # A minimal /DA so viewers can synthesize text (ISO 32000-2
+                # Table 177 requires it); its font is a name of the form's
+                # default resources (12.7.4.3).
+                if text_font is None:
+                    text_font = hold_standard_font(pdf)
+                a["/DA"] = pikepdf.String(f"0 0 0 rg /{text_font} 12 Tf")
             for child in el:
                 if local(child.tag) == "contents" and child.text:
                     a["/Contents"] = pikepdf.String(child.text)

@@ -17,7 +17,7 @@
 // class's own no-degradation rule.
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { ImportedAnnotationFingerprint, PageAnnotation, TextMarkupType } from '../state/types';
-import { pdfPointToDisplay, pdfRectToDisplay } from './pdfx-build';
+import { pdfPointToDisplay, pdfRectToDisplay, pdfRectToUprightDisplay } from './pdfx-build';
 import { takeRawStyle, type RawAnnotStyle } from './annotation-raw-style';
 import {
   DEFAULT_COUNT_SYMBOL,
@@ -27,6 +27,7 @@ import {
   type CountLegendRow,
 } from './count-marks';
 import { maxOf, minOf } from './coordinate-bounds';
+import { signatureFaceById } from './signature-fonts';
 
 type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 
@@ -115,6 +116,8 @@ interface RawAnnotation {
   inkLists?: ArrayLike<number>[];
   quadPoints?: unknown; // markup only — pdf.js's parsed /QuadPoints
   hasAppearance?: boolean;
+  /** The NoRotate flag of /F. */
+  noRotate?: boolean;
   // Shapes and callouts: pdf.js's parses where they exist; the sidecar supplies the rest.
   it?: string;
   vertices?: ArrayLike<number>;
@@ -414,7 +417,23 @@ export async function importPageAnnotations(
       continue;
     }
     if (w <= 0 || h <= 0) continue; // degenerate box — nothing sensible to render/edit
-    imported.push({ id: crypto.randomUUID(), kind, x, y, w, h, color, note: contents, importedOriginal });
+    // A typed signature names its bundled face, and the commit draws it in
+    // that face again. A face this build does not hold is not taken: the
+    // commit then carries the stamp's own appearance.
+    const face = a.subtype === 'Stamp' && sidecar?.spectraSignatureFont
+      ? signatureFaceById(sidecar.spectraSignatureFont) : undefined;
+    const carried = !face && a.subtype === 'Stamp' && !!sidecar?.appearanceCarried;
+    // The commit keeps a carried stamp's flags, so a NoRotate original is
+    // placed by its upright box. Every other import is written again as an
+    // annotation that turns with the page.
+    const upright = carried && a.noRotate === true;
+    imported.push({
+      id: crypto.randomUUID(), kind, ...(upright ? pdfRectToUprightDisplay(a.rect, box, rotation) : { x, y, w, h }), color, note: contents,
+      ...(face ? { signatureFont: face.id } : {}),
+      ...(carried && a.id ? { carriedAppearance: a.id } : {}),
+      ...(upright ? { noRotate: true as const } : {}),
+      importedOriginal,
+    });
   }
   return imported;
 }

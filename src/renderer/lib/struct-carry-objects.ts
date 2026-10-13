@@ -33,6 +33,7 @@ import {
   PDFString,
 } from 'pdf-lib';
 
+import { pagePair, settleReplaced } from './catalog-carry';
 import type { CarriedSourcePages, ObjectMap } from './catalog-carry';
 
 const N = PDFName.of.bind(PDFName);
@@ -113,6 +114,9 @@ export interface PageOccurrence {
   outPageRef: PDFRef;
   outPageNode: PDFDict;
   objMap: ObjectMap;
+  /** Source tags of this page's objects the build removed from the output
+   *  without a replacement. */
+  removed: ReadonlySet<string>;
 }
 
 /** Walk a source page and its copy in step, recording which output object
@@ -212,14 +216,15 @@ export function buildOccurrences(
   // Shared across occurrences: what one source object paired with one output
   // object reaches is the same on every page that references that pair.
   const memo: ParallelMemo = new Map();
-  source.pairs.forEach(({ srcIndex, outPage }, order) => {
-    const srcPage = source.doc.getPage(srcIndex);
+  source.pairs.forEach((pair, order) => {
+    const { srcIndex, outPage } = pair;
     const map: ObjectMap = new Map();
     // A fresh `seen` per occurrence: the point is that the same source object
     // maps to a DIFFERENT output object in each copy of the page.
     const seen = new Set<string>();
     for (const key of ['Resources', 'Annots', 'Contents'] as const) {
-      mapParallel(srcPage.node.get(N(key)), outPage.node.get(N(key)), source.doc, output, map, seen, 0, budget, memo);
+      const [src, out] = pagePair(source, pair, key);
+      mapParallel(src, out, source.doc, output, map, seen, 0, budget, memo);
     }
     occurrences.push({
       srcIndex,
@@ -227,6 +232,7 @@ export function buildOccurrences(
       outPageRef: outPage.ref,
       outPageNode: outPage.node,
       objMap: map,
+      removed: settleReplaced(map, source.replaced),
     });
   });
   return occurrences;

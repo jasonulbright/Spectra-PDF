@@ -26,9 +26,29 @@ function rotatePoint(u: number, v: number, d: number): [number, number] {
   return [u, v];
 }
 
-export function rotateAnnotationRect(a: PageAnnotation, delta: number): PageAnnotation {
+/** The page's display size under its pending rotation. */
+export function displayFrame(page: { width: number; height: number; rotation: number }): { width: number; height: number } {
+  return page.rotation === 90 || page.rotation === 270
+    ? { width: page.height, height: page.width }
+    : { width: page.width, height: page.height };
+}
+
+/** Re-projects an annotation for a page turned by `delta`. `frame` is the
+ *  page's display size before the turn; a NoRotate box needs it, because its
+ *  top-left corner turns with the page and its size in points stays. */
+export function rotateAnnotationRect(
+  a: PageAnnotation,
+  delta: number,
+  frame?: { width: number; height: number },
+): PageAnnotation {
   const d = ((delta % 360) + 360) % 360;
   if (d === 0) return a;
+  if (a.noRotate && frame && frame.width > 0 && frame.height > 0) {
+    const [x, y] = rotatePoint(a.x, a.y, d);
+    if (d === 180) return { ...a, x, y };
+    const aspect = frame.width / frame.height;
+    return { ...a, x, y, w: a.w * aspect, h: a.h / aspect };
+  }
   let points: number[] | undefined;
   if (a.points) {
     points = [];
@@ -2006,7 +2026,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             ? {
                 ...p,
                 rotation: action.rotation,
-                annotations: p.annotations?.map((a) => rotateAnnotationRect(a, delta)),
+                annotations: p.annotations?.map((a) => rotateAnnotationRect(a, delta, displayFrame(p))),
               }
             : p,
         ),
@@ -2038,7 +2058,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             if (!idSet.has(p.id)) return p;
             const rotation = (((p.rotation + delta) % 360) as 0 | 90 | 180 | 270);
             // Re-project annotations by the same delta as the singular rotate.
-            return { ...p, rotation, annotations: p.annotations?.map((a) => rotateAnnotationRect(a, delta)) };
+            return { ...p, rotation, annotations: p.annotations?.map((a) => rotateAnnotationRect(a, delta, displayFrame(p))) };
           }),
         };
       });

@@ -18,6 +18,7 @@ from engine.output_intents import (
     PAGE_LEVEL_VERSION, OutputIntentCarry, read_output_intents,
 )
 from engine.pdf_version import VersionCarry
+from engine.default_fonts import bind_carried_fonts
 
 from engine.acroform import (
     carry_doc_form_extras, carry_pure_data_fields,
@@ -215,6 +216,14 @@ def copy_pages_with_forms(dst, src, pages=None):
     renamed.update({r['from']: r['to'] for r in pure})
     refresh_sig_flags(dst)
     carry_doc_form_extras(dst, src, renamed)
+    # A free text or redaction /DA names a font of its own document's default
+    # resources; the copy keeps that font, under a new name where the name is
+    # another font's in the destination.
+    carried = []
+    for page in dst.pages[start:]:
+        annots = page.obj.get('/Annots')
+        carried.extend(annots if isinstance(annots, Array) else ())
+    bind_carried_fonts(dst, src, carried)
     dst.acroform.invalidate_cache()
     first_map = struct.add(dst, src, src_pages, start, annot_occurrences)
     struct.register_sources(dst, src, first_map)

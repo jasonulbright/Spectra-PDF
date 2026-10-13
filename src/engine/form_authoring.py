@@ -44,6 +44,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import open_pdf
+from engine.default_fonts import hold_simple_font
 from pikepdf import Array, Dictionary, Name, String
 
 from engine import afemit, fieldactions
@@ -611,38 +612,25 @@ def _dr_fonts(pdf: pikepdf.Pdf):
     return fonts
 
 
-def _helv(pdf: pikepdf.Pdf):
-    fonts = _dr_fonts(pdf)
-    existing = fonts.get("/Helv")
-    if existing is not None:
-        return existing
-    font = pdf.make_indirect(
-        Dictionary(
-            Type=Name.Font,
-            Subtype=Name.Type1,
-            BaseFont=Name.Helvetica,
-            Encoding=Name.WinAnsiEncoding,
-        )
-    )
-    fonts["/Helv"] = font
-    return font
+def _helv(pdf: pikepdf.Pdf) -> str:
+    """The /DR font name of the standard Helvetica face a created field's /DA
+    selects. One name is one font (`engine.default_fonts`): a `Helv` that
+    holds another font is left as it is and the face takes `Helv_1`, ..."""
+    return hold_simple_font(pdf, _dr_fonts(pdf), "Helv", "Helvetica", "WinAnsiEncoding")
 
 
-def _zapf(pdf: pikepdf.Pdf):
-    """ZapfDingbats, the face a button's on-state mark is drawn in."""
-    fonts = _dr_fonts(pdf)
-    existing = fonts.get("/ZaDb")
-    if existing is not None:
-        return existing
-    font = pdf.make_indirect(
-        Dictionary(
-            Type=Name.Font,
-            Subtype=Name.Type1,
-            BaseFont=Name.ZapfDingbats,
-        )
-    )
-    fonts["/ZaDb"] = font
-    return font
+def _zapf(pdf: pikepdf.Pdf) -> str:
+    """The /DR font name of ZapfDingbats, the face a button's on-state mark is
+    drawn in, by the same rule as `_helv`."""
+    return hold_simple_font(pdf, _dr_fonts(pdf), "ZaDb", "ZapfDingbats")
+
+
+def _font_resource(pdf: pikepdf.Pdf, name: str) -> Dictionary:
+    """An appearance's /Font resources with the /DR font ``name`` under the
+    same name, so the /DA and the appearance select one font."""
+    fonts = Dictionary()
+    fonts["/" + name] = _dr_fonts(pdf)["/" + name]
+    return Dictionary(Font=fonts)
 
 
 def _vertical_face_metrics(font_dir: str) -> tuple[str, dict]:
@@ -773,8 +761,7 @@ def _text_ap(pdf: pikepdf.Pdf, w: float, h: float):
     """An empty text widget's appearance: chrome, and the marked content a
     viewer replaces when the field is filled."""
     body = _chrome(w, h) + "/Tx BMC\nEMC\n"
-    resources = Dictionary(Font=Dictionary(Helv=_helv(pdf)))
-    return _form_xobject(pdf, body, w, h, resources)
+    return _form_xobject(pdf, body, w, h, _font_resource(pdf, _helv(pdf)))
 
 
 def _button_ap(pdf: pikepdf.Pdf, w: float, h: float, glyph: str):
@@ -785,12 +772,12 @@ def _button_ap(pdf: pikepdf.Pdf, w: float, h: float, glyph: str):
     # baseline, so the mark centres by its own metrics rather than by the box.
     x = (w - size * 0.75) / 2
     y = (h - size * 0.72) / 2
+    name = _zapf(pdf)
     body = (
         _chrome(w, h)
-        + f"q 0 0 0 rg BT /ZaDb {size:.4f} Tf {x:.4f} {y:.4f} Td ({glyph}) Tj ET Q\n"
+        + f"q 0 0 0 rg BT /{name} {size:.4f} Tf {x:.4f} {y:.4f} Td ({glyph}) Tj ET Q\n"
     )
-    resources = Dictionary(Font=Dictionary(ZaDb=_zapf(pdf)))
-    return _form_xobject(pdf, body, w, h, resources)
+    return _form_xobject(pdf, body, w, h, _font_resource(pdf, name))
 
 
 def _off_ap(pdf: pikepdf.Pdf, w: float, h: float):
@@ -844,7 +831,7 @@ def _default_appearance(pdf: pikepdf.Pdf, spec: dict, font_dir: str) -> str:
     """
     mode, script = _writing_of(spec)
     if mode == "horizontal":
-        return DEFAULT_DA
+        return f"/{_helv(pdf)} 0 Tf 0 g"
     return f"/{_vertical_font(pdf, script, font_dir)} 0 Tf 0 g"
 
 
@@ -873,7 +860,7 @@ def _create_checkbox(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple):
     field = _widget(pdf, page, rect, caption="4")
     field["/FT"] = Name("/Btn")
     field["/T"] = String(spec["name"].strip())
-    field["/DA"] = String("/ZaDb 0 Tf 0 g")
+    field["/DA"] = String(f"/{_zapf(pdf)} 0 Tf 0 g")
     field["/V"] = Name("/Off")
     field["/AS"] = Name("/Off")
     states = Dictionary()
@@ -921,7 +908,7 @@ def _create_radio(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: list
             T=String(spec["name"].strip()),
             Ff=FF_RADIO | FF_NO_TOGGLE_TO_OFF,
             V=Name("/Off"),
-            DA=String("/ZaDb 0 Tf 0 g"),
+            DA=String(f"/{_zapf(pdf)} 0 Tf 0 g"),
             Kids=Array(),
         )
     )

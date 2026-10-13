@@ -4,6 +4,10 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
+import {
+  annotationStoredBox, annotationViewBox, bodyTurnsWithView, pendingPageRotation, resizedInView, resizesInView,
+  translatedInView, turnedFrame,
+} from '../../lib/annotation-view';
 import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
@@ -73,6 +77,7 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import { ACTION_KIND_LABEL, type ActionTrigger } from '../../lib/field-actions';
 import type { FormFieldValue, FormValuePhase } from '../../lib/forms';
 import { PageView } from './PageView';
+import { CarriedStampBody } from './CarriedStampBody';
 import { useSeparationInspector, useSeparationRaster } from '../../hooks/useSeparationPreview';
 import { isInspectClick, pointerTravel } from '../../lib/separation-preview';
 import { useFlattenerRegions } from '../../hooks/useFlattenerPreview';
@@ -130,8 +135,6 @@ import type { PageSnapGeometry } from '../../lib/snap-geometry';
 import {
   isTransformable,
   isResizable,
-  translated,
-  translatedBy,
   resized,
   recomputedMeasureNote,
   hasVertexHandles,
@@ -1477,6 +1480,18 @@ function PageCellImpl({
     viewRotation === 0 ? pts : rotateNormalizedPoints(pts, inverseView);
   const toStoredStrokes = (strokes: number[][]): number[][] =>
     viewRotation === 0 ? strokes : strokes.map((s) => rotateNormalizedPoints(s, inverseView));
+  // An existing annotation's box projects through these two: a NoRotate box
+  // keeps its corner and its size in points under the view turn, so it needs
+  // the page's display size in the stored frame.
+  const pendingRotation = pendingPageRotation(page.rotation, viewRotation);
+  const storedFrame = turnedFrame(page.width, page.height, pendingRotation);
+  const toViewBox = (a: PageAnnotation): { x: number; y: number; w: number; h: number } =>
+    annotationViewBox(a, viewRotation, storedFrame);
+  const toStoredBox = (
+    box: { x: number; y: number; w: number; h: number },
+    a: PageAnnotation,
+  ): { x: number; y: number; w: number; h: number } =>
+    annotationStoredBox(box, a.noRotate === true, viewRotation, storedFrame);
 
   // ── Snapping ──────────────────────────────────────────────────────────
   // Every gesture's client→page conversion goes through `pagePoint` below,
@@ -1633,7 +1648,7 @@ function PageCellImpl({
     const out = new Map<string, SnapPath>();
     if (!snapArmed) return out;
     for (const a of page.annotations ?? []) {
-      const b = viewRotation === 0 ? a : rotateNormalizedRect(a, viewRotation);
+      const b = annotationViewBox(a, viewRotation, turnedFrame(page.width, page.height, pendingPageRotation(page.rotation, viewRotation)));
       const subpaths: number[][] = [
         [b.x, b.y, b.x + b.w, b.y, b.x + b.w, b.y + b.h, b.x, b.y + b.h],
       ];
@@ -1654,7 +1669,7 @@ function PageCellImpl({
       out.set(a.id, { subpaths, closed });
     }
     return out;
-  }, [snapArmed, page.annotations, viewRotation]);
+  }, [snapArmed, page.annotations, page.width, page.height, page.rotation, viewRotation]);
   const snapIndex = useMemo<SnapIndex>(
     () =>
       snapArmed
@@ -1818,7 +1833,7 @@ function PageCellImpl({
   const ownSnapPoints = (members: readonly PageAnnotation[]): SnapPoint[] => {
     const out: SnapPoint[] = [];
     for (const m of members) {
-      const b = viewRotation === 0 ? m : rotateNormalizedRect(m, viewRotation);
+      const b = toViewBox(m);
       const pts =
         m.points && viewRotation !== 0
           ? rotateNormalizedPoints([...m.points], viewRotation)
@@ -1974,10 +1989,10 @@ function PageCellImpl({
       const { dx, dy } = storedDelta(ev);
       // The pressed annotation leads; its CLAMPED delta moves the group in
       // formation (members still clamp individually at the page edge).
-      const lead = translated(a, dx, dy);
+      const lead = translatedInView(a, dx, dy, viewRotation, storedFrame);
       const next = new Map<string, { x: number; y: number; w: number; h: number; points?: number[] }>();
       for (const m of group) {
-        const t = m.id === a.id ? lead : translatedBy(m, lead.dx, lead.dy);
+        const t = m.id === a.id ? lead : translatedInView(m, lead.dx, lead.dy, viewRotation, storedFrame);
         next.set(m.id, { x: t.x, y: t.y, w: m.w, h: m.h, ...(t.points ? { points: t.points } : {}) });
       }
       setManipPreview(next);
@@ -2003,10 +2018,10 @@ function PageCellImpl({
       swallowNextClick();
       if (!commit || !ev) return;
       const { dx, dy } = storedDelta(ev);
-      const lead = translated(a, dx, dy);
+      const lead = translatedInView(a, dx, dy, viewRotation, storedFrame);
       if (lead.dx === 0 && lead.dy === 0) return;
       const edits: AnnotationTransform[] = group.map((m) => {
-        const t = m.id === a.id ? lead : translatedBy(m, lead.dx, lead.dy);
+        const t = m.id === a.id ? lead : translatedInView(m, lead.dx, lead.dy, viewRotation, storedFrame);
         return {
           pageId: page.id,
           annotationId: m.id,
@@ -2052,7 +2067,7 @@ function PageCellImpl({
     if (!cell) return;
     // The annotation projected into the view frame — the frame the pointer
     // and the grabbed handle live in.
-    const viewBox = viewRotation === 0 ? { x: a.x, y: a.y, w: a.w, h: a.h } : rotateNormalizedRect(a, viewRotation);
+    const viewBox = toViewBox(a);
     const viewA: PageAnnotation = {
       ...a,
       ...viewBox,
@@ -2062,28 +2077,37 @@ function PageCellImpl({
     // locks the rest on demand.
     // A raster and a UNIT-SQUARE symbol both have a shape of their own, so
     // resizing keeps their aspect unless Shift says otherwise; a text stamp's
-    // box does not.
-    const aspectByDefault = a.kind === 'stamp' && (!!a.imageData || !!a.symbolParts);
+    // box does not. A carried appearance is a picture as well.
+    const aspectByDefault = a.kind === 'stamp' && (!!a.imageData || !!a.symbolParts || (!!a.carriedAppearance && !a.signatureFont));
     let activated = false;
     let lastStored: { x: number; y: number; w: number; h: number; points?: number[] } | null = null;
     // A resize DRAGS one handle, so the pointer IS the moving geometry —
     // `pagePoint`, not the delta entry — with this annotation excluded from
     // its own targets. Built lazily, like the move gesture's.
     let resizeIndex: SnapIndex | null = null;
+    // A handle of a box that reaches past the page edge in the view is
+    // outside the cell, so its pointer is read unclamped.
+    const ownBox = resizesInView(a, viewRotation, storedFrame);
 
     const applyAt = (ev: PointerEvent): void => {
       resizeIndex ??= snapIndexExcluding([a.id]);
       const p = pagePoint(cell, ev.clientX, ev.clientY, {
         suspend: ev.altKey,
         index: resizeIndex,
+        ...(ownBox ? { unclamped: true } : {}),
       });
       const keepAspect = aspectByDefault ? !ev.shiftKey : ev.shiftKey;
-      const r = resized(viewA, handle, p.x, p.y, keepAspect);
-      const storedBox = toStoredRect({ x: r.x, y: r.y, w: r.w, h: r.h });
-      const stored = {
-        ...storedBox,
-        ...(r.points ? { points: toStoredPoints(r.points) } : {}),
-      };
+      let stored: { x: number; y: number; w: number; h: number; points?: number[] };
+      if (ownBox) {
+        stored = resizedInView(a, handle, p.x, p.y, keepAspect, viewRotation, storedFrame);
+      } else {
+        const r = resized(viewA, handle, p.x, p.y, keepAspect);
+        const storedBox = toStoredBox({ x: r.x, y: r.y, w: r.w, h: r.h }, a);
+        stored = {
+          ...storedBox,
+          ...(r.points ? { points: toStoredPoints(r.points) } : {}),
+        };
+      }
       lastStored = stored;
       setManipPreview(new Map([[a.id, stored]]));
     };
@@ -2114,9 +2138,8 @@ function PageCellImpl({
       // here is the EFFECTIVE rotation (real + view, composed by the reading
       // view) — subtract the view part or the dims swap against the wrong
       // frame at 90/270 view turns.
-      const realRotation = (((page.rotation - viewRotation) % 360) + 360) % 360;
       const note = s.points
-        ? recomputedMeasureNote(a, s.points, page.width, page.height, realRotation)
+        ? recomputedMeasureNote(a, s.points, page.width, page.height, pendingRotation)
         : undefined;
       onTransformAnnotations(docId, [
         {
@@ -2268,7 +2291,7 @@ function PageCellImpl({
       // Intersect in the VIEW frame — the marquee's own frame.
       const hits = (page.annotations ?? [])
         .filter((x) => {
-          const b = viewRotation === 0 ? x : rotateNormalizedRect(x, viewRotation);
+          const b = toViewBox(x);
           return (
             b.x < latest.x + latest.w &&
             b.x + b.w > latest.x &&
@@ -3570,7 +3593,7 @@ function PageCellImpl({
             ? a
             : {
                 ...a,
-                ...rotateNormalizedRect(a, viewRotation),
+                ...toViewBox(a),
                 points: a.points ? rotateNormalizedPoints(a.points, viewRotation) : a.points,
                 // quads are corner pairs — rotating each (x,y) then min/max-ing
                 // per quad in the SVG below reprojects them into the view frame.
@@ -3589,9 +3612,9 @@ function PageCellImpl({
         // Text bodies (freetext/stamp + the inline editor) turn WITH the page
         // — a counter-sized wrapper rotated about its center, the PageView
         // canvas technique. Hover chrome stays screen-upright outside it.
-        const turnsWithPage =
-          viewRotation !== 0 && (a.kind === 'freetext' || a.kind === 'stamp');
-        const swapTurn = viewRotation === 90 || viewRotation === 270;
+        // A NoRotate stamp has no wrapper: its body stands upright in `da`.
+        const turnsWithPage = bodyTurnsWithView(a, viewRotation);
+        const swapTurn = turnsWithPage && (viewRotation === 90 || viewRotation === 270);
         const turnStyle: React.CSSProperties | undefined = turnsWithPage
           ? {
               position: 'absolute',
@@ -3640,6 +3663,8 @@ function PageCellImpl({
                     : a.kind === 'stamp'
                       ? a.imageData || a.symbolParts
                         ? {} // the raster / the symbol alone — no box chrome
+                        : a.carriedAppearance && !a.signatureFont
+                        ? { borderColor: a.color, color: a.color } // the fallback label's frame; the appearance hides it
                         : { backgroundColor: `${a.color}22`, borderColor: a.color, color: a.color }
                       : { borderColor: a.color, color: a.color, fontSize: freetextFontPx }),
             // In Select mode, every annotation body is clickable and movable.
@@ -4099,6 +4124,29 @@ function PageCellImpl({
                 >
                   {a.note}
                 </span>
+              ) : a.carriedAppearance ? (
+                // The commit keeps this stamp's own appearance, so the body is
+                // that appearance on the edited box. A body the wrapper above
+                // turns with the view is sized in the stored frame; a
+                // NoRotate body has no wrapper and is sized in the view frame.
+                <CarriedStampBody
+                  pdf={pdf}
+                  pageNumber={page.sourcePageIndex + 1}
+                  annotationId={a.carriedAppearance}
+                  rotation={pendingRotation}
+                  width={swapTurn ? da.h * pageHeight : da.w * displayWidth}
+                  height={swapTurn ? da.w * displayWidth : da.h * pageHeight}
+                  pixelsPerPoint={Math.sqrt((displayWidth * pageHeight) / Math.max(1, page.width * page.height))}
+                  rectangle={a.importedOriginal
+                    ? {
+                        width: Math.abs(a.importedOriginal.rect[2] - a.importedOriginal.rect[0]),
+                        height: Math.abs(a.importedOriginal.rect[3] - a.importedOriginal.rect[1]),
+                      }
+                    : null}
+                  noRotate={a.noRotate === true}
+                  color={a.color}
+                  label={a.note}
+                />
               ) : (
                 <span className="page-annot-stamp-label">{a.note}</span>
               )

@@ -4230,6 +4230,9 @@ function AppContent(): React.ReactElement {
           // asserts the group RECONSTITUTES from the file, so it has to see
           // what the mark says it belongs to.
           countGroup: a.countGroup,
+          // An imported stamp whose own appearance the commit keeps.
+          carriedAppearance: a.carriedAppearance !== undefined ? true : undefined,
+          noRotate: a.noRotate,
           countSymbol: a.countSymbol,
           countSeq: a.countSeq,
           // Which registry symbol a placed stamp / count marker

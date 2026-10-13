@@ -269,14 +269,13 @@ import {
   rotateFlipEdits,
   sizeMatchEdits,
   nudgeDelta,
-  translated,
-  translatedBy,
   isTransformable,
   type AnnotationTransform,
   type AlignMode,
   type DistributeMode,
   type SizeMatchMode,
 } from '../../lib/annotation-manipulation';
+import { translatedInView, turnedFrame, viewGroupFrame } from '../../lib/annotation-view';
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
 import { useTranslation } from 'react-i18next';
@@ -2846,29 +2845,41 @@ export function WorkspaceCanvasView({
         : new Map<string, { width: number; height: number; rotation: number }>(),
     [resolvedAnnots],
   );
+  // Left, top, width and height are those of the screen: under Rotate View
+  // the commands measure the boxes the view shows.
+  const groupFrame = useMemo(
+    () =>
+      resolvedAnnots
+        ? viewGroupFrame(
+            state.ui.viewRotationByPath[resolvedAnnots.docPath] ?? 0,
+            turnedFrame(resolvedAnnots.pageWidth, resolvedAnnots.pageHeight, resolvedAnnots.rotation),
+          )
+        : undefined,
+    [resolvedAnnots, state.ui.viewRotationByPath],
+  );
   const onAlignSelection = useCallback(
     (mode: AlignMode) => {
       if (!resolvedAnnots) return;
-      const edits = alignEdits(groupMembers, mode);
+      const edits = alignEdits(groupMembers, mode, groupFrame);
       if (edits.length > 0) onTransformAnnotations(resolvedAnnots.docId, edits);
     },
-    [resolvedAnnots, groupMembers, onTransformAnnotations],
+    [resolvedAnnots, groupMembers, groupFrame, onTransformAnnotations],
   );
   const onDistributeSelection = useCallback(
     (mode: DistributeMode) => {
       if (!resolvedAnnots) return;
-      const edits = distributeEdits(groupMembers, mode);
+      const edits = distributeEdits(groupMembers, mode, groupFrame);
       if (edits.length > 0) onTransformAnnotations(resolvedAnnots.docId, edits);
     },
-    [resolvedAnnots, groupMembers, onTransformAnnotations],
+    [resolvedAnnots, groupMembers, groupFrame, onTransformAnnotations],
   );
   const onSizeMatchSelection = useCallback(
     (mode: SizeMatchMode) => {
       if (!resolvedAnnots) return;
-      const edits = sizeMatchEdits(groupMembers, mode, groupPageDims);
+      const edits = sizeMatchEdits(groupMembers, mode, groupPageDims, groupFrame);
       if (edits.length > 0) onTransformAnnotations(resolvedAnnots.docId, edits);
     },
-    [resolvedAnnots, groupMembers, groupPageDims, onTransformAnnotations],
+    [resolvedAnnots, groupMembers, groupPageDims, groupFrame, onTransformAnnotations],
   );
   const onReorderSelection = useCallback(
     (direction: 'front' | 'back' | 'forward' | 'backward') => {
@@ -3049,9 +3060,10 @@ export function WorkspaceCanvasView({
         const inv = (360 - vr) % 360;
         const [sdx, sdy] =
           inv === 90 ? [-dy, dx] : inv === 180 ? [-dx, -dy] : inv === 270 ? [dy, -dx] : [dx, dy];
-        const lead = translated(movable[0], sdx, sdy);
+        const frame = turnedFrame(resolvedAnnots.pageWidth, resolvedAnnots.pageHeight, resolvedAnnots.rotation);
+        const lead = translatedInView(movable[0], sdx, sdy, vr, frame);
         const edits: AnnotationTransform[] = movable.map((m) => {
-          const t2 = m.id === movable[0].id ? lead : translatedBy(m, lead.dx, lead.dy);
+          const t2 = m.id === movable[0].id ? lead : translatedInView(m, lead.dx, lead.dy, vr, frame);
           return {
             pageId: resolvedAnnots.pageId,
             annotationId: m.id,
