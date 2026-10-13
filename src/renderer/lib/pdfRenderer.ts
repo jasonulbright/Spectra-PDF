@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PdfBuffer } from '../state/types';
+import { renderPageUprightOnce } from './upright-stamps';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -64,6 +65,6 @@ export async function renderPageToCanvas(
   canvas.width = Math.floor(viewport.width);
   canvas.height = Math.floor(viewport.height);
   const ctx = canvas.getContext('2d')!;
-  await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+  await renderPageUprightOnce(doc, page, { canvas, canvasContext: ctx, viewport });
   return canvas;
 }

@@ -18,6 +18,8 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { ImportedAnnotationFingerprint, PageAnnotation, TextMarkupType } from '../state/types';
 import { pdfPointToDisplay, pdfRectToDisplay, pdfRectToUprightDisplay } from './pdfx-build';
+import { uprightStampsAmong } from './upright-record';
+import type { UprightStamp } from './upright-record';
 import { takeRawStyle, type RawAnnotStyle } from './annotation-raw-style';
 import {
   DEFAULT_COUNT_SYMBOL,
@@ -215,8 +217,10 @@ export async function importPageAnnotations(
   page: PDFPageProxy,
   rawStyles?: RawAnnotStyle[],
   untouchedSlots?: number[],
+  uprightStamps?: UprightStamp[],
 ): Promise<PageAnnotation[]> {
   const raw = (await page.getAnnotations()) as unknown as RawAnnotation[];
+  uprightStamps?.push(...uprightStampsAmong(raw));
   const [vx0, vy0, vx1, vy1] = page.view;
   const box = { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 };
   const rotation = page.rotate;
@@ -723,15 +727,17 @@ function importCallout(
 /** A page's imported annotations and the positions in its /Annots the import
  *  leaves untouched, as the workspace index records them. An ambiguous
  *  annotation written directly in /Annots is among them although nothing
- *  pairs it with pdf.js's reading. */
+ *  pairs it with pdf.js's reading. `uprightStamps` are the stamps of the page
+ *  a render draws upright, with the ids of the document `page` belongs to. */
 export async function importPage(
   page: PDFPageProxy,
   rawStyles?: RawAnnotStyle[],
-): Promise<{ annotations: PageAnnotation[]; untouchedSlots: number[] }> {
+): Promise<{ annotations: PageAnnotation[]; untouchedSlots: number[]; uprightStamps: UprightStamp[] }> {
   const untouchedSlots: number[] = [];
-  const annotations = await importPageAnnotations(page, rawStyles, untouchedSlots);
+  const uprightStamps: UprightStamp[] = [];
+  const annotations = await importPageAnnotations(page, rawStyles, untouchedSlots, uprightStamps);
   for (const style of rawStyles ?? []) {
     if (style.ambiguous && style.slot !== undefined && !untouchedSlots.includes(style.slot)) untouchedSlots.push(style.slot);
   }
-  return { annotations, untouchedSlots };
+  return { annotations, untouchedSlots, uprightStamps };
 }

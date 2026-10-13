@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { logRenderError, scheduleReblit } from '../canvas/raster';
+import { keepsPaintedRaster, useUprightRecord, useUprightTurn } from '../canvas/useUprightTurn';
+import type { RasterSource } from '../canvas/useUprightTurn';
+import { renderPageUpright, uprightDrawn as uprightCount } from '../../lib/upright-stamps';
+import type { PageRenderTask } from '../../lib/upright-stamps';
 import { confirmPageEditNow, getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { computeReorderTarget } from '../../lib/page-reorder';
@@ -77,6 +81,16 @@ function Thumbnail({
   // First paint lands immediately; a buffer-swap re-render (version bump)
   // batches through the shared anti-ripple scheduler.
   const hasPaintedRef = useRef(false);
+  // The raster is turned by CSS. One that holds an upright stamp is drawn for
+  // one turn and renders again for another.
+  const { epoch: uprightEpoch, shown: shownTurn, drawn: uprightDrawn } = useUprightTurn(rotation);
+  // The raster renders again when the upright stamps known for the page
+  // differ from those its last render had.
+  const { epoch: recordEpoch, began: recordBegan } = useUprightRecord(proxy, pageNumber);
+  // The painted bitmap stays visible while the same page renders again (a
+  // turn, a record) and is replaced in one step. Another page or document
+  // hides it at once.
+  const paintedSource = useRef<RasterSource | null>(null);
 
   // Display footprint (rotation-aware) — the raster below is NOT: it renders at
   // a fixed budget from the natural dims, and CSS rotates + sizes it. So a
@@ -91,11 +105,13 @@ function Thumbnail({
   useEffect(() => {
     if (!proxy) return;
     let cancelled = false;
-    let task: RenderTask | null = null;
-    setReady(false);
+    let task: PageRenderTask | null = null;
+    const source: RasterSource = { document: proxy, pageNumber };
+    if (!keepsPaintedRaster(paintedSource.current, source)) setReady(false);
     (async () => {
       const page = await proxy.getPage(pageNumber);
       if (cancelled) return;
+      const turn = shownTurn.current;
       // Scale from the natural (rotation-correct) dims — NOT page.view, the raw
       // MediaBox, which doesn't reflect an intrinsic /Rotate (regression:
       // wrong density on scanned/faxed pages). Render offscreen, then blit.
@@ -104,8 +120,9 @@ function Thumbnail({
       const off = document.createElement('canvas');
       off.width = Math.max(1, Math.floor(viewport.width));
       off.height = Math.max(1, Math.floor(viewport.height));
-      task = page.render({ canvas: off, canvasContext: off.getContext('2d')!, viewport });
-      await task.promise;
+      task = renderPageUpright(proxy, page, { canvas: off, canvasContext: off.getContext('2d')!, viewport }, turn);
+      recordBegan(task);
+      const stamps = uprightCount(await task.promise);
       if (cancelled) return;
       const paint = (): void => {
         if (cancelled) return;
@@ -114,7 +131,9 @@ function Thumbnail({
         canvas.width = off.width;
         canvas.height = off.height;
         canvas.getContext('2d')!.drawImage(off, 0, 0);
+        paintedSource.current = source;
         setReady(true);
+        uprightDrawn(stamps, turn);
       };
       if (hasPaintedRef.current) {
         scheduleReblit(paint);
@@ -132,7 +151,7 @@ function Thumbnail({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proxy, pageNumber, version]);
+  }, [proxy, pageNumber, version, uprightEpoch, recordEpoch]);
 
   return (
     <div

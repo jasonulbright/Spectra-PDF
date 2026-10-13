@@ -14,6 +14,7 @@ import {
   setReactInputValue,
   getPageAnnotations,
   commitPendingEdits,
+  removeAnnotation,
   saveActiveAs,
   closeAllFiles,
   scrollIntoReach,
@@ -29,10 +30,10 @@ import type { PageAnnotationSnapshot } from '../support/harness.js';
 // Two more suites each open a file of their own, built here, whose one stamp
 // keeps its appearance through a commit. The first moves an image stamp: the
 // canvas shows its image at the new place before the commit, and the commit
-// keeps the image. The second moves a NoRotate stamp on a rotated page: it
+// keeps the image. The second holds a NoRotate stamp on a rotated page: it
 // stands upright from the upper-left corner of its rectangle (ISO 32000-2
-// 12.5.3), under Rotate View as well, and the commit keeps its size and its
-// flag.
+// 12.5.3) in the page raster before any edit, in its body after a move and
+// under Rotate View, and the commit keeps its size and its flag.
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const APP_EXE = APP_BINARY;
@@ -326,6 +327,84 @@ async function dragStamp(
   return { from, dx: toX - centre.x, dy: toY - centre.y };
 }
 
+/** One RGBA sample of the page raster for each point, given as fractions of
+ * the annotation's box on the screen (a point outside 0..1 is beside the
+ * box). Reads the detail raster where it is shown over the point and the base
+ * raster otherwise. Null until the base raster is painted. */
+async function rasterAtBody(annotationId: string, points: number[][]): Promise<number[][] | null> {
+  return (await browser.execute(function (id: string, fractions: number[][]) {
+    const el = Array.from(document.querySelectorAll('[data-annot-id]')).find(
+      (e) => e.getAttribute('data-annot-id') === id,
+    );
+    const cell = el ? el.closest('[data-page-id]') : null;
+    if (!el || !cell) return null;
+    const base = cell.querySelector('canvas.pageview-base.ready') as HTMLCanvasElement | null;
+    const detail = cell.querySelector('canvas.pageview-detail') as HTMLCanvasElement | null;
+    if (!base) return null;
+    const box = el.getBoundingClientRect();
+    const sample = function (canvas: HTMLCanvasElement, x: number, y: number): number[] | null {
+      const r = canvas.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0 || x < r.left || x >= r.right || y < r.top || y >= r.bottom) return null;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      const px = Math.min(canvas.width - 1, Math.floor(((x - r.left) / r.width) * canvas.width));
+      const py = Math.min(canvas.height - 1, Math.floor(((y - r.top) / r.height) * canvas.height));
+      return Array.from(context.getImageData(px, py, 1, 1).data);
+    };
+    return fractions.map(function (point) {
+      const x = box.left + point[0] * box.width;
+      const y = box.top + point[1] * box.height;
+      const sharp = detail && detail.style.display !== 'none' ? sample(detail, x, y) : null;
+      return sharp || sample(base, x, y) || [];
+    });
+  }, annotationId, points)) as number[][] | null;
+}
+
+interface PaintedUpright {
+  /** Stamps the render behind the painted base raster took as upright; null
+   * until the base raster has painted. */
+  base: number | null;
+  /** The same for the detail raster; null while it is not shown. */
+  detail: number | null;
+}
+
+/** What the rasters of the first page cell of the document view were
+ * rendered with. Null while the cell is not there. */
+async function paintedUpright(): Promise<PaintedUpright | null> {
+  return (await browser.execute(function () {
+    const cells = (window as any).__SPECTRA_TEST__.getPaintedUpright() as { base: number | null; detail: number | null }[];
+    return cells.length > 0 ? { base: cells[0].base, detail: cells[0].detail } : null;
+  })) as PaintedUpright | null;
+}
+
+/** One RGBA sample of the page raster of the first page cell for each point,
+ * given as fractions of the shown page. Reads the detail raster where it is
+ * shown over the point and the base raster otherwise. Null until the base
+ * raster is painted. */
+async function rasterAtPage(points: number[][]): Promise<number[][] | null> {
+  return (await browser.execute(function (fractions: number[][]) {
+    const base = document.querySelector('[data-page-id] canvas.pageview-base.ready') as HTMLCanvasElement | null;
+    if (!base) return null;
+    const detail = base.closest('[data-page-id]')!.querySelector('canvas.pageview-detail') as HTMLCanvasElement | null;
+    const page = base.getBoundingClientRect();
+    const sample = function (canvas: HTMLCanvasElement, x: number, y: number): number[] | null {
+      const r = canvas.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0 || x < r.left || x >= r.right || y < r.top || y >= r.bottom) return null;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      const px = Math.min(canvas.width - 1, Math.floor(((x - r.left) / r.width) * canvas.width));
+      const py = Math.min(canvas.height - 1, Math.floor(((y - r.top) / r.height) * canvas.height));
+      return Array.from(context.getImageData(px, py, 1, 1).data);
+    };
+    return fractions.map(function (point) {
+      const x = page.left + point[0] * page.width;
+      const y = page.top + point[1] * page.height;
+      const sharp = detail && detail.style.display !== 'none' ? sample(detail, x, y) : null;
+      return sharp || sample(base, x, y) || [];
+    });
+  }, points)) as number[][] | null;
+}
+
 function expectColour(sample: number[], rgb: number[]): void {
   expect(sample[3]).toBe(255);
   for (let channel = 0; channel < 3; channel++) {
@@ -446,6 +525,40 @@ describe('a read-back NoRotate stamp on a rotated page', () => {
 
   after(leaveStampFile);
 
+  it('is drawn upright at its box before any edit, and not on its rectangle as the page turns it', async () => {
+    const before = (await firstPageStamp())!;
+    expect(before.stamp.noRotate).toBe(true);
+    await browser.waitUntil(async () => (await bodyOf(before.stamp.id)) !== null, {
+      timeout: 15_000,
+      timeoutMsg: 'the read-back NoRotate stamp has no body on the canvas',
+    });
+    await scrollIntoReach(`[data-annot-id="${before.stamp.id}"]`);
+    // The page raster draws the unedited stamp; the overlay draws nothing.
+    const untouched = (await bodyOf(before.stamp.id))!;
+    expect({ label: untouched.label, preview: untouched.preview }).toEqual({ label: false, preview: null });
+    // Four points of the box, then the centre of the rectangle as /Rotate 90
+    // turns it: 80 by 200 points, left of the box and below its top. The box
+    // is 200 by 80 points from (380, 60) on the shown page.
+    const points = [[0.25, 0.25], [0.25, 0.75], [0.75, 0.25], [0.75, 0.75], [-0.2, 1.25]];
+    const near = (sample: number[] | undefined, rgb: number[]): boolean =>
+      !!sample && sample.length === 4 && sample[3] === 255 && rgb.every((value, channel) => Math.abs(sample[channel] - value) <= 6);
+    await browser.waitUntil(
+      async () => {
+        const samples = await rasterAtBody(before.stamp.id, points);
+        return !!samples && near(samples[0], RED) && near(samples[1], RED) && near(samples[2], BLUE) && near(samples[3], BLUE);
+      },
+      { timeout: 20_000, timeoutMsg: 'the page raster never showed the NoRotate stamp upright at its box' },
+    );
+    const shown = (await rasterAtBody(before.stamp.id, points))!;
+    expectColour(shown[0], RED);
+    expectColour(shown[1], RED);
+    expectColour(shown[2], BLUE);
+    expectColour(shown[3], BLUE);
+    expectColour(shown[4], [255, 255, 255]);
+    // Still unedited: the overlay holds no bitmap, so the stamp is drawn once.
+    expect((await bodyOf(before.stamp.id))!.preview).toBeNull();
+  });
+
   it('stands upright from the upper-left corner of its rectangle, moves upright, and keeps its size and flag in the file', async () => {
     // The upper-left corner of /Rect is (60, 380). Under /Rotate 90 it shows
     // at x = 380 / 600 and y = 60 / 400, and the box keeps 200 by 80 points.
@@ -526,6 +639,37 @@ describe('a read-back NoRotate stamp on a rotated page', () => {
     });
 
     await commitPendingEdits();
+    // After the commit the page raster draws the stamp: upright at the new box,
+    // and nothing of it at the box it had before the move. The points of the
+    // old box are given as fractions of the new one; those inside the new box
+    // are left out.
+    const committed = (await firstPageStamp())!.stamp;
+    expect(committed.noRotate).toBe(true);
+    await browser.waitUntil(async () => (await bodyOf(committed.id)) !== null, {
+      timeout: 15_000,
+      timeoutMsg: 'the committed NoRotate stamp has no body on the canvas',
+    });
+    await scrollIntoReach(`[data-annot-id="${committed.id}"]`);
+    const oldPoints = [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9], [0.5, 0.5]]
+      .map(([u, v]) => [
+        (before.stamp.x + u * before.stamp.w - committed.x) / committed.w,
+        (before.stamp.y + v * before.stamp.h - committed.y) / committed.h,
+      ])
+      .filter(([u, v]) => u < -0.05 || u > 1.05 || v < -0.05 || v > 1.05);
+    expect(oldPoints.length).toBeGreaterThanOrEqual(2);
+    const rasterPoints = [...samples, ...oldPoints];
+    const close = (sample: number[] | undefined, rgb: number[]): boolean =>
+      !!sample && sample.length === 4 && sample[3] === 255 && rgb.every((value, channel) => Math.abs(sample[channel] - value) <= 6);
+    await browser.waitUntil(
+      async () => {
+        const raster = await rasterAtBody(committed.id, rasterPoints);
+        return !!raster && close(raster[0], RED) && close(raster[1], RED) && close(raster[2], BLUE) && close(raster[3], BLUE)
+          && raster.slice(samples.length).every((sample) => close(sample, [255, 255, 255]));
+      },
+      { timeout: 20_000, timeoutMsg: 'after the commit the page raster did not show the stamp upright at its new box and nothing at its old box' },
+    );
+    // The page raster draws it once: the overlay holds no bitmap.
+    expect((await bodyOf(committed.id))!.preview).toBeNull();
     const dest = resolve(scratch, 'no-rotate-stamp-moved.pdf');
     await saveActiveAs(dest);
     const { rotate, stamps } = await savedStamps(dest);
@@ -539,5 +683,147 @@ describe('a read-back NoRotate stamp on a rotated page', () => {
     expect(Math.abs(rect[3] - moved.stamp.x * PAGE.height)).toBeLessThanOrEqual(1);
     expect(Math.abs(rect[2] - rect[0] - (RECT[2] - RECT[0]))).toBeLessThanOrEqual(0.5);
     expect(Math.abs(rect[3] - rect[1] - (RECT[3] - RECT[1]))).toBeLessThanOrEqual(0.5);
+  });
+});
+
+describe('a read-back NoRotate stamp of a layer that is off', () => {
+  // The page is 400 by 600 with /Rotate 90. The stamp is optional content of
+  // a group the default configuration turns off, so no render shows it.
+  const PAGE = { width: 400, height: 600 };
+  const RECT = [60, 300, 260, 380];
+  const NO_ROTATE_PRINT = 20;
+  const WHITE = [255, 255, 255];
+  let scratch = '';
+
+  before(async () => {
+    scratch = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-stamp-norotate-layer-'));
+    const doc = await PDFDocument.create();
+    const group = doc.context.register(doc.context.obj({ Type: 'OCG', Name: PDFString.of('Hidden stamps') }));
+    doc.catalog.set(PDFName.of('OCProperties'), doc.context.obj({
+      OCGs: [group],
+      D: { BaseState: 'ON', OFF: [group], Order: [group] },
+    }));
+    const page = doc.addPage([PAGE.width, PAGE.height]);
+    page.node.set(PDFName.of('Rotate'), doc.context.obj(90));
+    const appearance = doc.context.register(doc.context.stream('1 0 0 rg 0 0 50 40 re f 0 0 1 rg 50 0 50 40 re f', {
+      Type: 'XObject', Subtype: 'Form', FormType: 1, BBox: [0, 0, 100, 40], Resources: {},
+    }));
+    const stamp = doc.context.obj({
+      Type: 'Annot', Subtype: 'Stamp', Rect: RECT, F: NO_ROTATE_PRINT, AP: { N: appearance }, OC: group,
+    });
+    stamp.set(PDFName.of('Contents'), PDFString.of('Hidden'));
+    page.node.set(PDFName.of('Annots'), doc.context.obj([doc.context.register(stamp)]));
+    const path = resolve(scratch, 'no-rotate-stamp-hidden-layer.pdf');
+    writeFileSync(path, await doc.save());
+    await openStampFile(path);
+  });
+
+  after(leaveStampFile);
+
+  it('is drawn nowhere: not upright at its box and not on its turned rectangle', async () => {
+    const read = (await firstPageStamp())!;
+    expect(read.stamp.noRotate).toBe(true);
+    await browser.waitUntil(async () => (await bodyOf(read.stamp.id)) !== null, {
+      timeout: 15_000,
+      timeoutMsg: 'the read-back NoRotate stamp has no body on the canvas',
+    });
+    await scrollIntoReach(`[data-annot-id="${read.stamp.id}"]`);
+    // Four points of the upright box, then the centre of the rectangle as
+    // /Rotate 90 turns it.
+    const points = [[0.25, 0.25], [0.25, 0.75], [0.75, 0.25], [0.75, 0.75], [-0.2, 1.25]];
+    const white = (sample: number[] | undefined): boolean =>
+      !!sample && sample.length === 4 && sample[3] === 255 && WHITE.every((value, channel) => Math.abs(sample[channel] - value) <= 6);
+    // The rasters that are sampled come from a render that took the stamp as
+    // upright: the record of the page was there, and the upright render ran.
+    // A raster of a render before the record counts no stamp.
+    await browser.waitUntil(
+      async () => {
+        const painted = await paintedUpright();
+        if (!painted || painted.base !== 1 || (painted.detail !== null && painted.detail !== 1)) return false;
+        const samples = await rasterAtBody(read.stamp.id, points);
+        return !!samples && samples.every(white);
+      },
+      { timeout: 20_000, timeoutMsg: 'the upright render of the page never ran, or it shows a NoRotate stamp of a layer that is off' },
+    );
+    const painted = (await paintedUpright())!;
+    expect(painted.base).toBe(1);
+    const shown = (await rasterAtBody(read.stamp.id, points))!;
+    for (const sample of shown) expectColour(sample, WHITE);
+    expect((await bodyOf(read.stamp.id))!.preview).toBeNull();
+  });
+});
+
+describe('a read-back NoRotate stamp that is deleted', () => {
+  // The page is 400 by 600 with /Rotate 90: it shows 600 wide and 400 high.
+  const PAGE = { width: 400, height: 600 };
+  const RECT = [60, 300, 260, 380];
+  const NO_ROTATE_PRINT = 20;
+  const RED = [255, 0, 0];
+  const BLUE = [0, 0, 255];
+  const WHITE = [255, 255, 255];
+  let scratch = '';
+
+  before(async () => {
+    scratch = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-stamp-norotate-deleted-'));
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([PAGE.width, PAGE.height]);
+    page.node.set(PDFName.of('Rotate'), doc.context.obj(90));
+    const appearance = doc.context.register(doc.context.stream('1 0 0 rg 0 0 50 40 re f 0 0 1 rg 50 0 50 40 re f', {
+      Type: 'XObject', Subtype: 'Form', FormType: 1, BBox: [0, 0, 100, 40], Resources: {},
+    }));
+    const stamp = doc.context.obj({ Type: 'Annot', Subtype: 'Stamp', Rect: RECT, F: NO_ROTATE_PRINT, AP: { N: appearance } });
+    stamp.set(PDFName.of('Contents'), PDFString.of('Upright'));
+    page.node.set(PDFName.of('Annots'), doc.context.obj([doc.context.register(stamp)]));
+    const path = resolve(scratch, 'no-rotate-stamp-deleted.pdf');
+    writeFileSync(path, await doc.save());
+    await openStampFile(path);
+  });
+
+  after(leaveStampFile);
+
+  it('leaves the page raster after the commit: the first paint of the new bytes shows no stamp at its box', async () => {
+    const read = (await firstPageStamp())!;
+    expect(read.stamp.noRotate).toBe(true);
+    await browser.waitUntil(async () => (await bodyOf(read.stamp.id)) !== null, {
+      timeout: 15_000,
+      timeoutMsg: 'the read-back NoRotate stamp has no body on the canvas',
+    });
+    await scrollIntoReach(`[data-annot-id="${read.stamp.id}"]`);
+    // Four points of the upright box, as fractions of the shown page.
+    const points = [[0.25, 0.25], [0.25, 0.75], [0.75, 0.25], [0.75, 0.75]]
+      .map(([u, v]) => [read.stamp.x + u * read.stamp.w, read.stamp.y + v * read.stamp.h]);
+    const near = (sample: number[] | undefined, rgb: number[]): boolean =>
+      !!sample && sample.length === 4 && sample[3] === 255 && rgb.every((value, channel) => Math.abs(sample[channel] - value) <= 6);
+    await browser.waitUntil(
+      async () => {
+        const samples = await rasterAtPage(points);
+        return !!samples && near(samples[0], RED) && near(samples[1], RED) && near(samples[2], BLUE) && near(samples[3], BLUE);
+      },
+      { timeout: 20_000, timeoutMsg: 'the page raster never showed the NoRotate stamp upright at its box' },
+    );
+    expect((await paintedUpright())!.base).toBe(1);
+
+    await removeAnnotation(read.docId, read.pageId, read.stamp.id);
+    await commitPendingEdits();
+    // The rasters of the committed bytes come from a render that took no
+    // stamp as upright, and hold nothing at the box. The pixels of the bytes
+    // before the commit hold the stamp there, so they fail both tests.
+    await browser.waitUntil(
+      async () => {
+        const painted = await paintedUpright();
+        if (!painted || painted.base !== 0 || (painted.detail !== null && painted.detail !== 0)) return false;
+        const samples = await rasterAtPage(points);
+        return !!samples && samples.every((sample) => near(sample, WHITE));
+      },
+      { timeout: 20_000, timeoutMsg: 'after the commit the page raster still shows the deleted NoRotate stamp, or never painted the new bytes' },
+    );
+    const shown = (await rasterAtPage(points))!;
+    for (const sample of shown) expectColour(sample, WHITE);
+    const dest = resolve(scratch, 'no-rotate-stamp-deleted-saved.pdf');
+    await saveActiveAs(dest);
+    const saved = await PDFDocument.load(readFileSync(dest));
+    const annots = saved.getPage(0).node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+    const subtypes = (annots ? annots.asArray() : []).map((entry) => saved.context.lookup(entry, PDFDict).get(PDFName.of('Subtype')));
+    expect(subtypes.filter((subtype) => subtype === PDFName.of('Stamp'))).toEqual([]);
   });
 });

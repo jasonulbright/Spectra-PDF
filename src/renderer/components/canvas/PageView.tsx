@@ -1,6 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PageRenderTask } from '../../lib/upright-stamps';
 import { BASE_RASTER, dpr, logRenderError, renderBase, renderDetail, renderSeparation } from './raster';
+import { useUprightRecord, useUprightTurn } from './useUprightTurn';
 
 interface PageViewProps {
   pdf: PDFDocumentProxy | null; // null until the file's proxy resolves
@@ -49,6 +51,13 @@ function PageViewImpl({
   // the ready flip). Once true, later renders are buffer-swap re-blits and
   // route through the shared batcher (see raster.ts).
   const hasPaintedRef = useRef(false);
+  // The base raster is rendered once and turned by CSS. A raster that holds
+  // an upright stamp is drawn for one turn and renders again for another.
+  const { epoch: uprightEpoch, shown: shownTurn, drawn: uprightDrawn } = useUprightTurn(rotation);
+  // Each raster renders again when the upright stamps known for the page
+  // differ from those its last render had.
+  const { epoch: baseRecordEpoch, began: baseBegan } = useUprightRecord(pdf, pageNumber);
+  const { epoch: detailRecordEpoch, began: detailBegan } = useUprightRecord(pdf, pageNumber);
 
   useEffect(() => {
     if (eager) return;
@@ -70,7 +79,7 @@ function PageViewImpl({
   useEffect(() => {
     if (!near || !pdf) return;
     let cancelled = false;
-    let task: RenderTask | null = null;
+    let task: PageRenderTask | null = null;
     void renderBase({
       pdf,
       pageNumber,
@@ -78,18 +87,23 @@ function PageViewImpl({
       naturalHeight,
       baseRef,
       isCancelled: () => cancelled,
-      onTask: (t) => (task = t),
+      onTask: (t) => {
+        task = t;
+        baseBegan(t);
+      },
       onReady: () => {
         hasPaintedRef.current = true;
         setBaseReady(true);
       },
       reblit: hasPaintedRef.current,
+      turn: shownTurn.current,
+      onUpright: uprightDrawn,
     }).catch(logRenderError(`Failed to render page ${pageNumber}`));
     return () => {
       cancelled = true;
       task?.cancel();
     };
-  }, [near, pdf, pageNumber, naturalWidth, naturalHeight]);
+  }, [near, pdf, pageNumber, naturalWidth, naturalHeight, uprightEpoch, shownTurn, uprightDrawn, baseRecordEpoch, baseBegan]);
 
   useEffect(() => {
     if (!separation) {
@@ -151,7 +165,7 @@ function PageViewImpl({
     }
 
     let cancelled = false;
-    let task: RenderTask | null = null;
+    let task: PageRenderTask | null = null;
     void renderDetail({
       pdf,
       pageNumber,
@@ -159,14 +173,17 @@ function PageViewImpl({
       geometry: { rect, layoutW, visLeft, visTop, visW, visH },
       detailCanvas,
       isCancelled: () => cancelled,
-      onTask: (t) => (task = t),
+      onTask: (t) => {
+        task = t;
+        detailBegan(t);
+      },
       rotationExtra: rotation,
     }).catch(logRenderError(`Failed to render detail for page ${pageNumber}`));
     return () => {
       cancelled = true;
       task?.cancel();
     };
-  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight, separation]);
+  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight, separation, detailRecordEpoch, detailBegan]);
 
   const swapped = rotation === 90 || rotation === 270;
   const baseStyle: React.CSSProperties | undefined =
