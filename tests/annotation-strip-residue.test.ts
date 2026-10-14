@@ -3,7 +3,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRe
 import type { PDFContext, PDFObject, PDFPage } from 'pdf-lib';
 import { commit, deleting } from './support/commit-cycle';
 import { annotsOf, brief, expectSound, held, qpdfReading, shown, subtypeOf } from './support/saved-pdf';
-import type { PageRef } from '../src/renderer/state/types';
+import type { PageAnnotation, PageRef } from '../src/renderer/state/types';
 
 const N = PDFName.of;
 const QUAD = [100, 520, 200, 520, 100, 500, 200, 500];
@@ -55,7 +55,9 @@ describe('a deleted annotation leaves nothing in the saved file', () => {
       ...page, annotations: page.annotations!.map((a) => ({ ...a, note: 'NEWTEXT' })),
     }]);
     expect(brief(await shown(once))).toEqual(['Popup:NEWTEXT', 'Text:NEWTEXT']);
-    await expectSound(once, ['SECRETNOTE', 'SECRETAPPEARANCE', 'SECRETRICH']);
+    await expectSound(once, ['SECRETNOTE', 'SECRETRICH']);
+    // The appearance of a note draws its icon, not its text, and stays.
+    expect(await held(once, ['SECRETAPPEARANCE'])).toEqual(['SECRETAPPEARANCE']);
     const linked = async (bytes: Uint8Array) => {
       const doc = await PDFDocument.load(bytes);
       const annots = annotsOf(doc);
@@ -67,7 +69,7 @@ describe('a deleted annotation leaves nothing in the saved file', () => {
     const twice = await commit(once);
     expect(brief(await shown(twice))).toEqual(['Popup:NEWTEXT', 'Text:NEWTEXT']);
     expect(await linked(twice)).toEqual({ popupParent: true, notePopup: true, count: 2 });
-    await expectSound(twice, ['SECRETNOTE', 'SECRETAPPEARANCE', 'SECRETRICH']);
+    await expectSound(twice, ['SECRETNOTE', 'SECRETRICH']);
   });
 
   it('an appearance stream a surviving annotation shares stays, and the deleted one\'s own parts go', async () => {
@@ -208,6 +210,17 @@ describe('a structure element that references a replaced or deleted annotation',
     const twice = await commit(once);
     expect(await objectReferences(twice)).toEqual(expected);
     await expectSound(twice, []);
+  });
+
+  it.each<[string, (a: PageAnnotation) => PageAnnotation]>([
+    ['drawn again in another colour', (a) => ({ ...a, color: '#00ff00' })],
+    ['given another comment', (a) => ({ ...a, note: 'TAGGEDCHANGE' })],
+  ])('references the annotation written for an edited one: %s', async (_label, change) => {
+    const source = await taggedAnnotations();
+    const once = await commit(source, ([page]) => [{ ...page, annotations: page.annotations!.map(change) }]);
+    expect(await objectReferences(once)).toEqual(['/Annot -> /Highlight listed=true parent=true', '/Link -> /Link listed=true parent=true']);
+    await expectSound(once, []);
+    expect(await objectReferences(await commit(once))).toEqual(['/Annot -> /Highlight listed=true parent=true', '/Link -> /Link listed=true parent=true']);
   });
 
   it('loses the element of a deleted annotation and keeps the link\'s', async () => {

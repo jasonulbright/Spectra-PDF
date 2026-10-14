@@ -1,6 +1,6 @@
 {
   "name": "spectrapdf",
-  "version": "2026.1011.155",
+  "version": "2026.1014.156",
   "description": "Open-source PDF workbench for Windows",
   "scripts": {
     "dev": "cargo tauri dev --config src-tauri/tauri.dev.conf.json",

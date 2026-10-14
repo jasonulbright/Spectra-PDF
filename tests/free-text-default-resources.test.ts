@@ -171,13 +171,23 @@ describe('a free text annotation of the input', () => {
     expect((await formOf(withBox))!.fonts).toEqual({ '/Cour': '/Courier', '/Helv': '/Helvetica' });
   }, PYTHON_RUNS);
 
-  it('that the commit writes again as a text box names the font this builder writes, which resolves', async () => {
+  it('that names a font no document holds stays as written when it is not edited', async () => {
     const source = await foreignFreeText('Ghost', false, true);
     expect(qpdfReading(source).default_fonts).toEqual(['free text /DA: /Font /Ghost']);
     const once = await commit(source, placing(HIGHLIGHT));
+    await expectSound(once, [], undefined, source);
+    expect(await freeTextAppearances(once)).toEqual(await freeTextAppearances(source));
+  });
+
+  it('that the commit draws again names the font its appearance draws the text in, which resolves', async () => {
+    const source = await foreignFreeText('Ghost', false, true);
+    const once = await commit(source, ([page, ...rest]) => [
+      { ...page, annotations: page.annotations!.map((a) => (a.kind === 'freetext' ? { ...a, note: 'Changed' } : a)) }, ...rest,
+    ]);
     await expectSound(once);
-    expect((await freeTextAppearances(once))[0]).toMatch(/ \/Helv [\d.]+ Tf$/);
-    expect((await formOf(once))!.fonts).toEqual({ '/Helv': '/Helvetica' });
+    // The original's appearance drew the text in /F0, a Courier; /Ghost named no font.
+    expect((await freeTextAppearances(once))[0]).toBe('0 g /F0 10 Tf');
+    expect((await formOf(once))!.fonts).toEqual({ '/F0': '/Courier' });
   });
 
   it('whose font no default resource holds is carried as written, and the oracle names the input as the cause', async () => {

@@ -8,12 +8,16 @@
 // pdf.js-only import: the shape kinds then stay UNIMPORTED rather than
 // imported blind — faithful-or-untouched.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNull, PDFNumber, PDFRef, PDFString } from 'pdf-lib';
-import type { PDFContext } from 'pdf-lib';
+import type { PDFContext, PDFObject } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
 import { annotationDictionaryIsAmbiguous, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
 import { pdfNameKey } from './pdf-text-string';
 import { nameReading, normalizeEscapedNames } from './pdf-name-normalize';
 import { stampAppearanceIsCarried } from './carried-stamp';
+import { appearanceDrawsContents } from './imported-carry';
+import type { FontProgram, OpenFontProgram } from './annotation-font';
+import { textRedrawRecord } from './free-text-redraw';
+import type { TextRedrawRecord } from './free-text-redraw';
 
 export interface RawAnnotStyle {
   subtype: string;
@@ -64,6 +68,10 @@ export interface RawAnnotStyle {
   /** A stamp whose normal appearance the commit keeps as written
    *  (`stampAppearanceIsCarried`). */
   appearanceCarried?: boolean;
+  /** The appearance draws /Contents (`appearanceDrawsContents`). */
+  drawsContents?: boolean;
+  /** A free text: how the commit can draw its text again. */
+  textRedraw?: TextRedrawRecord;
   /** The annotation's object, spelt as pdf.js spells an annotation id (`12R`,
    *  `12R3`); absent for an annotation written directly in /Annots. */
   ref?: string;
@@ -163,6 +171,14 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
   const text = encrypted ? (v: unknown) => (v instanceof PDFName ? v.decodeText() : undefined) : textOf;
   const pages = doc.getPages();
   const out: RawAnnotStyle[][] = [];
+  const form = doc.catalog.lookup(PDFName.of('AcroForm'));
+  const resources = form instanceof PDFDict ? form.lookup(PDFName.of('DR')) : undefined;
+  const defaultFonts = resources instanceof PDFDict ? resources.lookup(PDFName.of('Font')) : undefined;
+  const sourceFont = (name: string): PDFObject | undefined =>
+    (defaultFonts instanceof PDFDict ? defaultFonts.get(PDFName.of(name)) : undefined);
+  // An embedded TrueType program is parsed only for a font that gives its
+  // characters no other way.
+  let open: OpenFontProgram | undefined;
   for (const page of pages) {
     const styles: RawAnnotStyle[] = [];
     try {
@@ -211,6 +227,16 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
           }
           const rd = numArray(typedEntry(dict, 'RD', isArray));
           const measure = rawEntry(dict, 'Measure');
+          let textRedraw: TextRedrawRecord | undefined;
+          if (subtype === 'FreeText' && !encrypted) {
+            const contents = textOf(entryOf(dict, 'Contents')) ?? '';
+            textRedraw = textRedrawRecord(doc.context, dict, contents, sourceFont, open);
+            if (textRedraw.refusal === 'font' && !open) {
+              const { default: fontkit } = await import('@pdf-lib/fontkit');
+              open = (program) => fontkit.create(program) as unknown as FontProgram;
+              textRedraw = textRedrawRecord(doc.context, dict, contents, sourceFont, open);
+            }
+          }
           styles.push({
             subtype,
             rect: rect as [number, number, number, number],
@@ -234,6 +260,8 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             spectraInkStyle: text(entryOf(dict, 'SpectraInkStyle')),
             spectraSignatureFont: text(entryOf(dict, 'SpectraSignatureFont')),
             ...(subtype === 'Stamp' && stampAppearanceIsCarried(dict) ? { appearanceCarried: true } : {}),
+            ...(appearanceDrawsContents(dict) ? { drawsContents: true } : {}),
+            ...(textRedraw ? { textRedraw } : {}),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

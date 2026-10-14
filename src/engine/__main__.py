@@ -220,6 +220,7 @@ from engine.create_pdf import create_pdf
 from engine.create_pdf_folders import create_pdf_folders, list_source_folders
 from engine.system_fonts import list_system_fonts
 from engine.text_authoring import add_text_box, measure_text_box
+from engine.text_box import text_box_appearance
 from engine.text_paragraphs import (
     list_text_paragraphs,
     merge_paragraph_with_previous,
@@ -478,6 +479,7 @@ def main() -> None:
     server.register("list_system_fonts", list_system_fonts)
     server.register("add_text_box", add_text_box)
     server.register("measure_text_box", measure_text_box)
+    server.register("text_box_appearance", text_box_appearance)
     server.register("print", print_pdf)
     server.register("print_preview", print_preview)
     server.register("print_preview_cleanup", print_preview_cleanup)

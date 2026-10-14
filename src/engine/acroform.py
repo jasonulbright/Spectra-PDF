@@ -9,10 +9,11 @@ flags the copy hazard (PageCopyWarning) and, since 10.x, ships the fix:
 ``Pdf.add_pages_from``. Its per-page field-copy maps, however, fork a field
 whose widgets span pages. merge/split/Combine subsets use
 ``page_copy.copy_pages_with_forms`` instead: one qpdf transform_annotations
-batch per source, then add_and_rename_fields. This retains upstream /DR
-collision handling, /DA rewriting, inherited defaults and /NeedAppearances,
-while retaining one field identity across all selected pages. This module
-covers the remaining document-level behavior:
+batch per source, then add_and_rename_fields. This retains upstream
+inherited defaults and /NeedAppearances, while retaining one field identity
+across all selected pages. The /DR /Font names and the /DA strings that
+select them are written by ``default_fonts.bind_carried_fonts`` alone. This
+module covers the remaining document-level behavior:
 
 - ``prune_form_to_pages`` — prune field trees to kept pages, in place. Used
   by split BEFORE the copy (add_pages_from carries a partially-selected
@@ -279,7 +280,7 @@ def prune_form_to_pages(pdf: pikepdf.Pdf, kept_indices) -> None:
     _reconcile_co_in_place(pdf)
 
 
-def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
+def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf, copies: list | None = None) -> list[dict]:
     """Copy ``src``'s widget-less pure-data fields into ``dst``'s /AcroForm.
 
     ``add_pages_from`` discovers fields through page widgets, so a field with
@@ -288,6 +289,10 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
     resolve lazily; the caller keeps sources open through the save). Name
     collisions with fields already in ``dst`` rename with the same ``+N``
     convention add_pages_from uses. Returns [{"from", "to"}, ...] renames.
+
+    A copied root with no /DA takes the source form's default /DA as its own
+    entry: the default it inherited does not travel with the form dictionary.
+    ``copies`` receives each copied root.
     """
     fields = _fields_of(src)
     if fields is None:
@@ -314,6 +319,9 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
         if t is not None:
             taken.add(token_text(t))
 
+    default_da = src.Root.AcroForm.get("/DA")
+    if not isinstance(default_da, pikepdf.String) or acro.get("/DA") == default_da:
+        default_da = None
     renamed: list[dict] = []
     for f in pure:
         handle = f if f.is_indirect else src.make_indirect(f)  # copy_foreign needs indirect
@@ -331,7 +339,11 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
                 taken.add(new_name)
             else:
                 taken.add(name)
+        if default_da is not None and "/DA" not in copied:
+            copied["/DA"] = pikepdf.String(bytes(default_da))
         dst_fields.append(copied)
+        if copies is not None:
+            copies.append(copied)
     return renamed
 
 

@@ -4,16 +4,21 @@
 // which holds another font under its name keeps its own font under a new
 // name; fonts that are interchangeable, or one object, share the name.
 
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
 import type { PDFObject } from 'pdf-lib';
 import type { ExportAnnotation, ExportPage } from '../src/renderer/lib/pdfx-format';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
-import { interchangeableFontKey, rewriteDaFonts } from '../src/renderer/lib/annotation-default-resources';
+import { FontComparison, interchangeableFontKey, rewriteDaFonts, sameSubsetFont } from '../src/renderer/lib/annotation-default-resources';
 import { docCarriesLiveSignature } from '../src/renderer/lib/signature-presence';
 import { sourceHasXfa } from '../src/renderer/lib/acroform-carry';
 import { commit, deleting } from './support/commit-cycle';
 import { expectSound, loadPdf } from './support/saved-pdf';
+import { testPython } from './support/python';
 
 const N = PDFName.of;
 const PYTHON_RUNS = 30_000;
@@ -220,6 +225,59 @@ describe('a merge of documents that hold different fonts under one name', () => 
   });
 });
 
+describe('four documents that hold four fonts under one name, in every order', () => {
+  const FACES: Record<string, Face> = {
+    a: TIMES, b: COURIER, c: { embedded: 'ABCDEF+Sans' }, d: { base: 'Symbol' },
+  };
+  const FIELD: Record<string, string | undefined> = { a: undefined, b: 'Helv', c: undefined, d: 'Helv' };
+  const TEXTS: Record<string, Annotation[]> = { a: [FREE_TEXT], b: [FREE_TEXT], c: [FREE_TEXT, { subtype: 'Redact', da: '0 g /Helv 10 Tf' }], d: [] };
+  const baseOf = (face: Face): string => ('embedded' in face ? `${face.embedded}*` : face.base);
+  const orders = (tags: string[]): string[][] => tags.length <= 1 ? [tags]
+    : tags.flatMap((tag, i) => orders([...tags.slice(0, i), ...tags.slice(i + 1)]).map((rest) => [tag, ...rest]));
+
+  /** Each page's /DA strings select the font of the page's own document. */
+  function expectOwnFonts(order: string[], { fonts, appearances }: Reading, label: string): void {
+    expect(Object.values(fonts).sort(), label).toEqual(Object.values(FACES).map(baseOf).sort());
+    order.forEach((tag, page) => {
+      expect(appearances[page].length, label).toBe(TEXTS[tag].length + (FIELD[tag] ? 1 : 0));
+      for (const text of appearances[page]) {
+        const name = /\/(\S+) 10 Tf/.exec(text)![1];
+        expect(fonts[name], `${label} page ${page + 1} ${text}`).toBe(baseOf(FACES[tag]));
+      }
+    });
+  }
+
+  it('keeps every default appearance on its own font, in the build and in the engine merge', async () => {
+    const sources: Record<string, Uint8Array> = {};
+    for (const tag of Object.keys(FACES)) {
+      sources[tag] = await fixture({ fonts: { Helv: FACES[tag] }, annotations: TEXTS[tag], field: FIELD[tag] });
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'spectra-font-names-'));
+    try {
+      for (const [tag, bytes] of Object.entries(sources)) writeFileSync(join(dir, `${tag}.pdf`), bytes);
+      const all = orders(Object.keys(FACES));
+      expect(all.length).toBe(24);
+      execFileSync(testPython(), ['-B', '-c', [
+        'import os, sys',
+        'from engine.merge import merge',
+        'folder = sys.argv[1]',
+        'for order in sys.argv[2:]:',
+        '    merge([os.path.join(folder, tag + ".pdf") for tag in order], os.path.join(folder, "engine-" + order + ".pdf"))',
+      ].join('\n'), dir, ...all.map((order) => order.join(''))], { env: { ...process.env, PYTHONPATH: join(__dirname, '..', 'src') }, windowsHide: true });
+      for (const order of all) {
+        const label = order.join('');
+        const built = await buildPdf(order.flatMap((tag) => pagesOf(sources[tag], tag)), sources[order[0]], order[0]);
+        expectOwnFonts(order, await reading(built), `build ${label}`);
+        expectOwnFonts(order, await reading(new Uint8Array(readFileSync(join(dir, `engine-${label}.pdf`)))), `engine ${label}`);
+      }
+      const sample = await buildPdf(['d', 'c', 'b', 'a'].flatMap((tag) => pagesOf(sources[tag], tag)), sources.d, 'd');
+      await expectSound(sample);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 240_000);
+});
+
 describe('a page moved into another document', () => {
   it('keeps its font under a new name, and a further commit of the result changes nothing', async () => {
     const owner = await fixture({ fonts: { Helv: TIMES }, annotations: [FREE_TEXT], pages: 2 });
@@ -328,5 +386,71 @@ describe('a form dictionary that only holds the font of a text box', () => {
     // The text box deleted: the form dictionary goes with its last use.
     const again = await commit(once, ([page, ...rest]) => [deleting(page, () => true), ...rest]);
     expect((await PDFDocument.load(again, { updateMetadata: false })).catalog.has(N('AcroForm'))).toBe(false);
+  });
+});
+
+describe('a font name whose bytes are not UTF-8', () => {
+  // `/F#E9` as pdf-lib decodes it: the letter and the byte E9.
+  const NAME = `F${String.fromCharCode(0xe9)}`;
+  const TOKENS: [string, string][] = [['its escape', 'F#E9'], ['its byte', NAME]];
+
+  it('is one name whether a default appearance writes the escape or the byte', () => {
+    expect(rewriteDaFonts(`/F#E9 10 Tf /${NAME} 8 Tf /F#E9x 9 Tf /F#e9 7 Tf`, new Map([[NAME, `${NAME}_1`]])))
+      .toBe('/F#E9_1 10 Tf /F#E9_1 8 Tf /F#E9x 9 Tf /F#e9 7 Tf');
+    // A string with no renamed name is returned as written, whatever its tokens.
+    for (const written of ['/F#E9 10 Tf', `/${NAME} 10 Tf`, '/F# 10 Tf /#ZZ 1 Tf /# 2 Tf', '/ 1 Tf //']) {
+      expect(rewriteDaFonts(written, new Map([['Helv', 'Helv_1']]))).toBe(written);
+    }
+  });
+
+  it.each(TOKENS)('stays as written through a build that carries it, written as %s', async (_label, token) => {
+    const source = await fixture({ fonts: { 'F#E9': TIMES }, annotations: [{ subtype: 'FreeText', da: `0 g /${token} 10 Tf` }], field: token });
+    const built = await buildPdf(pagesOf(source, 'first'), source, 'first');
+    await expectSound(built);
+    const { fonts, appearances } = await reading(built);
+    expect(fonts).toEqual({ [NAME]: 'Times-Roman' });
+    expect(appearances[0]).toEqual([`0 g /${token} 10 Tf`, `/${token} 10 Tf 0 g`]);
+  }, PYTHON_RUNS);
+
+  it.each(TOKENS)('takes the next name of its family in a merge, written as %s', async (_label, token) => {
+    const annotations: Annotation[] = [{ subtype: 'FreeText', da: `0 g /${token} 10 Tf` }];
+    const first = await fixture({ fonts: { 'F#E9': TIMES }, annotations, field: token });
+    const second = await fixture({ fonts: { 'F#E9': COURIER }, annotations, field: token });
+    const merged = await buildPdf([...pagesOf(first, 'first'), ...pagesOf(second, 'second')], first, 'first');
+    await expectSound(merged);
+    const { fonts, appearances } = await reading(merged);
+    expect(Object.keys(fonts).sort()).toEqual([NAME, `${NAME}_1`]);
+    expect(Object.values(fonts).sort()).toEqual(['Courier', 'Times-Roman']);
+    // The font that keeps the name keeps its strings as written; the other
+    // takes the new name, written as pdf-lib writes that name.
+    const written = (base: string): string => (fonts[NAME] === base ? token : 'F#E9_1');
+    expect(appearances[0]).toEqual([`0 g /${written('Times-Roman')} 10 Tf`, `/${written('Times-Roman')} 10 Tf 0 g`]);
+    expect(appearances[1]).toEqual([`0 g /${written('Courier')} 10 Tf`, `/${written('Courier')} 10 Tf 0 g`]);
+  }, PYTHON_RUNS);
+});
+
+describe('the comparison of subset fonts in one build', () => {
+  it('reads each font stream once and answers each pair once', async () => {
+    const doc = await PDFDocument.create();
+    const context = doc.context;
+    const font = (program: number[]): PDFRef => {
+      const descriptor = context.register(context.obj({
+        Type: 'FontDescriptor', FontName: 'ABCDEF+Face', FontFile2: context.register(context.stream(Uint8Array.from(program))),
+      }));
+      const descendant = context.register(context.obj({ Type: 'Font', Subtype: 'CIDFontType2', BaseFont: 'ABCDEF+Face', FontDescriptor: descriptor }));
+      return context.register(context.obj({ Type: 'Font', Subtype: 'Type0', BaseFont: 'ABCDEF+Face', DescendantFonts: [descendant] }));
+    };
+    const [one, same, other] = [font([1, 2, 3]), font([1, 2, 3]), font([1, 2, 4])];
+    const memo = new FontComparison();
+    for (let round = 0; round < 6; round++) {
+      expect(sameSubsetFont(context, one, same, memo)).toBe(true);
+      expect(sameSubsetFont(context, same, one, memo)).toBe(true);
+      expect(sameSubsetFont(context, one, other, memo)).toBe(false);
+      expect(sameSubsetFont(context, other, same, memo)).toBe(false);
+    }
+    expect(memo.decodes).toBe(3);
+    // With no memo given the answers are the same.
+    expect(sameSubsetFont(context, one, same)).toBe(true);
+    expect(sameSubsetFont(context, one, other)).toBe(false);
   });
 });

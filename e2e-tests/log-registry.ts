@@ -46,4 +46,18 @@ export const KNOWN_LOG_ROWS: readonly KnownLogRow[] = [
     reason:
       'A negative-path case registers a schedule whose name carries path separators. The refusal is thrown inside browser.execute, so the driver reports the product message as a javascript error; the spec asserts that a refusal happened and passes.',
   },
+  {
+    id: 'exit-session-app-closed',
+    match: /WebDriverError: invalid session id: session deleted as the browser has closed the connection/i,
+    spec: '149-exit-session.spec.ts',
+    reason:
+      'Two cases deliberately exit the last app window and verify the saved session record before browser.reloadSession starts the next process. The WebDriver session is necessarily invalidated when the app closes.',
+  },
+  {
+    id: 'exit-session-command-in-flight',
+    match: /WebDriverError: invalid session id when running "execute\/sync" with method "POST"/i,
+    spec: '149-exit-session.spec.ts',
+    reason:
+      'A file-exit case closes the app while a synchronous WebDriver command is in flight. The test then reads the saved session record directly and reloads a fresh app session.',
+  },
 ];

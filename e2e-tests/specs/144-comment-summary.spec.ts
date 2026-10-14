@@ -270,6 +270,7 @@ describe('comment summary', () => {
   async function showComments(): Promise<void> {
     await focusTab({ doc: docPath });
     await setView('operations');
+    expect((await getState()).activeFile?.path).toBe(docPath);
     await setActiveOp('comments');
     await $('[data-testid="comments-summary"]').waitForDisplayed({ timeout: 20_000 });
   }
@@ -609,6 +610,7 @@ describe('comment summary', () => {
     this.timeout(180_000);
     await focusTab({ doc: docPath });
     await setView('canvas');
+    expect((await getState()).activeFile?.path).toBe(docPath);
     const drawn = await addAnnotation({
       kind: 'highlight',
       x: 0.3,

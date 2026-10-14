@@ -149,6 +149,27 @@ export const REFUSAL_STRINGS = {
   // ── Workspace / file handlers ────────────────────────────────────────
   'refusal.commit.sourceClosed':
     'Cannot commit: source file is no longer open ({{path}})',
+  // The engine did not draw the text of an annotation for a commit.
+  'refusal.commit.textEngineMissing':
+    'The text of an annotation could not be drawn. The engine gave no drawing for it.',
+  // A batch edit that some of its annotations refused. {{number}} is how
+  // many stay as they were, {{first}} the refusal of the first of them.
+  'refusal.edit.batchNotChanged': 'Annotations not changed: {{number}}. The first: {{first}}',
+  // `refusal.edit.textBox*`: an edit of an annotation whose text the commit
+  // cannot draw. {{page}} is the page number, {{kind}} the name of the
+  // annotation kind, {{words}} the first words of its text.
+  // textBoxFaces: the fonts folder of the installation lacks a font file
+  // the text needs.
+  'refusal.edit.textBoxFaces':
+    'Page {{page}}, {{kind}} \u201c{{words}}\u201d: a font file that draws this text is missing from this installation. Install the application again. The change was not made.',
+  'refusal.edit.textBoxFont':
+    'Page {{page}}, {{kind}} \u201c{{words}}\u201d: the font of this text cannot be read. You can move it or replace its text. The change was not made.',
+  'refusal.edit.textBoxLong':
+    'Page {{page}}, {{kind}} \u201c{{words}}\u201d: this text is too long to draw. The change was not made.',
+  'refusal.edit.textBoxScript':
+    'Page {{page}}, {{kind}} \u201c{{words}}\u201d: no font of this editor draws these characters: {{characters}}. The change was not made.',
+  'refusal.edit.textBoxStyled':
+    'Page {{page}}, {{kind}} \u201c{{words}}\u201d: this text has more than one style. You can move it or replace its text. The change was not made.',
   'refusal.file.noLongerOpen': 'The file is no longer open.',
   'refusal.file.noActiveDocument': 'No active document.',
   'refusal.file.noActiveToSign': 'No active file to sign.',

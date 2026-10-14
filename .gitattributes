@@ -84,3 +84,5 @@ src/engine/** -text
 
 src-tauri/linux/** text eol=lf
 keys/*.asc text eol=lf
+scripts/libreoffice-notices.tsv text eol=lf
+scripts/voikko.tsv text eol=lf

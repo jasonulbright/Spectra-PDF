@@ -10,6 +10,8 @@ import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tool
 import { countContents, countMarksOf, groupOf, nextSequence } from '../lib/count-marks';
 import { documentPermissions, placeTabAt } from './selectors';
 import { capabilityBlock, pageExportBlock, type Capability, type CapabilityBlock } from '../lib/document-permissions';
+import { textBoxEditRefusal, type TextBoxRefusal } from '../lib/text-box-edit';
+import { withUniformScale } from '../lib/imported-edit';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -37,6 +39,18 @@ export function displayFrame(page: { width: number; height: number; rotation: nu
  *  page's display size before the turn; a NoRotate box needs it, because its
  *  top-left corner turns with the page and its size in points stays. */
 export function rotateAnnotationRect(
+  a: PageAnnotation,
+  delta: number,
+  frame?: { width: number; height: number },
+): PageAnnotation {
+  const turned = rotateAnnotationGeometry(a, delta, frame);
+  if (turned === a || !a.importedState) return turned;
+  // The recorded import state stays in the frame of the annotation.
+  const { id: _id, ...state } = rotateAnnotationGeometry({ ...a.importedState, id: a.id }, delta, frame);
+  return { ...turned, importedState: state };
+}
+
+function rotateAnnotationGeometry(
   a: PageAnnotation,
   delta: number,
   frame?: { width: number; height: number },
@@ -261,8 +275,73 @@ function mapDocument(
 
 // An edit the page tier cannot take: nothing changes, and one more notice is
 // owed.
-function refuseEdit(state: AppState, reason: CapabilityBlock | null = null): AppState {
+function refuseEdit(state: AppState, reason: AppState['pageEditRefusalReason'] = null): AppState {
   return { ...state, pageEditRefusals: state.pageEditRefusals + 1, pageEditRefusalReason: reason };
+}
+
+/** The members of a batch edit whose text the commit could not draw with
+ *  the edit applied: they stay as they are. */
+interface BatchRefusals {
+  first: TextBoxRefusal | null;
+  count: number;
+}
+
+/** `next` when the commit can draw it, else `a` unchanged and one more
+ *  refusal. `page` is the 1-based page number a notice names. */
+function admitMember(a: PageAnnotation, next: PageAnnotation, page: number, refusals: BatchRefusals): PageAnnotation {
+  const refusal = textBoxEditRefusal(next, page);
+  if (!refusal) return next;
+  refusals.first ??= refusal;
+  refusals.count += 1;
+  return a;
+}
+
+/** The state after a batch edit some members refused: the edit of the other
+ *  members stands as one undo step, and one notice is owed. The notice of an
+ *  edit of one annotation is the refusal itself. */
+function withBatchRefusals(state: AppState, applied: AppState, refusals: BatchRefusals, members: number): AppState {
+  if (!refusals.first) return applied;
+  return {
+    ...applied,
+    pageEditRefusals: state.pageEditRefusals + 1,
+    pageEditRefusalReason: { textBox: refusals.first, ...(members > 1 ? { notChanged: refusals.count } : {}) },
+  };
+}
+
+/** The annotations of `documents` that an edit made or changed, each with
+ *  its 1-based page number: the annotation objects `before` does not hold. */
+export function* annotationsMadeBy(
+  before: OpenDocument[], documents: OpenDocument[],
+): Generator<{ annotation: PageAnnotation; page: number }> {
+  const known = new Set<PageAnnotation[]>();
+  const held = new Set<PageAnnotation>();
+  for (const doc of before) {
+    for (const page of doc.pages) {
+      if (!page.annotations) continue;
+      known.add(page.annotations);
+      for (const annotation of page.annotations) held.add(annotation);
+    }
+  }
+  for (const doc of documents) {
+    for (let index = 0; index < doc.pages.length; index++) {
+      const annotations = doc.pages[index].annotations;
+      if (!annotations || known.has(annotations)) continue;
+      for (const annotation of annotations) {
+        if (!held.has(annotation)) yield { annotation, page: index + 1 };
+      }
+    }
+  }
+}
+
+/** The first annotation of `documents` that an edit made or changed and
+ *  whose text the commit cannot draw (`lib/text-box-edit.ts`). An annotation
+ *  object `before` already holds was admitted when it was made. */
+function undrawableText(before: OpenDocument[], documents: OpenDocument[]): TextBoxRefusal | null {
+  for (const made of annotationsMadeBy(before, documents)) {
+    const refusal = textBoxEditRefusal(made.annotation, made.page);
+    if (refusal) return refusal;
+  }
+  return null;
 }
 
 function bumpFileEditRevisions(files: Map<string, OpenFile>, paths: readonly string[]): Map<string, OpenFile> {
@@ -401,6 +480,8 @@ function applyPageEdit(
   action: PageEditAction,
 ): AppState {
   if (documents === state.workspace.documents) return state;
+  const undrawable = undrawableText(state.workspace.documents, documents);
+  if (undrawable) return refuseEdit(state, { textBox: undrawable });
   const pageDirtyPaths = [
     ...state.pageDirtyPaths,
     ...touchedPaths.filter((p) => !state.pageDirtyPaths.includes(p)),
@@ -1761,7 +1842,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           const annotations = p.annotations.map((a) => {
             const e = edits.find((x) => x.annotationId === a.id);
             if (!e || a.kind === 'textmarkup') return a;
-            const next = {
+            const asked: PageAnnotation = {
               ...a,
               x: e.x,
               y: e.y,
@@ -1778,6 +1859,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               // (see the field's comment in types.ts).
               ...(a.importedOriginal ? { geometryDiverged: true } : {}),
             };
+            // A box whose original appearance the commit keeps takes one
+            // scale factor, from any gesture, key or size field.
+            const next = withUniformScale(a, asked);
             if (
               next.x === a.x &&
               next.y === a.y &&
@@ -1862,9 +1946,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const { strokeWidth, fillColor, opacity, lineEndings, cloudIntensity } = action.style;
       let changed = false;
       let touchesBaked = false;
+      const refusals: BatchRefusals = { first: null, count: 0 };
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
-        pages: d.pages.map((p) =>
+        pages: d.pages.map((p, pageIndex) =>
           p.id === action.pageId
             ? {
                 ...p,
@@ -1892,6 +1977,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                       : {}),
                     ...(endable && lineEndings !== undefined ? { lineEndings } : {}),
                     ...(cloudy && cloudIntensity !== undefined ? { cloudIntensity } : {}),
+                    // A restyled import is drawn by the overlay: the raster
+                    // still shows the look the file holds.
+                    ...(a.importedOriginal ? { geometryDiverged: true } : {}),
                   };
                   if (
                     next.strokeWidth === a.strokeWidth &&
@@ -1901,17 +1989,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                     next.cloudIntensity === a.cloudIntensity
                   )
                     return a;
-                  if (a.baked) touchesBaked = true;
-                  changed = true;
-                  return next;
+                  if (a.baked) {
+                    touchesBaked = true;
+                    return next;
+                  }
+                  const admitted = admitMember(a, next, pageIndex + 1, refusals);
+                  if (admitted !== a) changed = true;
+                  return admitted;
                 }),
               }
             : p,
         ),
       }));
       if (touchesBaked) return refuseEdit(state);
-      if (!changed) return state;
-      return applyPageEdit(state, documents, [doc.path], action);
+      if (!changed) return withBatchRefusals(state, state, refusals, chosen.size);
+      return withBatchRefusals(state, applyPageEdit(state, documents, [doc.path], action), refusals, chosen.size);
     }
     case 'RECALIBRATE_ANNOTATION': {
       // One measurement's recorded scale is overridden — the /Measure
@@ -1958,25 +2050,30 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const chosen = new Set(action.annotationIds);
       let changed = false;
       let touchesBaked = false;
+      const refusals: BatchRefusals = { first: null, count: 0 };
       const documents = mapDocument(state.workspace.documents, action.docId, (d) => ({
         ...d,
-        pages: d.pages.map((p) =>
+        pages: d.pages.map((p, pageIndex) =>
           p.id === action.pageId
             ? {
                 ...p,
                 annotations: p.annotations!.map((a) => {
                   if (!chosen.has(a.id) || a.color === action.color) return a;
-                  if (a.baked) touchesBaked = true;
-                  changed = true;
-                  return { ...a, color: action.color };
+                  if (a.baked) {
+                    touchesBaked = true;
+                    return a;
+                  }
+                  const admitted = admitMember(a, { ...a, color: action.color }, pageIndex + 1, refusals);
+                  if (admitted !== a) changed = true;
+                  return admitted;
                 }),
               }
             : p,
         ),
       }));
       if (touchesBaked) return refuseEdit(state);
-      if (!changed) return state;
-      return applyPageEdit(state, documents, [doc.path], action);
+      if (!changed) return withBatchRefusals(state, state, refusals, chosen.size);
+      return withBatchRefusals(state, applyPageEdit(state, documents, [doc.path], action), refusals, chosen.size);
     }
     case 'REMOVE_ANNOTATIONS': {
       // Batch remove = one undo step. Same fingerprint-tombstone rule as the

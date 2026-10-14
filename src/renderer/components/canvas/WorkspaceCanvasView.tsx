@@ -24,6 +24,8 @@ import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_D
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { primeSystemFonts } from '../../lib/system-fonts';
+import { provideTextBoxEngine } from '../../lib/text-box-layout';
+import { learnBundledFaces, provideFaceReader, textBoxEngine } from '../../lib/text-box-engine';
 import { insetsFromBand, pageRectFromBand, publishDrawnCrop, roundInsets } from '../../lib/crop-draw';
 import { publishDrawnBead } from '../../lib/article-beads';
 import {
@@ -1208,6 +1210,18 @@ export function WorkspaceCanvasView({
   // pickers deep in the page tree.
   useEffect(() => {
     primeSystemFonts(engineCall);
+  }, [engineCall]);
+  // The lines of a pending text box come from the engine that will draw it.
+  useEffect(() => {
+    provideTextBoxEngine(textBoxEngine((method, params) => engineCall(method, params), app.getEditFontPath));
+    // The edit gate refuses a text whose face file the fonts folder lacks:
+    // the folder is read once per session, before the first edit.
+    provideFaceReader((method, params) => engineCall(method, params), app.getEditFontPath);
+    void learnBundledFaces();
+    return () => {
+      provideTextBoxEngine(undefined);
+      provideFaceReader(undefined);
+    };
   }, [engineCall]);
   // Follow-on: fetch the focused document's page labels. Declared HERE
   // rather than beside `pageLabels` because the engine handle is only in

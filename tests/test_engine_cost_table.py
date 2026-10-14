@@ -292,6 +292,8 @@ COST = {
     "list_system_fonts": "K",
     "add_text_box": "P1+WF",
     "measure_text_box": "K",
+    # The text of the blocks it is given, and the bundled faces: no document.
+    "text_box_appearance": "K",
     "print": "EXT",
     "print_preview": "EXT",
     "print_preview_cleanup": "LF",

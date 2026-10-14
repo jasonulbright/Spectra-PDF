@@ -1,0 +1,136 @@
+{
+ "samples": [
+  {
+   "text": "Plain text \u2013 5 \u20ac",
+   "read": "exact"
+  },
+  {
+   "text": "Za\u017c\u00f3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d\u6587 \u65e5\u672c\u8a9e \ud55c\uad6d\uc5b4",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d a b\u00a0c",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d a-b\u00adc\u2011d",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d x\u2012y\u2013z",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d a\u2003b\u3000c",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d x\u2026y\u22efz",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d e\u0301 \u00a0x",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d e\u0301 a-b\u00adc\u2011d",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d e\u0301 x\u2012y\u2013z",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d e\u0301 a\u2003b\u3000c",
+   "read": "exact"
+  },
+  {
+   "text": "\u4e2d e\u0301 x\u2026y\u22efz",
+   "read": "exact"
+  },
+  {
+   "text": "\u00e9 e\u0301 \u4e2d",
+   "read": "exact"
+  },
+  {
+   "text": "\u00e9e\u0301\u4e2d",
+   "read": "exact"
+  },
+  {
+   "text": "\uac00 \u1100\u1161 \u4e2d",
+   "read": "exact"
+  },
+  {
+   "text": "fi \ufb01 \u4e2d",
+   "read": "exact"
+  },
+  {
+   "text": "\ud55c \u1112\u1161\u11ab",
+   "read": "exact"
+  },
+  {
+   "text": "a\u3000b",
+   "read": "exact"
+  },
+  {
+   "text": "x\u00adz \u017c",
+   "read": "exact"
+  },
+  {
+   "text": "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd",
+   "read": "characters"
+  },
+  {
+   "text": "\u05e9\u05dc\u05d5\u05dd\u00ad\u05e2\u05d5\u05dc\u05dd",
+   "read": "characters"
+  },
+  {
+   "text": "\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645",
+   "read": "characters"
+  },
+  {
+   "text": "\u0633\u200c\u0644\u0627\u0645 abc",
+   "read": "characters"
+  },
+  {
+   "text": "abc \u05e9\u05dc\u05d5\u05dd \u4e2d\u6587 \u0645\u0631\u062d\u0628\u0627",
+   "read": "characters"
+  },
+  {
+   "text": "\u0644\u0627 \u0644\u064e\u0627 \u0645\u064e \u0645\u0652",
+   "read": "characters"
+  },
+  {
+   "text": "a\u0301\u0302 \u017c",
+   "read": "characters"
+  },
+  {
+   "text": "\u0928\u092e\u0938\u094d\u0924\u0947",
+   "read": "refused"
+  },
+  {
+   "text": "\u4e2d \u0e01",
+   "read": "refused"
+  },
+  {
+   "text": "abc \ud83d\ude00",
+   "read": "refused"
+  },
+  {
+   "text": "\u1820\u1821 x",
+   "read": "refused"
+  },
+  {
+   "text": "a\u2028b \u017c",
+   "read": "refused"
+  },
+  {
+   "text": "\u017c \udb80\udc00",
+   "read": "refused"
+  }
+ ]
+}

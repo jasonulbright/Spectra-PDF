@@ -14,6 +14,7 @@ import {
   invokeAppCommand,
   getCanvasDocs,
   dropFilesOntoDoc,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 // Create PDF, through the REAL dialog and the REAL engine.
@@ -209,7 +210,10 @@ describe('Create PDF from any file', () => {
     );
     // The dialog closes when the open settles, after the document is already
     // active; a command issued before that close is undone by it.
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 20_000 });
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
+      reverse: true,
+      timeout: 20_000,
+    });
   });
 
   it('normalises every page onto a chosen size without stretching', async function () {
@@ -233,7 +237,7 @@ describe('Create PDF from any file', () => {
     expect(pdf.text).toContain(TOKEN);
 
     await $('[data-testid="create-pdf-close"]').click();
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
       reverse: true,
       timeout: 10_000,
     });
@@ -256,7 +260,7 @@ describe('Create PDF from any file', () => {
     expect(existsSync(outPath)).toBe(false);
 
     await $('[data-testid="create-pdf-close"]').click();
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
       reverse: true,
       timeout: 10_000,
     });
@@ -306,7 +310,7 @@ describe('Create PDF from any file', () => {
     expect(pdf.fields).toEqual(form.fields);
 
     await $('[data-testid="combine-close"]').click();
-    await $('[data-testid="combine-dialog"]').waitForDisplayed({
+    await waitForDisplayedSelector('[data-testid="combine-dialog"]', {
       reverse: true,
       timeout: 10_000,
     });
@@ -337,7 +341,7 @@ describe('Create PDF from any file', () => {
     });
 
     await $('[data-testid="combine-close"]').click();
-    await $('[data-testid="combine-dialog"]').waitForDisplayed({
+    await waitForDisplayedSelector('[data-testid="combine-dialog"]', {
       reverse: true,
       timeout: 10_000,
     });
@@ -359,7 +363,7 @@ describe('Create PDF from any file', () => {
     expect(existsSync(outPath)).toBe(false);
 
     await $('[data-testid="combine-close"]').click();
-    await $('[data-testid="combine-dialog"]').waitForDisplayed({
+    await waitForDisplayedSelector('[data-testid="combine-dialog"]', {
       reverse: true,
       timeout: 10_000,
     });
@@ -398,7 +402,10 @@ describe('Create PDF from any file', () => {
     expect(second!.pages).toBe(3);
 
     await $('[data-testid="create-pdf-close"]').click();
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
+      reverse: true,
+      timeout: 10_000,
+    });
   });
 
   it('opens the created PDF with Scan & OCR armed in one click', async function () {
@@ -418,7 +425,10 @@ describe('Create PDF from any file', () => {
       { timeout: 30_000, timeoutMsg: 'the created PDF did not open with Scan & OCR armed' },
     );
     await $('[data-testid="find-bar"]').waitForDisplayed({ timeout: 15_000 });
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
+      reverse: true,
+      timeout: 10_000,
+    });
   });
 
   it('offers Create PDF when an image is dropped on a page', async function () {
@@ -437,7 +447,10 @@ describe('Create PDF from any file', () => {
     expect(after?.pages).toBe(before);
 
     await $('[data-testid="create-pdf-close"]').click();
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 10_000 });
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
+      reverse: true,
+      timeout: 10_000,
+    });
   });
 
   it('inserts the converted pages at the drop point rather than opening a tab (#42)', async function () {
@@ -461,7 +474,10 @@ describe('Create PDF from any file', () => {
     expect(built).not.toBe(null);
     await $('[data-testid="create-pdf-open"]').waitForDisplayed({ timeout: 30_000 });
     await $('[data-testid="create-pdf-open"]').click();
-    await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ reverse: true, timeout: 30_000 });
+    await waitForDisplayedSelector('[data-testid="create-pdf-dialog"]', {
+      reverse: true,
+      timeout: 30_000,
+    });
 
     await browser.waitUntil(
       async () => (await getCanvasDocs(1)).find((d) => d.id === target.id)?.pages === before + built!.pages,

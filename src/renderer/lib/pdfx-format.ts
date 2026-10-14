@@ -98,7 +98,15 @@ export interface ExportAnnotation {
     rect: [number, number, number, number];
     contents?: string;
     color?: string;
+    slot?: number;
   };
+  // Imported annotations only: what the user changed since the import. With
+  // no change the builder leaves the original in the page and authors
+  // nothing. Absent for an annotation with no recorded import state, which
+  // is authored again.
+  importedEdit?: import('./imported-edit').ImportedEdit;
+  // The /M of an edited imported annotation that has one (a PDF date string).
+  modified?: string;
 }
 
 export interface ExportPage {

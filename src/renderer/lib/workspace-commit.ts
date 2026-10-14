@@ -1,9 +1,12 @@
 import { PDFDocument } from 'pdf-lib';
 import { docCarriesLiveSignature } from './signature-presence';
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
+import type { BuildServices } from './pdfx-build';
+import type { TextBoxEngine } from './text-box-engine';
 import { carriesManifest } from './doc-names';
 import { baseName } from './create-pdf';
-import type { ExportPage } from './pdfx-format';
+import type { ExportAnnotation, ExportPage } from './pdfx-format';
+import { editIsNone, importedEdit, pdfDate } from './imported-edit';
 import type { AppAction, OpenDocument, OpenFile, PageAnnotation, PageRef, PageTierStacks, PdfBuffer, Workspace } from '../state/types';
 import { editsSincePlan } from '../state/page-tier';
 // Refusals here that reach the user resolve through
@@ -77,6 +80,14 @@ function toBytes(buffer: PdfBuffer): Uint8Array {
 // page indices consistent no matter the write order. Zero-page compositions
 // (defensively — the reducer resets those paths) are never planned: a 0-page
 // PDF must not be materialized over a working copy.
+/** The edit of an imported annotation, and the date an edited one is
+ *  modified at. */
+function importedEditOf(annotation: PageAnnotation, modified: string): Pick<ExportAnnotation, 'importedEdit' | 'modified'> {
+  const edit = importedEdit(annotation);
+  if (!edit) return {};
+  return editIsNone(edit) ? { importedEdit: edit } : { importedEdit: edit, modified };
+}
+
 export function planCommit(
   workspace: Workspace,
   files: Map<string, OpenFile>,
@@ -96,6 +107,7 @@ export function planCommit(
     return bytes;
   };
 
+  const modified = pdfDate(new Date());
   const plans: CommitFilePlan[] = [];
   for (const path of dirtyPaths) {
     const f = files.get(path);
@@ -116,7 +128,7 @@ export function planCommit(
           ...(authored.length
             ? {
                 annotations: authored.map(
-                  ({ kind, x, y, w, h, color, note, points, strokes, inkStyle, imageData, signatureFont, noRotate, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
+                  (annotation) => { const { kind, x, y, w, h, color, note, points, strokes, inkStyle, imageData, signatureFont, noRotate, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal } = annotation; return {
                     kind,
                     x,
                     y,
@@ -165,7 +177,8 @@ export function planCommit(
                     symbolId,
                     symbolParts,
                     importedOriginal,
-                  }),
+                    ...importedEditOf(annotation, modified),
+                  }; },
                 ),
               }
             : {}),
@@ -220,7 +233,7 @@ export function committedDocuments(docs: readonly OpenDocument[], buffer: PdfBuf
       };
       if (page.annotations?.length) {
         committed.annotations = page.annotations.map(
-          ({ importedOriginal: _original, geometryDiverged: _diverged, ...annotation }): PageAnnotation => ({
+          ({ importedOriginal: _original, importedState: _state, geometryDiverged: _diverged, ...annotation }): PageAnnotation => ({
             ...annotation,
             baked: true,
           }),
@@ -232,13 +245,13 @@ export function committedDocuments(docs: readonly OpenDocument[], buffer: PdfBuf
   });
 }
 
-export async function buildCommitBytes(plan: CommitFilePlan): Promise<Uint8Array> {
+export async function buildCommitBytes(plan: CommitFilePlan, services: BuildServices = {}): Promise<Uint8Array> {
   // plan.path doubles as the OWN sourceKey (ExportPage.sourceKey is the
   // sourceDocId, which IS the path for the file's own pages) — the identity
   // the catalog carry keys on.
   return plan.useManifest
-    ? buildPdfx(plan.documents, plan.title, plan.ownBytes, plan.path)
-    : buildPdf(plan.documents[0].pages, plan.ownBytes, plan.path);
+    ? buildPdfx(plan.documents, plan.title, plan.ownBytes, plan.path, services)
+    : buildPdf(plan.documents[0].pages, plan.ownBytes, plan.path, services);
 }
 
 
@@ -300,6 +313,10 @@ interface CommitDeps {
    *  (`lib/sealed-edit.ts`), ungated for the reason `preserveSignatures` is.
    *  Without it such a file refuses; with it `readBack` is required too. */
   sealed?: SealedCall;
+  /** The engine's `text_box_appearance`, ungated for the reason
+   *  `preserveSignatures` is. It names no document. Without it a build that
+   *  holds a text the standard Helvetica cannot draw refuses. */
+  textBoxes?: TextBoxEngine;
 }
 
 // Temp names are unique per run so a stale leftover (crash, prior failure)
@@ -339,6 +356,7 @@ export async function commitPageEdits({
   preserveSignatures,
   readBack,
   sealed,
+  textBoxes,
 }: CommitDeps): Promise<CommitOutcome> {
   if (commitRunning) {
     throw new Error('commitPageEdits is already running — callers must share the in-flight run');
@@ -398,7 +416,7 @@ export async function commitPageEdits({
     // failed and given no way to tell which document refused.
     const built = await Promise.all(plans.map(async (plan) => {
       try {
-        return await buildCommitBytes(plan);
+        return await buildCommitBytes(plan, { textBoxes });
       } catch (err) {
         throw new Error(tChrome('canvas.common.fileFailure', {
           name: baseName(plan.path),

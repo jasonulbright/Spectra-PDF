@@ -52,6 +52,10 @@ const SITES: readonly Site[] = [
     reason: 'The commit appends its staged temp to the signed original.',
   },
   {
+    file: 'App.tsx', method: 'text_box_appearance', count: 1, kind: 'commit',
+    reason: 'The commit build asks for the text of annotations in bundled faces; no document is named.',
+  },
+  {
     file: 'components/BatchOcrDialog.tsx', method: 'batch_ocr', count: 1, kind: 'outside',
     reason: 'A folder of sources read by path into a mirror tree.',
   },

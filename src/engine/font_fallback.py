@@ -25,6 +25,7 @@ run editor uses.
 
 import io
 import os
+from functools import lru_cache
 from pathlib import Path
 
 import pikepdf
@@ -317,6 +318,57 @@ def resolve_rtl_font(font_path: str, text: str, style: str = "regular") -> str:
     raise ValueError(f"no bundled right-to-left font can express {text!r}")
 
 
+@lru_cache(maxsize=32)
+def _face_facts(face_path: str, stamp: tuple) -> tuple:
+    tt = TTFont(face_path, fontNumber=0, lazy=True)
+    try:
+        cmap = dict(tt.getBestCmap() or {})
+        hmtx = tt["hmtx"]
+        scale = 1000.0 / (tt["head"].unitsPerEm or 1000)
+        advances = {point: round(hmtx[name][0] * scale, 2) for point, name in cmap.items()}
+        if getattr(tt, "sfntVersion", "") != "OTTO":
+            outlines = "glyf"
+        else:
+            outlines = "cff" if "CFF " in tt else "cff2"
+        return cmap, advances, outlines, int(tt["maxp"].numGlyphs)
+    finally:
+        tt.close()
+
+
+def _facts_of(face_path) -> tuple:
+    # Kept per face file and its modification stamp: a replaced file is read
+    # again.
+    path = str(face_path)
+    stat = os.stat(path)
+    return _face_facts(path, (stat.st_mtime_ns, stat.st_size))
+
+
+def face_glyph_names(face_path) -> dict:
+    """Code point to glyph name, by the face's cmap."""
+    return _facts_of(face_path)[0]
+
+
+def face_advances(face_path) -> dict:
+    """Code point to advance per 1000 units of the em: the numbers a subset
+    of the face writes in its widths."""
+    return _facts_of(face_path)[1]
+
+
+def face_outlines(face_path) -> tuple:
+    """(outline kind, glyph count) of the face: `glyf`, `cff` or `cff2`."""
+    return _facts_of(face_path)[2:4]
+
+
+def present_faces(font_path) -> list:
+    """The names of the face files in the fonts folder, sorted."""
+    if not os.path.isdir(font_path):
+        return []
+    return sorted(
+        name for name in os.listdir(font_path)
+        if name.lower().endswith((".ttf", ".otf")) and os.path.isfile(os.path.join(font_path, name))
+    )
+
+
 def face_covers(face_path: str, text: str) -> bool:
     """Whether the face's cmap maps every DRAWN character of `text`
     (structural whitespace excluded — it never embeds)."""
@@ -324,13 +376,7 @@ def face_covers(face_path: str, text: str) -> bool:
     if not needed:
         return True
     try:
-        from fontTools.ttLib import TTFont
-
-        tt = TTFont(str(face_path), fontNumber=0, lazy=True)
-        try:
-            cmap = tt.getBestCmap()
-        finally:
-            tt.close()
+        cmap = face_glyph_names(face_path)
     except Exception:
         return False
     return all(ord(ch) in cmap for ch in needed)
@@ -564,6 +610,99 @@ def _cff_cids(font: "TTFont") -> dict | None:
     return cids
 
 
+class _CffTwins:
+    """Second codes for the glyphs of a subset with CFF outlines.
+
+    A CIDFontType0 descendant has no /CIDToGIDMap: under Identity-H a code
+    selects one glyph, and /ToUnicode gives a code one spelling. A glyph
+    that spells two texts is therefore two glyphs with one outline: `add`
+    makes a copy of the glyph and answers the code that selects the copy.
+
+    `spare` names the glyphs of the subset that draw nothing (a subset that
+    retains glyph ids keeps the slots of the glyphs it dropped). A copy
+    takes a spare slot first: a program holds at most 65535 glyphs, and a
+    subset that retains the ids of a full face has no room for one more.
+    """
+
+    def __init__(self, font: "TTFont", spare=()):
+        self.font = font
+        self.count = 0
+        self._top = font["CFF "].cff.topDictIndex[0] if "CFF " in font else None
+        self._gid_of = {name: gid for gid, name in enumerate(font.getGlyphOrder())}
+        self._cids = _cff_cids(font)
+        self._taken = None if self._cids is None else set(self._cids.values())
+        self._free = 1
+        self._spare = iter(spare)
+
+    @property
+    def takes_glyphs(self) -> bool:
+        """False for a CFF2 program, which this class does not extend."""
+        return self._top is not None
+
+    def add(self, source: str) -> "int | None":
+        """The code of a new glyph that draws what `source` draws, or None
+        when the program takes no more glyphs or codes."""
+        top = self._top
+        if top is None:
+            return None
+        strings = top.CharStrings
+        drawn = strings[source]
+        twin = type(drawn)(
+            bytecode=drawn.bytecode,
+            program=None if drawn.bytecode is not None else list(drawn.program),
+            private=drawn.private,
+            globalSubrs=drawn.globalSubrs,
+        )
+        slot = next(self._spare, None)
+        if slot is not None:
+            strings[slot] = twin
+            if hasattr(top, "FDSelect"):
+                top.FDSelect[self._gid_of[slot]] = top.FDSelect[self._gid_of[source]]
+            self._metrics(slot, source)
+            self.count += 1
+            return self._cids[slot] if self._cids is not None else self._gid_of[slot]
+        order = self.font.getGlyphOrder()
+        if self._taken is not None:
+            while self._free in self._taken:
+                self._free += 1
+            code = self._free
+            name = f"cid{code:05d}"
+        else:
+            code = len(order)
+            name = f"{source}.twin{self.count + 1}"
+        if code > 0xFFFF or len(order) >= 0xFFFF or name in self._gid_of:
+            return None
+        strings.charStringsIndex.append(twin)
+        strings.charStrings[name] = len(strings.charStringsIndex) - 1
+        if hasattr(top, "FDSelect"):
+            top.FDSelect.append(top.FDSelect[self._gid_of[source]])
+        if top.charset is not order:
+            top.charset.append(name)
+        order.append(name)
+        self.font.setGlyphOrder(order)
+        self._metrics(name, source)
+        self._gid_of[name] = len(order) - 1
+        if self._taken is not None:
+            self._taken.add(code)
+        self.count += 1
+        return code
+
+    def _metrics(self, name: str, source: str) -> None:
+        for tag in ("hmtx", "vmtx"):
+            if tag in self.font:
+                self.font[tag].metrics[name] = self.font[tag].metrics[source]
+
+    def program(self, written: bytes) -> bytes:
+        """The font program to embed: `written` when no glyph was added."""
+        if not self.count:
+            return written
+        # The face's own `head.modified` travels, never the clock of the run.
+        self.font.recalcTimestamp = False
+        buffer = io.BytesIO()
+        self.font.save(buffer)
+        return buffer.getvalue()
+
+
 def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for=None):
     """Embed a subset of the fallback font for `text`. Returns
     (font_dict [indirect], encode(str)->bytes, width_1000(str)->float).
@@ -605,13 +744,59 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
     gid_of = {name: i for i, name in enumerate(glyph_order)}
     cid_of = _cff_cids(font)
 
+    # /ToUnicode is keyed by code, so a code spells one character: the
+    # first character of a glyph takes the glyph's own code and each later
+    # one a code of its own. With TrueType outlines the later codes reach
+    # the glyph through a /CIDToGIDMap stream; with CFF outlines each is a
+    # second glyph (`_CffTwins`). A CFF2 program takes no second glyph:
+    # there a later character draws from the first one's code and reads
+    # back as the first, and /ToUnicode still gives the code one spelling.
+    is_cff = getattr(font, "sfntVersion", "") == "OTTO"
+    twins = _CffTwins(font) if is_cff else None
+    first_of: dict[str, str] = {}  # glyph name -> the character on its own code
+    mapped: dict[int, int] = {}  # code beyond the glyph ids -> glyph id
     used: dict[str, int] = {}  # char -> code
+    spelled: dict[int, str] = {}  # code -> the character it reads back as
     widths: dict[int, float] = {}  # code -> width (1000/em)
     for ch in sorted(set(text)):
         glyph_name = glyph_of_char[ch]
-        code = cid_of[glyph_name] if cid_of is not None else gid_of[glyph_name]
+        if glyph_name not in first_of:
+            first_of[glyph_name] = ch
+            code = cid_of[glyph_name] if cid_of is not None else gid_of[glyph_name]
+        elif is_cff and not twins.takes_glyphs:
+            code = used[first_of[glyph_name]]
+        elif is_cff:
+            code = twins.add(glyph_name)
+            if code is None:
+                prior, spells = first_of[glyph_name], ch
+                raise ValueError(
+                    "this font cannot carry both spellings of one glyph "
+                    f"({prior!r} and {spells!r})"
+                )
+        else:
+            code = len(glyph_order) + len(mapped)
+            if code > 0xFFFF:
+                prior, spells = first_of[glyph_name], ch
+                raise ValueError(
+                    "this font cannot carry both spellings of one glyph "
+                    f"({prior!r} and {spells!r})"
+                )
+            mapped[code] = gid_of[glyph_name]
         used[ch] = code
+        spelled.setdefault(code, ch)
         widths[code] = round(hmtx[glyph_name][0] * scale, 2)
+    cid_to_gid = None
+    if mapped:
+        table = bytearray((len(glyph_order) + len(mapped)) * 2)
+        for gid in range(len(glyph_order)):
+            table[gid * 2] = (gid >> 8) & 0xFF
+            table[gid * 2 + 1] = gid & 0xFF
+        for code, gid in mapped.items():
+            table[code * 2] = (gid >> 8) & 0xFF
+            table[code * 2 + 1] = gid & 0xFF
+        cid_to_gid = bytes(table)
+    if twins is not None:
+        ttf_bytes = twins.program(ttf_bytes)
 
     def encode(s: str) -> bytes:
         out = bytearray()
@@ -627,7 +812,8 @@ def build_fallback_font(pdf: "pikepdf.Pdf", font_path: str, text: str, glyph_for
 
     return _embed_identity_h(
         pdf, ttf_bytes, font, font_path, metrics, widths,
-        sorted(((code, ch) for ch, code in used.items())),
+        sorted(spelled.items()),
+        cid_to_gid=cid_to_gid,
     ) + (encode, width_1000)
 
 
@@ -909,13 +1095,12 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
     # for a CFF face: the code must be what selects the glyph by itself, the
     # glyph index for a CFF without CIDFont operators and the glyph's CID for
     # a CID-keyed one (`_cff_cids`), exactly as `build_fallback_font` writes.
-    #
-    # CFF faces must retain their mapping; otherwise they draw whatever glyph
-    # the arbitrary code happened to hit. Libertinus and Noto Sans CJK — the
-    # two bundled faces that actually carry `liga` — are both OTF, so the
-    # ligature capability was landing on precisely the fonts this broke.
+    # A second spelling of a glyph is a second glyph there (`_CffTwins`).
     is_cff = getattr(font, "sfntVersion", "") == "OTTO"
     cid_of = _cff_cids(font) if is_cff else None
+    twins = _CffTwins(font, (name for name in sub_order[1:] if name not in want)) if is_cff else None
+    # No glyph can be added to a program that is already embedded.
+    embedded = False
 
     def gid_width(g: int) -> float:
         if g >= len(sub_order):
@@ -936,21 +1121,28 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
             return code
         g = full_gid_of[name]
         if is_cff:
-            # No mapping table to point several codes at one glyph, so a
-            # glyph carries exactly ONE spelling. A collision REFUSES rather
-            # than letting the second spelling overwrite the first — the
-            # spelling rule, which is why a fatha does not come back a sukun.
-            # The caller drops to the unshaped path, whose output is correct
-            # (just without the ligature), never to wrong glyphs.
+            # No mapping table points several codes at one glyph. The first
+            # spelling of a glyph takes the glyph's own code; a later
+            # spelling never overwrites it and takes the code of a second
+            # glyph with the same outline.
             code = cid_of[name] if cid_of is not None else g
             prior = unicode_of.get(code)
-            if prior is not None and prior != spells:
+            if prior is not None:
+                code = None if embedded else twins.add(name)
+                if code is None:
+                    raise ValueError(
+                        "this font cannot carry both spellings of one glyph "
+                        f"({prior!r} and {spells!r})"
+                    )
+        else:
+            code = len(code_of) + 1
+            if code > 0xFFFF:
+                # A code holds two bytes: no code is left for this spelling.
+                prior = next((text for (held, text) in code_of if held == name), spells)
                 raise ValueError(
                     "this font cannot carry both spellings of one glyph "
                     f"({prior!r} and {spells!r})"
                 )
-        else:
-            code = len(code_of) + 1
         code_of[key] = code
         gid_of_code[code] = g
         widths[code] = gid_width(g)
@@ -994,6 +1186,9 @@ def build_shaped_font(pdf: "pikepdf.Pdf", font_path: str, text: str, shaped):
             buf[code * 2 + 1] = g & 0xFF
         cid_to_gid = bytes(buf)
 
+    if twins is not None:
+        ttf_bytes = twins.program(ttf_bytes)
+    embedded = True
     return _embed_identity_h(
         pdf, ttf_bytes, font, font_path, metrics, widths,
         sorted(unicode_of.items()), cid_to_gid=cid_to_gid,
