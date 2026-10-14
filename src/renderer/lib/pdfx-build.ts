@@ -22,6 +22,18 @@ import { cloudBumps } from './annotation-manipulation';
 import { inheritNameReadings, nameReading, normalizeEscapedNames } from './pdf-name-normalize';
 import { decodePdfTextString, pdfNameText, pdfStringCodes } from './pdf-text-string';
 import { annotationDictionaryIsAmbiguous, contentsHolder, entryOf, importedRect, rawEntry } from './annotation-fingerprint';
+import { editIsNone } from './imported-edit';
+import { carryOriginalEntries, changeOf, keepsAppearance, mayScaleAppearance, patchedOriginal, scaledOriginal } from './imported-carry';
+import type { FontProgram, OpenFontProgram } from './annotation-font';
+import {
+  LEADING_FACTOR, defaultAppearanceWithColor, drawInFace, needsShaping, placedText, planFreeTextRedraw, planOwnText, standardFace,
+  standardTextHolds, standardShow, textForGlyphCoverage,
+} from './free-text-redraw';
+import type { CarriedStyle, DrawnText, RedrawRefusal, TextPlan } from './free-text-redraw';
+import { bundledSubsetStem, charactersWithoutFace } from './text-box-faces';
+import { partsRefusal, textBoxNoticeValues } from './text-box-edit';
+import type { TextBlockRequest, TextBlockResult, TextBoxEngine } from './text-box-engine';
+import { noteAppearance } from './note-appearance';
 import {
   LEGEND_FONT_SIZE,
   LEGEND_PAD,
@@ -212,43 +224,10 @@ function symbolPartsOf(a: ExportAnnotation): readonly SymbolPart[] | null {
 }
 
 const HIGHLIGHT_ALPHA = 0.4;
-const FREETEXT_FONT_SIZE = 12;
+// The space between the edge of a text box and its text, in points.
+const TEXT_BOX_PAD = 3;
 const STAMP_FONT_SIZE = 14;
 const STAMP_PAD = 4;
-
-// Escape a string for a PDF content-stream literal, best-effort WinAnsi:
-// characters outside Latin-1 render as '?' in the appearance (the full
-// unicode text still lands in /Contents).
-function escapePdfText(text: string): string {
-  let out = '';
-  for (const ch of text) {
-    const code = ch.codePointAt(0)!;
-    if (ch === '(' || ch === ')' || ch === '\\') out += '\\' + ch;
-    else if (code >= 32 && code <= 255) out += ch;
-    else out += '?';
-  }
-  return out;
-}
-
-// Greedy wrap using a rough Helvetica average advance (~0.5em) — the box
-// clips anything that still overflows, matching the overlay's behavior.
-function wrapLines(text: string, boxWidth: number, fontSize: number): string[] {
-  const maxChars = Math.max(1, Math.floor(boxWidth / (fontSize * 0.5)));
-  const lines: string[] = [];
-  for (const raw of text.split(/\r?\n/)) {
-    let line = '';
-    for (const word of raw.split(' ')) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (candidate.length <= maxChars || !line) line = candidate;
-      else {
-        lines.push(line);
-        line = word;
-      }
-    }
-    lines.push(line);
-  }
-  return lines;
-}
 
 // AP /Matrix that counter-rotates the form so its content reads upright
 // after the viewer applies the page's /Rotate. The viewer maps the
@@ -279,12 +258,18 @@ function cloudPath(verts: [number, number][], r: number): string {
   return out;
 }
 
-// Positively match and remove ORIGINAL annotation objects on the copied page
-// that correspond to imported annotations in `annotations` (which the caller
-// will re-append, possibly edited, right after this runs) — never a blanket
-// subtype strip: an original we can't positively fingerprint
-// against something we're re-authoring is left alone, so a matching miss can
-// only ever produce a visible duplicate, never silent data loss.
+// Positively match the ORIGINAL annotation objects on the copied page that
+// correspond to imported annotations in `annotations`, never by a blanket
+// subtype strip: an original no fingerprint positively matches is left alone,
+// so a matching miss can only ever produce a visible duplicate, never silent
+// data loss. The original of an annotation the user did not edit stays in
+// /Annots as written. The original of an edited or a removed one leaves
+// /Annots; the caller writes the edited annotation in its place.
+//
+// A fingerprint with a slot matches the original at that position and no
+// other. The rest match by subtype, text and rectangle: an unedited
+// annotation takes the first original that fits, in /Annots order, before
+// any edited or removed one can take it.
 function stripImportedOriginals(
   copied: import('pdf-lib').PDFPage,
   annotations: ExportAnnotation[],
@@ -296,69 +281,113 @@ function stripImportedOriginals(
   const nameContents = new Map<ExportAnnotation, string>();
   const references = new Map<ExportAnnotation, PDFRef>();
   const dictionaries = new Map<ExportAnnotation, PDFDict>();
-  const stripped = { layerGates, nameContents, references, dictionaries };
-  // Two sources of fingerprints to strip-on-match: annotations being
-  // re-appended (live, possibly edited) and ones the user REMOVED (tombstones
-  // — matched and stripped same as any other, just never re-appended after).
-  // Without the latter, deleting an imported annotation would be a no-op:
-  // its fingerprint vanishes with it, nothing left to match the real PDF
-  // object against, and the "original" reappears on reindex after commit.
+  const kept = new Map<ExportAnnotation, PDFObject>();
+  const layout: (PDFObject | typeof MODEL_POSITION)[] = [];
+  const stripped: StrippedOriginals = { layerGates, nameContents, references, dictionaries, kept };
+  // Two sources of fingerprints: annotations of the model (live, possibly
+  // edited) and ones the user REMOVED (tombstones, matched and stripped the
+  // same, just never written again). Without the latter, deleting an imported
+  // annotation would be a no-op: its fingerprint vanishes with it, nothing is
+  // left to match the real PDF object against, and the original reappears on
+  // reindex after commit.
   const originals = annotations.flatMap(annotation => annotation.importedOriginal
     ? [{ fingerprint: annotation.importedOriginal, annotation: annotation as ExportAnnotation | undefined }] : []);
   originals.push(...removedImportedOriginals.map(fingerprint => ({ fingerprint, annotation: undefined })));
-  const fingerprints = originals.map(original => original.fingerprint);
-  if (fingerprints.length === 0) return stripped;
+  if (originals.length === 0) return stripped;
   const annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
   if (!annots) return stripped;
-  const consumed = new Set<number>(); // indices into `fingerprints` already matched
+  const STRIPPABLE = new Set([
+    'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
+    // The imported drawing shapes re-append like everything else.
+    'Circle', 'Line', 'Polygon', 'PolyLine',
+  ]);
+  interface Reading { dict: PDFDict; subtype: string; rect: number[]; holder: PDFDict; contentsObj: PDFObject | undefined; contents: string | undefined }
+  const readings = new Map<number, Reading | null>();
+  const readingAt = (i: number): Reading | null => {
+    const known = readings.get(i);
+    if (known !== undefined) return known;
+    let reading: Reading | null = null;
+    let dict: PDFDict | undefined;
+    try {
+      dict = i >= 0 && i < annots.size() ? annots.lookup(i, PDFDict) : undefined;
+    } catch {
+      dict = undefined; // not a dict (shouldn't happen for a valid /Annots entry): left alone
+    }
+    // Never imported, so never a candidate, even when a fingerprint of
+    // another annotation happens to fit it.
+    if (dict && !untouched.has(dict) && !annotationDictionaryIsAmbiguous(dict)) {
+      // Typed lookups throw on a value of the wrong type. A key whose value
+      // breaks Table 166's typing (ISO 32000-2 12.5.2) reads as absent here,
+      // which is how the importer's pdf.js reading sees it too, so both sides
+      // fingerprint alike. A strict read fails the whole commit over one
+      // malformed annotation.
+      const subtypeObj = entryOf(dict, 'Subtype');
+      const subtype = subtypeObj instanceof PDFName ? nameReading(subtypeObj, dict.context) : undefined;
+      if (subtype && STRIPPABLE.has(subtype)) {
+        // The rectangle the importer was given for this annotation, which is
+        // not always the file's /Rect: an unreadable /Rect and an annotation
+        // with no appearance both read differently.
+        // A box kind seen only at the [0 0 0 0] fallback is never imported, so
+        // no fingerprint names it; markups and ink import from their own
+        // geometry and do match at that rectangle.
+        const rect = importedRect(dict, subtype);
+        const holder = contentsHolder(dict);
+        const contentsObj = entryOf(holder, 'Contents');
+        const contents = contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
+          ? decodePdfTextString(pdfStringCodes(contentsObj)) : undefined;
+        reading = { dict, subtype, rect, holder, contentsObj, contents };
+      }
+    }
+    readings.set(i, reading);
+    return reading;
+  };
+  const fits = (fp: NonNullable<ExportAnnotation['importedOriginal']>, reading: Reading): boolean =>
+    fp.subtype === reading.subtype &&
+    (fp.contents ?? '') === (reading.contents ?? '') &&
+    // A /Text note without an appearance is reported at a fixed icon
+    // size; /Text matches on subtype and contents alone.
+    (reading.subtype === 'Text' || fp.rect.every((v, k) => Math.abs(v - reading.rect[k]) <= 0.5));
+  const consumed = new Set<number>(); // indices into `originals` already matched
+  const matched = new Map<number, number>(); // /Annots position → index into `originals`
+  const asCopied = annots.asArray().slice();
+  // /Annots position → whether a model annotation stands there after the build.
+  const taken = new Map<number, boolean>();
+  originals.forEach(({ fingerprint }, index) => {
+    const slot = fingerprint.slot;
+    if (slot === undefined || matched.has(slot)) return;
+    const reading = readingAt(slot);
+    if (!reading || !fits(fingerprint, reading)) return;
+    matched.set(slot, index);
+    consumed.add(index);
+  });
+  originals.forEach(({ fingerprint, annotation }, index) => {
+    if (consumed.has(index) || !editIsNone(annotation?.importedEdit)) return;
+    for (let i = 0; i < annots.size(); i++) {
+      const reading = matched.has(i) ? null : readingAt(i);
+      if (!reading || !fits(fingerprint, reading)) continue;
+      matched.set(i, index);
+      consumed.add(index);
+      return;
+    }
+  });
   // Iterate back-to-front: PDFArray.remove(index) shifts later indices, which
   // would desync a forward loop's remaining indices mid-iteration.
   for (let i = annots.size() - 1; i >= 0; i--) {
-    let dict: PDFDict;
-    try {
-      dict = annots.lookup(i, PDFDict);
-    } catch {
-      continue; // not a dict (shouldn't happen for a valid /Annots entry) — leave it
+    let matchIndex = matched.get(i);
+    const reading = readingAt(i);
+    if (!reading) continue;
+    if (matchIndex === undefined) {
+      matchIndex = originals.findIndex((original, idx) => !consumed.has(idx) && fits(original.fingerprint, reading));
+      if (matchIndex === -1) continue; // no positive match: never guess-remove
+      consumed.add(matchIndex);
     }
-    // Never imported, so never a strip candidate, even when a fingerprint of
-    // another annotation happens to fit it.
-    if (untouched.has(dict) || annotationDictionaryIsAmbiguous(dict)) continue;
-    // Typed lookups throw on a value of the wrong type. A key whose value
-    // breaks Table 166's typing (ISO 32000-2 12.5.2) reads as absent here,
-    // which is how the importer's pdf.js reading sees it too, so both sides
-    // fingerprint alike. A strict read fails the whole commit over one
-    // malformed annotation.
-    const subtypeObj = entryOf(dict, 'Subtype');
-    const subtype = subtypeObj instanceof PDFName ? nameReading(subtypeObj, dict.context) : undefined;
-    const STRIPPABLE = new Set([
-      'Square', 'FreeText', 'Ink', 'Stamp', 'Highlight', 'Underline', 'StrikeOut', 'Squiggly', 'Text',
-      // The imported drawing shapes re-append like everything else.
-      'Circle', 'Line', 'Polygon', 'PolyLine',
-    ]);
-    if (!subtype || !STRIPPABLE.has(subtype)) continue;
-    // The rectangle the importer was given for this annotation, which is not
-    // always the file's /Rect: an unreadable /Rect and an annotation with no
-    // appearance both read differently.
-    // A box kind seen only at the [0 0 0 0] fallback is never imported, so no
-    // fingerprint names it; markups and ink import from their own geometry
-    // and do match at that rectangle.
-    const rect = importedRect(dict, subtype);
-    const holder = contentsHolder(dict);
-    const contentsObj = entryOf(holder, 'Contents');
-    const contents = contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
-      ? decodePdfTextString(pdfStringCodes(contentsObj)) : undefined;
-    const matchIndex = fingerprints.findIndex(
-      (fp, idx) =>
-        !consumed.has(idx) &&
-        fp.subtype === subtype &&
-        (fp.contents ?? '') === (contents ?? '') &&
-        // A /Text note without an appearance is reported at a fixed icon
-        // size; /Text matches on subtype and contents alone.
-        (subtype === 'Text' || fp.rect.every((v, k) => Math.abs(v - rect[k]) <= 0.5)),
-    );
-    if (matchIndex === -1) continue; // no positive match — never guess-remove
-    consumed.add(matchIndex);
+    const { dict, holder, contentsObj } = reading;
     const annotation = originals[matchIndex].annotation;
+    taken.set(i, annotation !== undefined);
+    if (annotation && editIsNone(annotation.importedEdit)) {
+      kept.set(annotation, annots.get(i));
+      continue;
+    }
     const layer = rawEntry(dict, 'OC');
     // Geometry and appearance are reauthored; layer membership is not.
     // Its reference is already in the output context and configured by the
@@ -380,8 +409,17 @@ function stripImportedOriginals(
     removals.count++;
     annots.remove(i);
   }
+  asCopied.forEach((entry, i) => {
+    const model = taken.get(i);
+    if (model === undefined) layout.push(entry);
+    else if (model) layout.push(MODEL_POSITION);
+  });
+  stripped.layout = layout;
   return stripped;
 }
+
+/** A position of /Annots that an annotation of the model takes. */
+const MODEL_POSITION = Symbol('model annotation');
 
 interface StrippedOriginals {
   /** The matched original's /OC, which its replacement carries. */
@@ -394,6 +432,12 @@ interface StrippedOriginals {
   references: Map<ExportAnnotation, PDFRef>;
   /** The matched original's dictionary. */
   dictionaries: Map<ExportAnnotation, PDFDict>;
+  /** The /Annots entry of an unedited annotation's original, which stays. */
+  kept: Map<ExportAnnotation, PDFObject>;
+  /** /Annots as copied, with each matched original's position marked for a
+   *  model annotation; the position of a removed one is left out. Absent
+   *  when no original was looked for. */
+  layout?: (PDFObject | typeof MODEL_POSITION)[];
 }
 
 /** The originals one build took out of the pages' /Annots. */
@@ -406,6 +450,8 @@ interface RemovedAnnotations {
   count: number;
   /** The tag of the /Popup a removed original names → that original's tag. */
   popups: Map<string, string>;
+  /** An /Annots array changed its order with no entry removed. */
+  reordered?: boolean;
 }
 
 /** The stroke width every dimension annotation is drawn at. */
@@ -432,9 +478,14 @@ function addAnnotations(
   untouched: ReadonlySet<PDFDict>,
   removals: RemovedAnnotations,
   writtenDefaults: Set<PDFDict>,
+  stripped: StrippedOriginals,
+  texts: DrawnTexts,
+  pageNumber: number,
 ): void {
-  const { layerGates, nameContents, references, dictionaries } = stripImportedOriginals(copied, annotations, removedImportedOriginals, untouched, removals);
+  const { layerGates, nameContents, references, dictionaries, kept, layout } = stripped;
   const context = output.context;
+  // The /Annots entry of each model annotation the page lists, in model order.
+  const listed: PDFObject[] = [];
   // CropBox (defaults to MediaBox when absent, so byte-identical for the
   // common case) — must match what annotation-import.ts reads via pdf.js's
   // page.view (the crop-intersected box), or an imported annotation's
@@ -442,6 +493,15 @@ function addAnnotations(
   const { x, y, width, height } = copied.getCropBox();
   const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
   for (const authored of annotations) {
+    // The original of an unedited annotation is in /Annots as written. One
+    // whose original no fingerprint found is written from the model: a page
+    // that holds the original too then shows it twice, and a page that does
+    // not hold it keeps the annotation.
+    const standing = editIsNone(authored.importedEdit) ? kept.get(authored) : undefined;
+    if (standing !== undefined) {
+      listed.push(standing);
+      continue;
+    }
     // A name-typed /Contents carried from the original is the note: the
     // appearance of a text-bearing kind is drawn from it as well as /Contents.
     const carried = nameContents.get(authored);
@@ -482,26 +542,39 @@ function addAnnotations(
     const dispW = swapped ? h : w;
     const dispH = swapped ? w : h;
 
-    let annot;
-    if (a.kind === 'freetext') {
+    const original = dictionaries.get(authored);
+    // The move of an imported annotation in default user space.
+    const from = authored.importedEdit?.from;
+    const fromRect = from ? displayRectToPdf(from, { x, y, width, height }, rotation) : undefined;
+    const delta: [number, number] = fromRect ? [rx0 - fromRect[0], ry0 - fromRect[1]] : [0, 0];
+    // A /DA carried from the original names a font of the original's document.
+    let carriedDefault = false;
+    let annot: PDFDict | undefined = original ? patchedOriginal(context, original, a, delta, [r, g, b]) : undefined;
+    // A free text the plan cannot draw again keeps its appearance, scaled
+    // into its new rectangle.
+    if (!annot && original && texts.scaled.has(authored)) annot = scaledOriginal(context, original, a, [x0, y0, x1, y1]);
+    if (annot) {
+      carriedDefault = true;
+    } else if (a.kind === 'freetext') {
       const text = a.note ?? '';
-      const fontRef = context.register(
-        context.obj({
-          Type: 'Font',
-          Subtype: 'Type1',
-          BaseFont: 'Helvetica',
-          Encoding: 'WinAnsiEncoding',
-        }),
-      );
-      const leading = FREETEXT_FONT_SIZE * 1.2;
-      const pad = 3;
-      const lines = wrapLines(text, dispW - pad * 2, FREETEXT_FONT_SIZE);
-      const tj = lines.map((l) => `(${escapePdfText(l)}) Tj T*`).join(' ');
+      // The text as the plan draws it: in the standard Helvetica, in the
+      // font of its original, or in bundled faces (`planTexts`).
+      const drawn = texts.drawn.get(authored)?.get('body');
+      if (!drawn) throw textRefused('font', a, pageNumber);
+      const carriedStyle = texts.carried.get(authored);
+      const recoloured = changeOf(authored).color;
+      const pad = TEXT_BOX_PAD;
+      const borderWidth = carriedStyle?.borderWidth;
+      const border = borderWidth === undefined
+        ? `${r} ${g} ${b} RG 0.75 w 0.5 0.5 ${dispW - 1} ${dispH - 1} re S `
+        : borderWidth > 0
+          ? `${r} ${g} ${b} RG ${borderWidth} w ${borderWidth / 2} ${borderWidth / 2} ${dispW - borderWidth} ${dispH - borderWidth} re S `
+          : '';
+      const textColor = carriedStyle?.textColor && !recoloured ? carriedStyle.textColor : `${r} ${g} ${b} rg`;
       const content =
         `0.98 0.98 0.96 rg 0 0 ${dispW} ${dispH} re f ` +
-        `${r} ${g} ${b} RG 0.75 w 0.5 0.5 ${dispW - 1} ${dispH - 1} re S ` +
-        `BT /Helv ${FREETEXT_FONT_SIZE} Tf ${leading} TL ${r} ${g} ${b} rg ` +
-        `${pad} ${dispH - FREETEXT_FONT_SIZE - pad} Td ${tj} ET`;
+        border +
+        placedText(drawn, pad, dispH - pad, textColor);
       const ap = context.register(
         context.stream(content, {
           Type: 'XObject',
@@ -509,7 +582,7 @@ function addAnnotations(
           FormType: 1,
           BBox: [0, 0, dispW, dispH],
           Matrix: apMatrixFor(rotation),
-          Resources: { Font: { Helv: fontRef } },
+          Resources: { Font: Object.fromEntries(drawn.fonts) },
         }),
       );
       annot = context.obj({
@@ -527,7 +600,9 @@ function addAnnotations(
       // 0)` and falls back to its own default appearance, so a viewer that
       // regenerates the appearance draws the note in a colour and size this
       // file never asked for.
-      annot.set(PDFName.of('DA'), PDFString.of(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
+      carriedDefault = writeDefaultAppearance(annot, drawn, carriedStyle, recoloured, [r, g, b], texts.ownFonts);
+      if (drawn.align !== 0) annot.set(PDFName.of('Q'), context.obj(drawn.align));
+      if (borderWidth !== undefined) annot.set(PDFName.of('BS'), context.obj({ W: borderWidth }));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'ink') {
       // The shared style edit reaches ink too: width + opacity (unset: width
@@ -816,13 +891,13 @@ function addAnnotations(
       const bw = a.w > 0 ? (cb[2] / a.w) * dispW : dispW;
       const bh = a.h > 0 ? (cb[3] / a.h) * dispH : dispH;
       const by0 = by1 - bh;
-      const fontRef = context.register(
-        context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding' }),
-      );
-      const leading = FREETEXT_FONT_SIZE * 1.2;
-      const pad = 3;
-      const lines = wrapLines(text, bw - pad * 2, FREETEXT_FONT_SIZE);
-      const tj = lines.map((l) => `(${escapePdfText(l)}) Tj T*`).join(' ');
+      // The text as the plan draws it, like a free text.
+      const drawn = texts.drawn.get(authored)?.get('body');
+      if (!drawn) throw textRefused('font', a, pageNumber);
+      const carriedStyle = texts.carried.get(authored);
+      const recoloured = changeOf(authored).color;
+      const pad = TEXT_BOX_PAD;
+      const textColor = carriedStyle?.textColor && !recoloured ? carriedStyle.textColor : `${r} ${g} ${b} rg`;
       // Leader in AP-local space, arrowhead at the tip (points[0]).
       const pts = a.points ?? [];
       let leader = '';
@@ -850,8 +925,7 @@ function addAnnotations(
         leader +
         `0.98 0.98 0.96 rg ${bx0} ${by0} ${bw} ${bh} re f ` +
         `${r} ${g} ${b} RG ${Math.max(0.75, strokeW)} w ${bx0 + 0.5} ${by0 + 0.5} ${bw - 1} ${bh - 1} re S ` +
-        `BT /Helv ${FREETEXT_FONT_SIZE} Tf ${leading} TL ${r} ${g} ${b} rg ` +
-        `${bx0 + pad} ${by1 - FREETEXT_FONT_SIZE - pad} Td ${tj} ET`;
+        placedText(drawn, bx0 + pad, by1 - pad, textColor);
       const apPad = strokeW * 6 + 8;
       const ap = context.register(
         context.stream(content, {
@@ -860,7 +934,7 @@ function addAnnotations(
           FormType: 1,
           BBox: [-apPad, -apPad, dispW + apPad, dispH + apPad],
           Matrix: apMatrixFor(rotation),
-          Resources: { Font: { Helv: fontRef } },
+          Resources: { Font: Object.fromEntries(drawn.fonts) },
         }),
       );
       annot = context.obj({
@@ -904,7 +978,8 @@ function addAnnotations(
       // 0)` and falls back to its own default appearance, so a viewer that
       // regenerates the appearance draws the note in a colour and size this
       // file never asked for.
-      annot.set(PDFName.of('DA'), PDFString.of(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
+      carriedDefault = writeDefaultAppearance(annot, drawn, carriedStyle, recoloured, [r, g, b], texts.ownFonts);
+      if (drawn.align !== 0) annot.set(PDFName.of('Q'), context.obj(drawn.align));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'count') {
       // A TAKEOFF COUNT MARK — a real /Stamp, so it survives save/reload as an
@@ -996,25 +1071,37 @@ function addAnnotations(
       const sx = layout.widthPt > 0 ? dispW / layout.widthPt : 1;
       const sy = layout.heightPt > 0 ? dispH / layout.heightPt : 1;
       const fs = LEGEND_FONT_SIZE;
+      // A text the standard Helvetica does not hold is drawn in bundled
+      // faces (`planTexts`); each part then has its own drawing.
+      const parts = texts.drawn.get(authored);
+      const partFonts: Record<string, PDFObject> = {};
       const textAt = (
         tx: number,
         yDown: number,
         font: string,
         color: [number, number, number],
         text: string,
-      ): string =>
-        `BT /${font} ${fs} Tf ${color[0]} ${color[1]} ${color[2]} rg ` +
-        `${round2(tx)} ${round2(layout.heightPt - yDown)} Td (${escapePdfText(text)}) Tj ET `;
-      const rightAt = (yDown: number, font: string, text: string): string => {
-        const w = text.length * fs * 0.55;
-        return textAt(layout.widthPt - LEGEND_PAD - w, yDown, font, [0.1, 0.1, 0.1], text);
+        part: string,
+      ): string => {
+        const drawn = parts?.get(part);
+        if (!drawn) {
+          return `BT /${font} ${fs} Tf ${color[0]} ${color[1]} ${color[2]} rg ` +
+            `${round2(tx)} ${round2(layout.heightPt - yDown)} Td ${standardShow(text)} Tj ET `;
+        }
+        for (const [name, object] of drawn.fonts) partFonts[name] = object;
+        const placed = placedText(drawn, round2(tx), round2(layout.heightPt - yDown + fs), `${color[0]} ${color[1]} ${color[2]} rg`);
+        return placed ? `${placed} ` : '';
+      };
+      const rightAt = (yDown: number, font: string, text: string, part: string): string => {
+        const w = parts?.get(part)?.widths[0] ?? text.length * fs * 0.55;
+        return textAt(layout.widthPt - LEGEND_PAD - w, yDown, font, [0.1, 0.1, 0.1], text, part);
       };
       let content =
         `q ${round2(sx)} 0 0 ${round2(sy)} 0 0 cm ` +
         `1 1 1 rg 0 0 ${round2(layout.widthPt)} ${round2(layout.heightPt)} re f ` +
         `${r} ${g} ${b} RG 1 w 0.5 0.5 ${round2(layout.widthPt - 1)} ${round2(layout.heightPt - 1)} re S ` +
-        textAt(LEGEND_PAD, LEGEND_PAD + LEGEND_ROW_H * 0.8, 'HelvB', [0.1, 0.1, 0.1], title);
-      for (const row of layout.rows) {
+        textAt(LEGEND_PAD, LEGEND_PAD + LEGEND_ROW_H * 0.8, 'HelvB', [0.1, 0.1, 0.1], title, 'title');
+      layout.rows.forEach((row, rowIndex) => {
         const [sr, sg, sb] = hexToRgb(row.color);
         const sym = symbolById(row.symbol);
         // The swatch is the symbol itself, drawn at row height in a nested
@@ -1022,14 +1109,14 @@ function addAnnotations(
         content +=
           `q 1 0 0 1 ${round2(LEGEND_PAD)} ${round2(layout.heightPt - row.y - fs * 0.2 - LEGEND_SYMBOL_W + 2)} cm ` +
           `${sr} ${sg} ${sb} RG 1 w 1 J 1 j ${symbolOps(sym.parts, LEGEND_SYMBOL_W, LEGEND_SYMBOL_W)}S Q ` +
-          textAt(LEGEND_PAD + LEGEND_SYMBOL_W + 4, row.y, 'Helv', [0.1, 0.1, 0.1], row.group) +
-          rightAt(row.y, 'Helv', String(row.count));
-      }
+          textAt(LEGEND_PAD + LEGEND_SYMBOL_W + 4, row.y, 'Helv', [0.1, 0.1, 0.1], row.group, `group:${rowIndex}`) +
+          rightAt(row.y, 'Helv', String(row.count), `count:${rowIndex}`);
+      });
       content +=
         `0.5 0.5 0.5 RG 0.5 w ${round2(LEGEND_PAD)} ${round2(layout.heightPt - layout.totalY - fs * 0.4)} m ` +
         `${round2(layout.widthPt - LEGEND_PAD)} ${round2(layout.heightPt - layout.totalY - fs * 0.4)} l S ` +
-        textAt(LEGEND_PAD, layout.totalY, 'HelvB', [0.1, 0.1, 0.1], totalWord) +
-        rightAt(layout.totalY, 'HelvB', String(layout.total)) +
+        textAt(LEGEND_PAD, layout.totalY, 'HelvB', [0.1, 0.1, 0.1], totalWord, 'totalWord') +
+        rightAt(layout.totalY, 'HelvB', String(layout.total), 'total') +
         'Q';
       const ap = context.register(
         context.stream(content, {
@@ -1038,7 +1125,7 @@ function addAnnotations(
           FormType: 1,
           BBox: [0, 0, dispW, dispH],
           Matrix: apMatrixFor(rotation),
-          Resources: { Font: { Helv: fontRef, HelvB: boldRef } },
+          Resources: { Font: { Helv: fontRef, HelvB: boldRef, ...partFonts } },
         }),
       );
       annot = context.obj({
@@ -1174,16 +1261,16 @@ function addAnnotations(
       // unmoved stamp keeps /Rect as written.
       // The box of a NoRotate original is its upright box, so a page rotation
       // alone gives back the rectangle as written.
-      const original = a.importedOriginal;
+      const imported = a.importedOriginal;
       annot = dictionaries.get(authored)!.clone(context);
       const placed = a.noRotate ? uprightDisplayToPdfRect(a, { x, y, width, height }, rotation) : [rx0, ry0, rx1, ry1];
-      if (placed.some((v, k) => Math.abs(v - original.rect[k]) > 0.01)) {
+      if (placed.some((v, k) => Math.abs(v - imported.rect[k]) > 0.01)) {
         annot.set(PDFName.of('Rect'), context.obj(placed));
       }
-      if ((authored.note ?? '') !== (original.contents ?? '')) {
+      if ((authored.note ?? '') !== (imported.contents ?? '')) {
         annot.set(PDFName.of('Contents'), PDFHexString.fromText(authored.note ?? ''));
       }
-      if (original.color !== undefined && a.color !== original.color) annot.set(PDFName.of('C'), context.obj([r, g, b]));
+      if (imported.color !== undefined && a.color !== imported.color) annot.set(PDFName.of('C'), context.obj([r, g, b]));
     } else if (a.kind === 'stamp') {
       const label = (a.note ?? '').toUpperCase();
       const fontRef = context.register(
@@ -1198,7 +1285,10 @@ function addAnnotations(
       // short fixed labels, not free-form text.
       const maxChars = Math.max(1, Math.floor((dispW - STAMP_PAD * 2) / (STAMP_FONT_SIZE * 0.6)));
       const clipped = label.length > maxChars ? label.slice(0, maxChars) : label;
-      const textWidth = clipped.length * STAMP_FONT_SIZE * 0.6;
+      // A label the standard Helvetica does not hold is drawn in bundled
+      // faces (`planTexts`), whole.
+      const drawnLabel = texts.drawn.get(authored)?.get('label');
+      const textWidth = drawnLabel ? Math.max(0, ...drawnLabel.widths) : clipped.length * STAMP_FONT_SIZE * 0.6;
       const tx = Math.max(STAMP_PAD, (dispW - textWidth) / 2);
       const ty = (dispH - STAMP_FONT_SIZE) / 2 + STAMP_FONT_SIZE * 0.2;
       // Translucent fill wrapped in q/Q so only the background rect picks up
@@ -1206,7 +1296,13 @@ function addAnnotations(
       const content =
         `q /GS0 gs ${r} ${g} ${b} rg 0 0 ${dispW} ${dispH} re f Q ` +
         `${r} ${g} ${b} RG 1.5 w 0.75 0.75 ${dispW - 1.5} ${dispH - 1.5} re S ` +
-        `BT /HelvB ${STAMP_FONT_SIZE} Tf ${r} ${g} ${b} rg ${tx} ${ty} Td (${escapePdfText(clipped)}) Tj ET`;
+        (drawnLabel
+          ? placedText(drawnLabel, tx, ty + STAMP_FONT_SIZE, `${r} ${g} ${b} rg`)
+          : standardTextHolds(clipped)
+            ? `BT /HelvB ${STAMP_FONT_SIZE} Tf ${r} ${g} ${b} rg ${tx} ${ty} Td ${standardShow(clipped)} Tj ET`
+            // The name of an image stamp whose image did not embed, in
+            // characters no face holds: the border stands alone.
+            : '');
       const gsRef = context.register(context.obj({ Type: 'ExtGState', ca: 0.12 }));
       const ap = context.register(
         context.stream(content, {
@@ -1215,7 +1311,7 @@ function addAnnotations(
           FormType: 1,
           BBox: [0, 0, dispW, dispH],
           Matrix: apMatrixFor(rotation),
-          Resources: { Font: { HelvB: fontRef }, ExtGState: { GS0: gsRef } },
+          Resources: { Font: { HelvB: fontRef, ...Object.fromEntries(drawnLabel?.fonts ?? []) }, ExtGState: { GS0: gsRef } },
         }),
       );
       annot = context.obj({
@@ -1240,6 +1336,20 @@ function addAnnotations(
         F: 4, // print
       });
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
+      // A note drawn again for an imported one keeps the icon name, the open
+      // state and the flags of its original, and an appearance when the
+      // original had one.
+      if (original) {
+        for (const key of ['Name', 'Open', 'F']) {
+          const written = entryOf(original, key);
+          if (written !== undefined) annot.set(PDFName.of(key), written);
+          else annot.delete(PDFName.of(key));
+        }
+        const appearance = noteAppearance(context, original, [r, g, b], changeOf(authored).color);
+        const state = entryOf(original, 'AS');
+        if (appearance) annot.set(PDFName.of('AP'), appearance);
+        if (appearance && state !== undefined) annot.set(PDFName.of('AS'), state);
+      }
     } else if (a.kind === 'textmarkup') {
       // Native text markup — round-trips as the real /Highlight, /Underline,
       // /StrikeOut, or /Squiggly with /QuadPoints (one quad per marked run) and
@@ -1344,19 +1454,49 @@ function addAnnotations(
       });
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     }
+    // An edited annotation keeps every entry of its original the emit did
+    // not write and does not replace.
+    if (original) carryOriginalEntries(annot, original, authored);
+    // A default style and a rich text name the original's font; a text in
+    // bundled faces has neither.
+    if (texts.drawn.get(authored)?.get('body')?.bundled) {
+      annot.delete(PDFName.of('DS'));
+      annot.delete(PDFName.of('RC'));
+    }
     const layer = layerGates.get(authored);
     if (layer !== undefined) annot.set(PDFName.of('OC'), layer);
     // A /DA written here names this builder's own font.
-    if (annot.has(PDFName.of('DA'))) writtenDefaults.add(annot);
+    if (annot.has(PDFName.of('DA')) && !carriedDefault) writtenDefaults.add(annot);
+    texts.emitted.add(annot);
     const ref = context.register(annot);
-    const original = references.get(authored);
-    if (original) removals.replaced.set(original.tag, ref);
+    const replacedOriginal = references.get(authored);
+    if (replacedOriginal) removals.replaced.set(replacedOriginal.tag, ref);
     let annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
     if (!annots) {
       annots = context.obj([]) as PDFArray;
       copied.node.set(PDFName.of('Annots'), annots);
     }
     annots.push(ref);
+    listed.push(ref);
+  }
+  // The order of /Annots is the order a viewer paints in. The positions the
+  // imported originals held take the model's annotations in model order, an
+  // edited one where its original stood; every other entry (a link, a
+  // widget, a popup) stays where it is, and a new annotation follows.
+  const annots = copied.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+  if (annots && layout) {
+    const ordered: PDFObject[] = [];
+    let next = 0;
+    for (const entry of layout) {
+      if (entry !== MODEL_POSITION) ordered.push(entry);
+      else if (next < listed.length) ordered.push(listed[next++]);
+    }
+    ordered.push(...listed.slice(next));
+    const standing = annots.asArray();
+    if (ordered.length === standing.length && ordered.some((entry, i) => entry !== standing[i])) {
+      ordered.forEach((entry, i) => annots.set(i, entry));
+      removals.reordered = true;
+    }
   }
 }
 
@@ -1369,12 +1509,11 @@ function applyPageExtras(
   untouched: ReadonlySet<PDFDict>,
   removals: RemovedAnnotations,
   writtenDefaults: Set<PDFDict>,
+  stripped: StrippedOriginals | undefined,
+  texts: DrawnTexts,
+  pageNumber: number,
 ): void {
-  applyRotation(copied, page);
-  // Must still run when `annotations` is empty but removedImportedOriginals
-  // isn't — e.g. the user deleted the only imported annotation on this page,
-  // leaving nothing to re-append but still needing the original stripped.
-  if (page.annotations?.length || page.removedImportedOriginals?.length) {
+  if (stripped) {
     addAnnotations(
       output,
       copied,
@@ -1385,8 +1524,331 @@ function applyPageExtras(
       untouched,
       removals,
       writtenDefaults,
+      stripped,
+      texts,
+      pageNumber,
     );
   }
+}
+
+/** The page's rotation, and its imported originals matched and taken out.
+ *  Undefined for a page with no annotation and no removed original. */
+function prepareAnnotations(
+  copied: import('pdf-lib').PDFPage,
+  page: ExportPage,
+  untouched: ReadonlySet<PDFDict>,
+  removals: RemovedAnnotations,
+): StrippedOriginals | undefined {
+  applyRotation(copied, page);
+  // Must still run when `annotations` is empty but removedImportedOriginals
+  // isn't — e.g. the user deleted the only imported annotation on this page,
+  // leaving nothing to re-append but still needing the original stripped.
+  if (!page.annotations?.length && !page.removedImportedOriginals?.length) return undefined;
+  return stripImportedOriginals(copied, page.annotations ?? [], page.removedImportedOriginals ?? [], untouched, removals);
+}
+
+/** The texts one build draws, by annotation and by the part of it the text
+ *  is, and the fonts their /DA names that this build gives a name in the
+ *  default resources. */
+interface DrawnTexts {
+  drawn: Map<ExportAnnotation, Map<string, DrawnText>>;
+  /** What the original of a text box drawn again gives it. */
+  carried: Map<ExportAnnotation, CarriedStyle>;
+  /** The free texts whose changed size keeps the appearance of the original
+   *  (`scaledOriginal`). */
+  scaled: Set<ExportAnnotation>;
+  ownFonts: Map<PDFDict, PDFObject>;
+  /** Per copied page: the originals of the text boxes the build draws again. */
+  redrawn: Map<import('pdf-lib').PDFPage, PDFDict[]>;
+  /** The annotation dictionaries the build wrote. */
+  emitted: Set<PDFDict>;
+}
+
+const REFUSAL_KEYS = {
+  font: 'refusal.edit.textBoxFont',
+  styled: 'refusal.edit.textBoxStyled',
+  script: 'refusal.edit.textBoxScript',
+  faces: 'refusal.edit.textBoxFaces',
+} as const;
+
+/** The build's refusal of a text it cannot draw. The reducers refuse the
+ *  edit that leads here (`lib/text-box-edit.ts`), so a build of a model the
+ *  reducers made does not raise it. */
+function textRefused(reason: RedrawRefusal | 'faces', a: ExportAnnotation, pageNumber: number, characters: string[] = []): Error {
+  return new Error(tChrome(REFUSAL_KEYS[reason], {
+    ...textBoxNoticeValues(a, pageNumber),
+    characters: characters.slice(0, 12).join(' '),
+  }));
+}
+
+/** Writes the /DA of a text box and answers whether it is the original's.
+ *  A text in the original's font keeps its /DA, with the colour operator
+ *  replaced when the user changed the colour. Any other /DA names the first
+ *  font of the appearance, and the build gives that name its font. */
+function writeDefaultAppearance(
+  annot: PDFDict, drawn: DrawnText, carried: CarriedStyle | undefined, recoloured: boolean, [r, g, b]: [number, number, number],
+  ownFonts: Map<PDFDict, PDFObject>,
+): boolean {
+  const written = carried?.da ? annot.context.lookup(carried.da) : undefined;
+  const color = carried?.textColor && !recoloured ? carried.textColor : `${r} ${g} ${b} rg`;
+  if (drawn.standard) {
+    // `Helv` of a /DA this build writes is bound with every other.
+    annot.set(PDFName.of('DA'), PDFString.of(`${color} /Helv ${drawn.size} Tf`));
+    return false;
+  }
+  if (!drawn.bundled && (written instanceof PDFString || written instanceof PDFHexString)) {
+    annot.set(PDFName.of('DA'), recoloured
+      ? PDFString.of(defaultAppearanceWithColor(String.fromCharCode(...written.asBytes()), `${r} ${g} ${b} rg`))
+      : carried!.da!);
+    return true;
+  }
+  const [name, font] = drawn.fonts[0];
+  annot.set(PDFName.of('DA'), PDFString.of(`${color} /${name} ${drawn.size} Tf`));
+  ownFonts.set(annot, font);
+  return false;
+}
+
+/** The width a text box gives its text, in points: the box in display
+ *  orientation less the padding of each side. */
+function textWidthOf(a: ExportAnnotation, crop: { x: number; y: number; width: number; height: number }, rotation: number): number {
+  const [x0, y0, x1, y1] = displayRectToPdf(a, crop, rotation);
+  const swapped = rotation === 90 || rotation === 270;
+  const dispW = swapped ? y1 - y0 : x1 - x0;
+  const box = a.kind === 'callout' && a.calloutBox && a.w > 0 ? (a.calloutBox[2] / a.w) * dispW : dispW;
+  return Math.max(1, box - TEXT_BOX_PAD * 2);
+}
+
+const ALIGN_NAMES = ['left', 'center', 'right'] as const;
+
+/** A text the engine draws, and where its drawing goes. */
+interface EngineJob {
+  authored: ExportAnnotation;
+  part: string;
+  request: TextBlockRequest;
+  pageNumber: number;
+  size: number;
+  leading: number;
+}
+
+/**
+ * Plans every text the build draws: each free text and callout it creates
+ * or draws again, and each stamp label and legend the standard Helvetica
+ * cannot draw. The emit is synchronous; reading an embedded program and the
+ * engine's drawing are not. A build whose texts the standard Helvetica and
+ * the fonts of the originals hold calls no engine.
+ */
+async function planTexts(
+  output: PDFDocument,
+  pending: {
+    copied: import('pdf-lib').PDFPage; page: ExportPage; stripped: StrippedOriginals | undefined;
+    sourceFont: (name: string) => PDFObject | undefined;
+  }[],
+  stampImages: ReadonlyMap<string, unknown>,
+  engine: TextBoxEngine | undefined,
+): Promise<DrawnTexts> {
+  const plans: DrawnTexts = { drawn: new Map(), carried: new Map(), scaled: new Set(), ownFonts: new Map(), redrawn: new Map(), emitted: new Set() };
+  const context = output.context;
+  let standardFont: PDFObject | undefined;
+  const standard = (): PDFObject => (standardFont ??= context.register(context.obj({
+    Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding',
+  })));
+  const put = (authored: ExportAnnotation, part: string, drawn: DrawnText): void => {
+    let parts = plans.drawn.get(authored);
+    if (!parts) plans.drawn.set(authored, parts = new Map());
+    parts.set(part, drawn);
+  };
+  const jobs: EngineJob[] = [];
+  let open: OpenFontProgram | undefined;
+  let group = 0;
+
+  for (let index = 0; index < pending.length; index++) {
+    const { copied, page, stripped, sourceFont } = pending[index];
+    const pageNumber = index + 1;
+    const crop = copied.getCropBox();
+    const rotation = ((copied.getRotation().angle % 360) + 360) % 360;
+    for (const authored of page.annotations ?? []) {
+      if (editIsNone(authored.importedEdit) && stripped?.kept.get(authored) !== undefined) continue;
+      const original = stripped?.dictionaries.get(authored);
+      const carriedNote = stripped?.nameContents.get(authored);
+      const a = carriedNote !== undefined && !authored.note ? { ...authored, note: carriedNote } : authored;
+      // The build writes the original with its appearance: it draws nothing.
+      if (original && authored.importedEdit && keepsAppearance(original, a)) continue;
+      if (authored.kind === 'freetext' || authored.kind === 'callout') {
+        const text = a.note ?? '';
+        let plan: TextPlan;
+        if (original) {
+          const job = { original, text, textChanged: changeOf(authored).text, sourceFont };
+          plan = planFreeTextRedraw(context, job, open, standard);
+          if ('refusal' in plan && plan.refusal === 'font' && !open) {
+            // An embedded TrueType program is read only when a font gives
+            // its characters no other way.
+            const { default: fontkit } = await import('@pdf-lib/fontkit');
+            open = (bytes) => fontkit.create(bytes) as unknown as FontProgram;
+            plan = planFreeTextRedraw(context, job, open, standard);
+          }
+        } else {
+          plan = planOwnText(context, text, standard);
+        }
+        if ('refusal' in plan) {
+          if (original && mayScaleAppearance(original, a)) {
+            plans.scaled.add(authored);
+            continue;
+          }
+          throw textRefused(plan.refusal, a, pageNumber, 'characters' in plan ? plan.characters : []);
+        }
+        const width = textWidthOf(a, crop, rotation);
+        const { textColor, borderWidth, da } = plan;
+        if (original) {
+          const onPage = plans.redrawn.get(copied);
+          if (onPage) onPage.push(original);
+          else plans.redrawn.set(copied, [original]);
+          plans.carried.set(authored, {
+            ...(textColor ? { textColor } : {}), ...(borderWidth !== undefined ? { borderWidth } : {}), ...(da ? { da } : {}),
+          });
+        }
+        if (plan.via === 'font') {
+          put(authored, 'body', drawInFace(plan.face, text, plan.size, plan.leading, plan.align, width));
+        } else {
+          jobs.push({
+            authored, part: 'body', pageNumber, size: plan.size, leading: plan.leading,
+            request: {
+              text, size: plan.size, leading: plan.leading, width, family: plan.style.family,
+              ...(plan.style.bold ? { bold: true } : {}), ...(plan.style.italic ? { italic: true } : {}),
+              ...(plan.align !== undefined ? { align: ALIGN_NAMES[plan.align] } : {}),
+            },
+          });
+        }
+      } else if (authored.kind === 'countlegend' || isLabelStamp(a, original, stampImages)) {
+        const parts = authored.kind === 'countlegend' ? legendTexts(a) : [{ part: 'label', text: (a.note ?? '').toUpperCase(), bold: true, size: STAMP_FONT_SIZE }];
+        if (parts.every((entry) => standardTextHolds(entry.text) && !needsShaping(entry.text))) continue;
+        const refused = partsRefusal(parts.map((entry) => ({ text: entry.text, style: { family: 'sans', ...(entry.bold ? { bold: true as const } : {}) } })));
+        if (refused) {
+          // An image stamp shows its image; its name is a label only when
+          // the image did not embed.
+          if (authored.kind === 'stamp' && a.imageData) continue;
+          throw textRefused(refused.reason, a, pageNumber, refused.reason === 'script' ? refused.characters : []);
+        }
+        group++;
+        for (const entry of parts) {
+          jobs.push({
+            authored, part: entry.part, pageNumber, size: entry.size, leading: entry.size * LEADING_FACTOR,
+            request: { text: entry.text, size: entry.size, family: 'sans', ...(entry.bold ? { bold: true } : {}), align: 'left', group },
+          });
+        }
+      }
+    }
+  }
+  if (jobs.length === 0) return plans;
+  if (!engine) throw new Error(tChrome('refusal.commit.textEngineMissing'));
+  const batches = engineBatches(jobs);
+  for (let call = 0; call < batches.length; call++) {
+    const batch = batches[call];
+    const answer = await engine(batch.map((job) => job.request), true);
+    if (answer.blocks.length !== batch.length) throw new Error(tChrome('refusal.commit.textEngineMissing'));
+    // An answer names its fonts on its own. The parts of one appearance can
+    // come from two calls, so each later call's names take the call's mark.
+    const named = (name: string): string => (call === 0 ? name : `${name}_b${call}`);
+    const fonts = new Map<string, PDFObject>();
+    if (answer.pdf) {
+      const carrier = await PDFDocument.load(Uint8Array.from(atob(answer.pdf), (c) => c.charCodeAt(0)), { updateMetadata: false });
+      const held = carrier.getPage(0).node.Resources()?.lookup(PDFName.of('Font'));
+      const copier = PDFObjectCopier.for(carrier.context, context);
+      if (held instanceof PDFDict) for (const [name, value] of held.entries()) fonts.set(named(name.decodeText()), copier.copy(value));
+    }
+    const held = answer.faces ? new Set(answer.faces) : undefined;
+    batch.forEach((job, index) => {
+      const block = answer.blocks[index];
+      putEngineBlock(job, call === 0 || block.refused !== undefined ? block : {
+        ...block,
+        fonts: block.fonts?.map(named),
+        content: block.content?.replace(/\/([^\s/<>[\]()]+)(?= [-\d.]+ Tf)/g, (_selected, name: string) => `/${named(name)}`),
+      }, fonts, held);
+    });
+  }
+  return plans;
+
+  function putEngineBlock(
+    job: EngineJob, block: TextBlockResult, fonts: ReadonlyMap<string, PDFObject>, held: ReadonlySet<string> | undefined,
+  ): void {
+    if (block.refused !== undefined) {
+      // `faces` names one cause: the face tables hold every character and
+      // the fonts folder, as the engine lists it, lacks a face file the
+      // text needs. Every other refusal names the characters the engine
+      // refused.
+      const { family, bold, italic } = job.request;
+      const style = { family, ...(bold ? { bold: true as const } : {}), ...(italic ? { italic: true as const } : {}) };
+      const glyphs = textForGlyphCoverage(job.request.text);
+      const never = charactersWithoutFace(glyphs, style, null);
+      const lacking = never.length === 0 && held !== undefined && charactersWithoutFace(glyphs, style, held).length > 0;
+      throw textRefused(lacking ? 'faces' : 'script', job.authored, job.pageNumber, lacking ? [] : [...block.refused]);
+    }
+    const named = (block.fonts ?? []).map((name): [string, PDFObject] => {
+      const font = fonts.get(name);
+      if (!font) throw new Error(tChrome('refusal.commit.textEngineMissing'));
+      return [name, font];
+    });
+    if (named.length === 0) {
+      // A text with no glyph: nothing is shown, and /DA names the standard font.
+      put(job.authored, job.part, drawInFace(standardFace(context, standard()), '', job.size, job.leading, 0, undefined));
+      return;
+    }
+    put(job.authored, job.part, {
+      content: block.content ?? '', fonts: named, lines: block.lines, widths: block.widths,
+      size: job.size, leading: job.leading, align: Math.max(0, ALIGN_NAMES.indexOf(block.align)) as 0 | 1 | 2,
+      rtl: block.rtl, standard: false, bundled: true,
+      ...(block.hyphens && block.hyphens.length > 0 ? { hyphens: block.hyphens } : {}),
+    });
+  }
+}
+
+/** The most text blocks and the most UTF-16 units of text one engine call
+ *  of a build carries. The engine refuses a call of more than 4096 blocks or
+ *  1,000,000 characters (`text_box._MAX_BLOCKS`, `_MAX_CHARS`); one text is
+ *  at most `TEXT_BOX_TEXT_LIMIT` units, so a batch of one block is in bounds. */
+export const ENGINE_BLOCKS_PER_CALL = 1024;
+export const ENGINE_UNITS_PER_CALL = 250_000;
+
+/** `jobs` in order, cut into the calls that draw them. A build of any size
+ *  makes calls of a bounded size. */
+export function engineBatches<T extends { request: { text: string } }>(jobs: readonly T[]): T[][] {
+  const batches: T[][] = [];
+  let units = 0;
+  for (const job of jobs) {
+    const size = job.request.text.length;
+    const last = batches[batches.length - 1];
+    if (!last || last.length >= ENGINE_BLOCKS_PER_CALL || units + size > ENGINE_UNITS_PER_CALL) {
+      batches.push([job]);
+      units = size;
+    } else {
+      last.push(job);
+      units += size;
+    }
+  }
+  return batches;
+}
+
+/** A stamp the build draws as a bordered label: no symbol, no signature
+ *  face, no image the build embedded, and no appearance it carries. */
+function isLabelStamp(a: ExportAnnotation, original: PDFDict | undefined, stampImages: ReadonlyMap<string, unknown>): boolean {
+  return a.kind === 'stamp' && !symbolPartsOf(a) && !a.signatureFont
+    && !(a.imageData && stampImages.get(a.imageData))
+    && !(a.importedOriginal && stampAppearanceIsCarried(original));
+}
+
+/** The texts of a placed legend, by part. */
+function legendTexts(a: ExportAnnotation): { part: string; text: string; bold: boolean; size: number }[] {
+  const rows = a.legendRows ?? [];
+  const layout = legendLayout(rows, a.legendTitle ?? '');
+  const size = LEGEND_FONT_SIZE;
+  return [
+    { part: 'title', text: a.legendTitle ?? '', bold: true, size },
+    { part: 'totalWord', text: a.legendTotalWord ?? '', bold: true, size },
+    { part: 'total', text: String(layout.total), bold: true, size },
+    ...layout.rows.flatMap((row, i) => [
+      { part: `group:${i}`, text: row.group, bold: false, size },
+      { part: `count:${i}`, text: String(row.count), bold: false, size },
+    ]),
+  ];
 }
 
 /**
@@ -1806,6 +2268,7 @@ async function assemblePages(
   ownSourceKey?: string,
   ownBytes?: Uint8Array,
   metadataOverrides: MetadataOverrides = {},
+  services: BuildServices = {},
 ): Promise<void> {
   // Catalog defaults belong to the document; explicit page conditions belong
   // to that physical page. Cache per source/value so repeated page occurrences
@@ -1878,7 +2341,7 @@ async function assemblePages(
   const stampImages = await embedStampImages(output, pages);
   const signatureFonts = await embedSignatureFonts(output, pages);
   const used = new Set<PDFPage>();
-  const pendingExtras: { copied: PDFPage; page: ExportPage; untouched: ReadonlySet<PDFDict>; pair: CarriedSourcePages['pairs'][number] }[] = [];
+  const pendingExtras: { copied: PDFPage; page: ExportPage; untouched: ReadonlySet<PDFDict>; pair: CarriedSourcePages['pairs'][number]; sourceFont: (name: string) => PDFObject | undefined }[] = [];
   const removals: RemovedAnnotations = { replaced: new Map(), references: [], popups: new Map(), count: 0 };
   // Which source page landed at which output page — the reference-identity
   // channel every catalog/struct remap depends on (catalog-carry.ts).
@@ -1917,7 +2380,14 @@ async function assemblePages(
     // Layer identity is paired against the untouched copy. Adding/removing
     // an annotation or wrapping Contents first changes that graph's shape.
     const pair: CarriedSourcePages['pairs'][number] = { srcIndex: page.pageIndex, outPage: copied };
-    pendingExtras.push({ copied, page, untouched, pair });
+    // A font of the source's default resources, as the object the page
+    // copies of that source share.
+    const sourceFonts = defaultFontsOf(src.doc);
+    const sourceFont = (name: string): PDFObject | undefined => {
+      const held = sourceFonts?.get(PDFName.of(name));
+      return held === undefined ? undefined : src.copier.copy(held);
+    };
+    pendingExtras.push({ copied, page, untouched, pair, sourceFont });
     output.addPage(copied);
     // copyPages clones the page leaf separately from its recursive object
     // cache. An annotation's /P can therefore name a second, detached copy
@@ -1972,19 +2442,23 @@ async function assemblePages(
     output.context.getObjectRef(optionalContent.properties) ?? output.context.register(optionalContent.properties));
   const asCopied = new Map<CarriedSourcePages['pairs'][number], PDFObject[]>();
   const writtenDefaults = new Set<PDFDict>();
-  for (const { copied, page, untouched, pair } of pendingExtras) {
+  const prepared = pendingExtras.map(({ copied, page, untouched, pair, sourceFont }) => {
     const annots = output.context.lookup(copied.node.get(PDFName.of('Annots')));
     if (annots instanceof PDFArray) asCopied.set(pair, annots.asArray().slice());
-    applyPageExtras(copied, page, output, stampImages, signatureFonts, untouched, removals, writtenDefaults);
-  }
+    return { copied, page, sourceFont, stripped: prepareAnnotations(copied, page, untouched, removals) };
+  });
+  const texts = await planTexts(output, prepared, stampImages, services.textBoxes);
+  pendingExtras.forEach(({ copied, page, untouched }, index) => {
+    applyPageExtras(copied, page, output, stampImages, signatureFonts, untouched, removals, writtenDefaults, prepared[index].stripped, texts, index + 1);
+  });
   // The carries below pair each source page with its copy by position. A
   // build that removes an original changes the order of /Annots (the strip,
   // a popup taken off another page), so every page then pairs /Annots as
   // copied; a build that removes none pairs the live arrays.
-  if (removals.count > 0) {
+  if (removals.count > 0 || removals.reordered) {
     for (const [pair, entries] of asCopied) pair.annotsAsCopied = output.context.obj(entries);
-    settleLinksToRemoved(output, removals);
   }
+  if (removals.count > 0) settleLinksToRemoved(output, removals);
   if (removals.count > 0 || boundTargets > 0) settleActionsOnRemoved(output, removals, settlement);
   if (removals.count > 0) recordRemovedSubtrees(output, removals);
   const structureMaps = carryStructTree(output, carriedSources);
@@ -2015,7 +2489,18 @@ async function assemblePages(
   if (boundTargets > 0) unbindEmbeddedTargets(output);
   // After every annotation is in place: each free text /DA font is a name
   // of the form's default resources (ISO 32000-2 12.5.6.6, 12.7.4.3).
-  completeAnnotationDefaultResources(output, contributions, { authored: writtenDefaults, bindings: fontBindings });
+  completeAnnotationDefaultResources(output, contributions, {
+    authored: writtenDefaults, bindings: fontBindings, ownFonts: texts.ownFonts,
+    released: (font) => bundledSubsetStem(output.context, font) !== undefined, redrawn: texts.redrawn, emitted: texts.emitted,
+  });
+}
+
+/** /AcroForm /DR /Font of a document, or undefined. */
+function defaultFontsOf(doc: PDFDocument): PDFDict | undefined {
+  const form = doc.catalog.lookup(PDFName.of('AcroForm'));
+  const resources = form instanceof PDFDict ? form.lookup(PDFName.of('DR')) : undefined;
+  const fonts = resources instanceof PDFDict ? resources.lookup(PDFName.of('Font')) : undefined;
+  return fonts instanceof PDFDict ? fonts : undefined;
 }
 
 /** A source document as the build copies from it: loaded, then its names
@@ -2115,10 +2600,18 @@ async function saveReachable(output: PDFDocument): Promise<Uint8Array> {
   return saveWithFormatDeclarations(output);
 }
 
+/** What a build asks of the application around it. */
+export interface BuildServices {
+  /** The engine's `text_box_appearance`: the texts of annotations the
+   *  standard Helvetica and the fonts of the originals do not hold. */
+  textBoxes?: TextBoxEngine;
+}
+
 export async function buildPdf(
   pages: ExportPage[],
   ownBytes?: Uint8Array,
   ownSourceKey?: string,
+  services: BuildServices = {},
 ): Promise<Uint8Array> {
   // A zero-page PDF is invalid; pdf-lib would happily save one. buildPdfx
   // skips empty documents for the same reason.
@@ -2129,7 +2622,7 @@ export async function buildPdf(
   // travels from the source instead (carryDocumentInfo); /Producer is the one
   // entry this builder generates, set explicitly below.
   const output = await PDFDocument.create({ updateMetadata: false });
-  await assemblePages(output, pages, ownSourceKey, ownBytes, { producer: `PDFX ${PDFX_VERSION}` });
+  await assemblePages(output, pages, ownSourceKey, ownBytes, { producer: `PDFX ${PDFX_VERSION}` }, services);
   // Names the writer, so it describes this build and not the source's tool.
   // GENERATED_INFO_KEYS keeps the carry off the key; this is its only writer.
   output.setProducer(`PDFX ${PDFX_VERSION}`);
@@ -2141,6 +2634,7 @@ export async function buildPdfx(
   title: string,
   ownBytes?: Uint8Array,
   ownSourceKey?: string,
+  services: BuildServices = {},
 ): Promise<Uint8Array> {
   const output = await PDFDocument.create({ updateMetadata: false });
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
@@ -2148,7 +2642,7 @@ export async function buildPdfx(
   const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
   await assemblePages(output, nonEmpty.flatMap((doc) => doc.pages), ownSourceKey, ownBytes, {
     producer: `PDFX ${PDFX_VERSION}`, title, keywords: 'PDFX',
-  });
+  }, services);
   // The embedded-files carry ran inside assemblePages, BEFORE the manifest
   // attach: pdf-lib's save-time embed appends to an existing tree, so the
   // manifest and carried members coexist (embedded-files-carry.test.ts).

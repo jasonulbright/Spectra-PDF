@@ -209,6 +209,7 @@ export const DOCUMENTLESS_METHODS = [
   'list_pkcs11_certificates',
   'list_csc_credentials',
   'preview_stamp_appearance',
+  'text_box_appearance',
   'print_preview_cleanup',
 ] as const;
 

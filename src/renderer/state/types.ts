@@ -72,7 +72,14 @@ export interface ImportedAnnotationFingerprint {
   // true; otherwise an AP-less imported annotation would render as nothing
   // until the user happens to edit it.
   hasAppearance: boolean;
+  // The original's position in its source page's /Annots, for an annotation
+  // held by reference. The commit then matches this original and no other,
+  // so two annotations with one subtype, text and rectangle stay apart.
+  slot?: number;
 }
+
+/** A PageAnnotation's entries as its import produced them. */
+export type ImportedAnnotationState = Omit<PageAnnotation, 'id' | 'importedOriginal' | 'importedState' | 'geometryDiverged' | 'baked'>;
 
 // Native PDF text-markup subtypes (quad-based) — imported from a foreign PDF as
 // first-class editable annotations. `kind: 'highlight'` is the box highlight
@@ -174,6 +181,17 @@ export interface PageAnnotation {
   // holds no drawing. The value is pdf.js's id of the original in its source
   // page; the canvas draws that appearance, rastered from the loaded bytes.
   carriedAppearance?: string;
+  // imported, with an appearance, and no stamp: pdf.js's id of the original
+  // in its source page. `drawsText`: that appearance draws the annotation's
+  // text (ISO 32000-2 12.5.6.6, and 12.5.6.7 Table 178 /Cap), or the import
+  // could not tell. While the commit will keep the appearance as written,
+  // the canvas draws it, rastered from the loaded bytes
+  // (lib/imported-edit.ts `keptAppearanceMove`).
+  originalAppearance?: { id: string; drawsText?: true };
+  // free text and callout, imported: how the commit can draw the text again
+  // (lib/free-text-redraw.ts `textRedrawRecord`). The reducer refuses an edit
+  // the commit could not draw (lib/text-box-edit.ts).
+  textRedraw?: import('../lib/free-text-redraw').TextRedrawRecord;
   // stamp only, imported with its appearance carried: the original has the
   // NoRotate flag (ISO 32000-2 12.5.3). The box is then the stamp as it
   // stands upright on the screen: its top-left corner is the upper-left
@@ -237,6 +255,11 @@ export interface PageAnnotation {
   // Never touched after import; edits to x/y/w/h/color/note/points do not
   // update it.
   importedOriginal?: ImportedAnnotationFingerprint;
+  // The entries as imported. A page rotation maps it with the annotation; no
+  // edit changes it. The commit reads the edit as the difference to it
+  // (lib/imported-edit.ts): with no difference the original stays in the
+  // file as written.
+  importedState?: ImportedAnnotationState;
   // Set by TRANSFORM_ANNOTATIONS when an IMPORTED annotation's geometry
   // moves: the pristine-import render suppression keys on color/note, which
   // a pure move leaves equal — without this flag the moved body would stay
@@ -671,8 +694,12 @@ export interface AppState {
   pageEditRefusals: number;
   // Why the latest refusal happened: a document's permissions, or `moving`
   // when the store refused an edit of a document sealed for a hand-over to
-  // another window; null for every other refusal.
-  pageEditRefusalReason: import('../lib/document-permissions').CapabilityBlock | 'moving' | null;
+  // another window; `textBox` when the commit could not draw the text an
+  // edit gives an annotation, with `notChanged` the number of members a
+  // batch edit left as they were (`textBox` is the first of them); null for
+  // every other refusal.
+  pageEditRefusalReason: import('../lib/document-permissions').CapabilityBlock | 'moving'
+    | { textBox: import('../lib/text-box-edit').TextBoxRefusal; notChanged?: number } | null;
 }
 
 export type AppAction =

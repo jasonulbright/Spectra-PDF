@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026.1014.156
+
+**More reliable text editing, annotations and long-running work**
+
+### New
+- Recognize printed music to MusicXML with a user-installed Audiveris.
+- Run long operations in a separate engine process so page reads, search and saves stay responsive.
+
+### Fixed
+- Keep page edits safe when a document moves to another window.
+- Keep the undo history of other documents when one document is rewritten.
+- Wait for running writes before a document or window closes, then ask to save.
+- Keep page reads, opens and saves responsive while a document check or redaction runs.
+- Keep saves and edits responsive while a document prints or exports.
+- Keep a text selection when the page text is rebuilt.
+- Keep a text selection on a recognised scan when the document is reloaded.
+- Save documents whose notes were written in an unusual form.
+- Jump to the right finding from the preflight and accessibility panels after a page edit.
+- Keep form-field suggestions for the document you are looking at when another document's detection finishes.
+- Save documents with unusual annotation shapes without creating duplicates.
+- Refuse accessibility fixes aimed at pages that were edited after the check.
+- Clear visual comparison results when either document changes.
+- Keep scan text selection working on an identical document after closing another copy.
+- Save documents with dashed or grouped annotations without creating duplicates.
+- Stop a multi-page accessibility fix when the pages change under it.
+- Keep fonts and images whose names use escaped characters after a save.
+- Move and delete notes correctly in password-protected documents.
+- Keep notes and markups from other programs unchanged until you edit them.
+- Keep the author, dates and text size of notes and text boxes from other programs when you edit them.
+- Draw accented, non-Latin and right-to-left text correctly in text boxes and callouts.
+- Keep field and text-box fonts correct when three or more documents are merged.
+- Show image stamps and typed signatures correctly while they are moved or resized.
+- Keep text-box and form fonts correct when documents are merged or split.
+- Keep stamps that must not rotate upright on rotated pages.
+- Remove deleted notes from the saved file.
+- Keep image stamps and typed signatures after later page edits.
+- Keep reply links and tagged annotations correct after a note is edited or deleted.
+- Keep soft hyphens invisible when text remains on one line.
+
 ## 2026.1011.155
 
 *Released 2026-10-11*

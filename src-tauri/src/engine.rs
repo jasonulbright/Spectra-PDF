@@ -268,6 +268,7 @@ pub(crate) const METHOD_CLASSES: &[(&str, ProcessClass)] = &[
     ("list_system_fonts", ProcessClass::Window),
     ("add_text_box", ProcessClass::Work),
     ("measure_text_box", ProcessClass::Window),
+    ("text_box_appearance", ProcessClass::Window),
     ("print", ProcessClass::Job),
     ("print_preview", ProcessClass::Job),
     ("print_preview_cleanup", ProcessClass::Job),
@@ -3546,7 +3547,7 @@ mod concurrency_tests {
             assert!(seen.insert(*method), "{method} is classified twice");
         }
         let count = |class: ProcessClass| METHOD_CLASSES.iter().filter(|(_, c)| *c == class).count();
-        assert_eq!(count(ProcessClass::Window), 66);
+        assert_eq!(count(ProcessClass::Window), 67);
         assert_eq!(count(ProcessClass::Work), 115);
         assert_eq!(count(ProcessClass::Job), 36);
         assert_eq!(count(ProcessClass::Run), 5);
@@ -3565,6 +3566,7 @@ mod concurrency_tests {
         assert_eq!(process_class("ink_settings_defaults"), ProcessClass::Work, "it lists the inks of every page");
         assert_eq!(process_class("read_aloud_page"), ProcessClass::Work, "a tagged page reads in structure order");
         assert_eq!(process_class("export_count_summary"), ProcessClass::Window);
+        assert_eq!(process_class("text_box_appearance"), ProcessClass::Window, "it opens no document");
         for method in ["merge", "create_portfolio", "remove_empty_folders"] {
             assert_eq!(process_class(method), ProcessClass::Job, "{method} reads a list of files or a folder");
         }

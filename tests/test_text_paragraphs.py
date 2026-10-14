@@ -1547,6 +1547,25 @@ class TestFamilySwap:
         _apply(src, out, para, new, family="serif", font_path=FONTS_DIR)
         assert "你" in _paras(out)[0]["text"]
 
+    @_needs_faces
+    @pytest.mark.skipif(
+        not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+        reason="CJK faces not provisioned",
+    )
+    @pytest.mark.parametrize("new", (
+        "Hello 你\u00a0world a\u2011b-c \u2012\u2013",
+        "He\u0301llo 你\u00a0world a\u2011b-c \u2012\u2013",
+    ))
+    def test_characters_of_one_glyph_in_a_cjk_paragraph_read_back_as_written(self, tmp_dir, new):
+        from pdfminer.high_level import extract_text as read_outside
+
+        src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Hello world) Tj ET")
+        out = os.path.join(tmp_dir, "o.pdf")
+        para = _paras(src)[0]
+        _apply(src, out, para, new, family="serif", font_path=FONTS_DIR)
+        assert read_outside(out).rstrip("\n\x0c") == new
+        assert _paras(out)[0]["text"] == new
+
     def test_invalid_family_refuses(self, tmp_dir):
         src = _build(tmp_dir, b"BT /F1 12 Tf 72 700 Td (Whatever text) Tj ET")
         out = os.path.join(tmp_dir, "o.pdf")

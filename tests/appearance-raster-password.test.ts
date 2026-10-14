@@ -23,7 +23,7 @@ vi.mock('../src/renderer/lib/pdfRenderer', async () => {
 
 import { contentKeyOf, evictExcept, getDocumentProxy, openPrivateCopy } from '../src/renderer/lib/pdfDocCache';
 import { forgetDocumentPassword, rememberDocumentPassword } from '../src/renderer/lib/document-passwords';
-import { holdStampRaster } from '../src/renderer/lib/stamp-raster';
+import { holdAppearanceRaster } from '../src/renderer/lib/appearance-raster';
 
 const HAS_CANVAS = (() => {
   try {
@@ -79,7 +79,7 @@ describe('the private copy of a password document', () => {
     rememberDocumentPassword(path, PASSWORD);
     try {
       const pdf = await getDocumentProxy(path, cipher);
-      const hold = holdStampRaster({ pdf, contentKey: await contentKeyOf(pdf), open: () => openPrivateCopy(pdf) }, 1, await stampId(pdf), 2);
+      const hold = holdAppearanceRaster({ pdf, contentKey: await contentKeyOf(pdf), open: () => openPrivateCopy(pdf) }, 1, await stampId(pdf), 2);
       const raster = await hold.raster;
       expect({ width: raster!.canvas.width, height: raster!.canvas.height }).toEqual({ width: 400, height: 200 });
       expect([pixel(raster!.canvas, 100, 100), pixel(raster!.canvas, 300, 100)]).toEqual([[255, 0, 0, 255], [0, 0, 255, 255]]);
@@ -119,7 +119,7 @@ describe('the private copy of a password document', () => {
       expect(getData).not.toHaveBeenCalled();
       // The raster keeps no result of the refusal.
       const source = { pdf: shown, contentKey: null, open: () => openPrivateCopy(shown) };
-      const hold = holdStampRaster(source, 1, await stampId(shown), 2);
+      const hold = holdAppearanceRaster(source, 1, await stampId(shown), 2);
       expect(await hold.raster).toBeNull();
       hold.release();
     } finally {

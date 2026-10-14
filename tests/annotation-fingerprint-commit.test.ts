@@ -174,20 +174,125 @@ describe('a commit replaces each original exactly once', () => {
   });
 });
 
+/** The operator that shows `text` in a font of one byte per character. */
+const showing = (text: string): string => `<${Buffer.from(text, 'latin1').toString('hex')}> Tj`;
+
 describe('a name-typed /Contents on a text-bearing annotation', () => {
-  it('is drawn in the re-authored FreeText appearance on the first commit', async () => {
-    const source = await pageWith((ctx) => ctx.obj({
-      Type: 'Annot', Subtype: 'FreeText', Rect: [40, 300, 200, 340], Contents: 'Approved',
-      DA: PDFString.of('0 g /Helv 12 Tf'), AP: appearance(ctx),
-    }));
-    const out = await PDFDocument.load(await commitCycle(source));
+  const nameTyped = () => pageWith((ctx) => ctx.obj({
+    Type: 'Annot', Subtype: 'FreeText', Rect: [40, 300, 200, 340], Contents: 'Approved',
+    DA: PDFString.of('0 g /Helv 12 Tf'), AP: appearance(ctx),
+  }));
+
+  it('stays as written when the annotation is not edited', async () => {
+    const out = await PDFDocument.load(await commitCycle(await nameTyped()));
+    const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    expect(annots.size()).toBe(1);
+    expect(annots.lookup(0, PDFDict).get(PDFName.of('Contents'))).toBe(PDFName.of('Approved'));
+  });
+
+  it('is drawn in the FreeText appearance when an edit draws the annotation again', async () => {
+    const source = await nameTyped();
+    const out = await PDFDocument.load(await commitCycle(source, (page) => ({
+      ...page, annotations: page.annotations!.map((a) => ({ ...a, w: a.w * 1.5 })),
+    })));
     const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
     expect(annots.size()).toBe(1);
     const freeText = annots.lookup(0, PDFDict);
     const normal = freeText.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N'));
     expect(normal).toBeInstanceOf(PDFStream);
     const bytes = normal instanceof PDFRawStream ? decodePDFRawStream(normal).decode() : (normal as PDFStream).getContents();
-    expect(Buffer.from(bytes).toString('latin1')).toContain('(Approved) Tj');
+    expect(Buffer.from(bytes).toString('latin1')).toContain(showing('Approved'));
+    expect(textOf(freeText.get(PDFName.of('Contents')))).toBe('Approved');
+  });
+
+  /** A free text and a note with a name-typed /Contents; the free text draws
+   *  its text in its own appearance. */
+  const drawn = async (): Promise<Uint8Array> => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const font = ctx.register(ctx.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding' }));
+    const stream = ctx.register(ctx.stream('BT /Helv 12 Tf 0 g 4 14 Td (Approved) Tj ET', {
+      Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 160, 40], Resources: { Font: { Helv: font } },
+    }));
+    const freeText = ctx.obj({
+      Type: 'Annot', Subtype: 'FreeText', Rect: [40, 300, 200, 340], Contents: 'Approved', F: 4,
+      DA: PDFString.of('0 g /Helv 12 Tf'), AP: { N: stream },
+    });
+    const note = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [40, 200, 60, 220], Contents: 'Checked', F: 4, Name: 'Note' });
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(freeText), ctx.register(note)]));
+    doc.catalog.set(PDFName.of('AcroForm'), ctx.obj({ Fields: [], DR: { Font: { Helv: font } } }));
+    return doc.save({ useObjectStreams: false });
+  };
+
+  const textOf = (value: unknown): string | undefined =>
+    value instanceof PDFString || value instanceof PDFHexString ? value.decodeText() : undefined;
+
+  interface Shown { subtype: string; rect: number[]; hasAppearance: boolean; contentsObj: { str: string }; textContent?: string[] }
+  const shown = async (bytes: Uint8Array): Promise<Shown[]> => {
+    const pdf = await loadPdf(bytes);
+    const list = (await (await pdf.getPage(1)).getAnnotations()) as Shown[];
+    await pdf.loadingTask.destroy();
+    return list.map(({ subtype, rect, hasAppearance, contentsObj, textContent }) => ({ subtype, rect: Array.from(rect), hasAppearance, contentsObj, textContent }));
+  };
+
+  const dictionaries = async (bytes: Uint8Array): Promise<{ contents: unknown; text: string | undefined; appearance: string | undefined }[]> => {
+    const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+    const annots = doc.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    return annots.asArray().map((_, i) => {
+      const dict = annots.lookup(i, PDFDict);
+      const ap = dict.lookup(PDFName.of('AP'));
+      const normal = ap instanceof PDFDict ? ap.lookup(PDFName.of('N')) : undefined;
+      const data = normal instanceof PDFRawStream ? decodePDFRawStream(normal).decode() : normal instanceof PDFStream ? normal.getContents() : undefined;
+      const contents = dict.get(PDFName.of('Contents'));
+      return { contents, text: textOf(contents), appearance: data ? Buffer.from(data).toString('latin1') : undefined };
+    });
+  };
+
+  it('reads the same in pdf.js before and after a commit that leaves it untouched', async () => {
+    const source = await drawn();
+    const before = await shown(source);
+    expect(before.map((a) => a.subtype)).toEqual(['FreeText', 'Text']);
+    const once = await commitCycle(source);
+    expect(await shown(once)).toEqual(before);
+    expect(await shown(await commitCycle(once))).toEqual(before);
+    const written = await dictionaries(once);
+    expect(written.map((entry) => entry.contents)).toEqual([PDFName.of('Approved'), PDFName.of('Checked')]);
+    expect(written[0].appearance).toBe('BT /Helv 12 Tf 0 g 4 14 Td (Approved) Tj ET');
+  });
+
+  it('becomes a text string with the name\'s text when the annotation is moved', async () => {
+    const source = await drawn();
+    const out = await commitCycle(source, (page) => ({
+      ...page, annotations: page.annotations!.map((a) => ({ ...a, x: a.x + 0.1, geometryDiverged: true })),
+    }));
+    const written = await dictionaries(out);
+    expect(written.map((entry) => entry.text)).toEqual(['Approved', 'Checked']);
+    expect(written[0].appearance).toBe('BT /Helv 12 Tf 0 g 4 14 Td (Approved) Tj ET');
+    const after = await shown(out);
+    expect(after.map((a) => a.contentsObj.str)).toEqual(['Approved', 'Checked']);
+    expect(after[0].rect).toEqual([70, 300, 230, 340]);
+  });
+
+  it('becomes a text string with the name\'s text when the annotation is recoloured or drawn again', async () => {
+    const source = await drawn();
+    const out = await commitCycle(source, (page) => ({
+      ...page, annotations: page.annotations!.map((a) => (a.kind === 'note' ? { ...a, color: '#ff0000' } : { ...a, h: a.h * 1.5 })),
+    }));
+    const written = await dictionaries(out);
+    expect(written.map((entry) => entry.text)).toEqual(['Approved', 'Checked']);
+    expect(written[0].appearance).toContain(showing('Approved'));
+    expect((await shown(out)).map((a) => a.contentsObj.str)).toEqual(['Approved', 'Checked']);
+  });
+
+  it('gives way to a text the user wrote', async () => {
+    const out = await commitCycle(await drawn(), (page) => ({
+      ...page, annotations: page.annotations!.map((a) => ({ ...a, note: a.kind === 'note' ? 'Mine' : 'Rejected' })),
+    }));
+    const written = await dictionaries(out);
+    expect(written.map((entry) => entry.text)).toEqual(['Rejected', 'Mine']);
+    expect(written[0].appearance).toContain(showing('Rejected'));
+    expect(written[0].appearance).not.toContain(showing('Approved'));
   });
 });
 
@@ -717,15 +822,27 @@ describe('the decoded-key scan', () => {
 });
 
 describe('an annotation whose /OC is null', () => {
-  it('is re-authored without an /OC key', async () => {
-    const source = await pageWith((ctx) => ctx.obj({
-      Type: 'Annot', Subtype: 'Square', Rect: [20, 300, 80, 320], C: [1, 0, 0], AP: appearance(ctx), OC: null,
-    }));
+  const gated = () => pageWith((ctx) => ctx.obj({
+    Type: 'Annot', Subtype: 'Square', Rect: [20, 300, 80, 320], C: [1, 0, 0], AP: appearance(ctx), OC: null,
+  }));
+
+  it.each<[string, (a: PageAnnotation) => PageAnnotation]>([
+    ['drawn again', (a) => ({ ...a, color: '#00ff00' })],
+    ['moved', (a) => ({ ...a, x: a.x + 0.1 })],
+  ])('is written without an /OC key when it is %s', async (_label, change) => {
+    const source = await gated();
     expect(await importAll(source)).toHaveLength(1);
-    const out = await PDFDocument.load(await commitCycle(source));
+    const out = await PDFDocument.load(await commitCycle(source, (page) => ({ ...page, annotations: page.annotations!.map(change) })));
     const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
     expect(annots.size()).toBe(1);
     expect(annots.lookup(0, PDFDict).get(PDFName.of('OC'), true)).toBeUndefined();
+  });
+
+  it('stays as written when the annotation is not edited', async () => {
+    const out = await PDFDocument.load(await commitCycle(await gated()));
+    const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
+    expect(annots.size()).toBe(1);
+    expect(annots.lookup(0, PDFDict).get(PDFName.of('OC'), true)).toBe(PDFNull);
   });
 });
 

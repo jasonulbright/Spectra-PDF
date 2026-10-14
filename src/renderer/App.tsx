@@ -8,6 +8,8 @@ import { documentWritesOf, whileDocumentLeaves, whileDocumentsLeave, withDocumen
 import { file, app, dialog, batch, tabDrag, pageCommit, setHeldOutputReporter, engine, shellMenu } from './lib/tauri-bridge';
 import { residueMessage, residueOf, residueRemovable, residueRequest } from './lib/redaction-residue';
 import type { PhysicalScreenPoint, ShellCreate, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
+import type { TextBoxAnswer } from './lib/text-box-engine';
+import { textBoxRefusalText } from './lib/text-box-edit';
 import { errorText, withoutFilePath } from './lib/error-text';
 import {
   HAND_OFF_COMMIT_ROUNDS, HandOffGate, flushTabOrder, handOffHold, handOffStop, planHandOff, reservationHolds, tabMoved,
@@ -1023,6 +1025,11 @@ function AppContent(): React.ReactElement {
             // A user-opened file's build and landing (lib/sealed-edit.ts);
             // callRaw for the same re-entry reason as above.
             sealed: callRaw,
+            // The text of annotations the build cannot draw in the standard
+            // font; callRaw for the same re-entry reason. No document is named.
+            textBoxes: async (blocks, draw) => (await callRaw('text_box_appearance', {
+              blocks, font_path: await app.getEditFontPath(), draw,
+            })) as unknown as TextBoxAnswer,
           }),
         });
         if (!outcome) throw new Error(tChrome('app.history.changed'));
@@ -4157,7 +4164,10 @@ function AppContent(): React.ReactElement {
     (v: 'welcome' | 'operations' | 'canvas') => {
       if (v === 'welcome') dispatch({ type: 'UI_FOCUS_TAB', tab: 'home' });
       else {
-        const s = stateRef.current;
+        // Harness calls can dispatch synchronously one after another, before
+        // React has rendered the first action into stateRef. Resolve the target
+        // from the store so setView cannot undo a just-requested focusTab.
+        const s = readState();
         // The shared rule, not a copy of it — the harness must answer "which
         // document is in front?" exactly as production does, or 16 e2e specs
         // silently drift from the app they're testing.
@@ -4166,7 +4176,7 @@ function AppContent(): React.ReactElement {
         if (v === 'operations') dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
       }
     },
-    [dispatch],
+    [dispatch, readState],
   );
 
   useEffect(() => {
@@ -4232,6 +4242,8 @@ function AppContent(): React.ReactElement {
           countGroup: a.countGroup,
           // An imported stamp whose own appearance the commit keeps.
           carriedAppearance: a.carriedAppearance !== undefined ? true : undefined,
+          // An import with an appearance the canvas can show from the file.
+          originalAppearance: a.originalAppearance !== undefined ? true : undefined,
           noRotate: a.noRotate,
           countSymbol: a.countSymbol,
           countSeq: a.countSeq,
@@ -4369,9 +4381,16 @@ function AppContent(): React.ReactElement {
           <span className="flex-1">
             {state.pageEditRefusalReason === 'moving'
               ? tChrome('app.window.moveRefusedEdit')
-              : state.pageEditRefusalReason
-                ? capabilityBlockText(state.pageEditRefusalReason)
-                : tChrome('app.history.changed')}
+              : state.pageEditRefusalReason && 'textBox' in state.pageEditRefusalReason
+                ? state.pageEditRefusalReason.notChanged !== undefined
+                  ? tChrome('refusal.edit.batchNotChanged', {
+                      number: state.pageEditRefusalReason.notChanged,
+                      first: textBoxRefusalText(state.pageEditRefusalReason.textBox),
+                    })
+                  : textBoxRefusalText(state.pageEditRefusalReason.textBox)
+                : state.pageEditRefusalReason
+                  ? capabilityBlockText(state.pageEditRefusalReason)
+                  : tChrome('app.history.changed')}
           </span>
           <button
             onClick={() => setPageEditRefused(false)}

@@ -191,15 +191,19 @@ class Resources:
             name = instruction.operands[0]
             if not isinstance(name, pikepdf.Name):
                 continue
-            target = fonts.get(str(name)) if isinstance(fonts, pikepdf.Dictionary) else None
+            # A name is its bytes: one that is not UTF-8 is a key by membership
+            # and indexing only, and is reported by its bytes.
+            key = bytes(name).decode("utf-8", "surrogateescape")
+            shown = bytes(name).decode("latin-1")
+            target = fonts[key] if isinstance(fonts, pikepdf.Dictionary) and key in fonts else None
             if target is None:
-                self.missing.append("%s /DA: /Font %s" % (where, name))
-                self.default_fonts.append("%s /DA: /Font %s" % (where, name))
+                self.missing.append("%s /DA: /Font %s" % (where, shown))
+                self.default_fonts.append("%s /DA: /Font %s" % (where, shown))
                 continue
             if isinstance(target, pikepdf.Dictionary):
                 self.used["form_fonts"] += 1
             else:
-                self.missing.append("%s /DA: font %s is not a dictionary" % (where, name))
+                self.missing.append("%s /DA: font %s is not a dictionary" % (where, shown))
 
     def free_text(self, pdf):
         form = pdf.Root.get("/AcroForm")

@@ -6,6 +6,7 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
 import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
+import { pdfNameText } from '../src/renderer/lib/pdf-text-string';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef, Workspace } from '../src/renderer/state/types';
 
 const require = createRequire(import.meta.url);
@@ -81,6 +82,16 @@ async function commitWithHighlight(bytes: Uint8Array): Promise<Uint8Array> {
 
 interface ReadAnnotation { subtype: string; contentsObj?: { str: string } }
 
+/** The text of each /Contents of page 1 that the file writes as a name. */
+async function nameTypedContents(bytes: Uint8Array): Promise<string[]> {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  const annots = doc.getPage(0).node.Annots()?.asArray() ?? [];
+  return annots.flatMap((ref) => {
+    const contents = doc.context.lookup(ref, PDFDict).get(PDFName.of('Contents'));
+    return contents instanceof PDFName ? [pdfNameText(contents)] : [];
+  });
+}
+
 async function readAnnotations(bytes: Uint8Array): Promise<ReadAnnotation[]> {
   const pdf = await loadPdf(bytes);
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as ReadAnnotation[];
@@ -113,9 +124,9 @@ describe('page-tier commit over hand-built annotations', () => {
 
   it('keeps the text of a sticky note whose /Contents is a name', async () => {
     const once = await commitWithHighlight(await buildPreflightShapedPdf());
-    const note = (await readAnnotations(once)).find(a => a.subtype === 'Text');
-    expect(note?.contentsObj?.str).toBe('Check this before it goes out');
+    expect(await nameTypedContents(once)).toEqual(['Check this before it goes out']);
     const twice = await commitCycle(once);
+    expect(await nameTypedContents(twice)).toEqual(['Check this before it goes out']);
     expect((await readAnnotations(twice)).map(a => a.subtype).sort()).toEqual(['Highlight', 'Text']);
   });
 
@@ -126,9 +137,9 @@ describe('page-tier commit over hand-built annotations', () => {
     const note = ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [20, 300, 40, 320], F: 4 });
     note.set(PDFName.of('Contents'), PDFName.of('caf#c3#a9'));
     page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(note)]));
-    const annots = await readAnnotations(await commitCycle(await doc.save()));
-    expect(annots).toHaveLength(1);
-    expect(annots[0].contentsObj?.str).toBe(`caf${String.fromCharCode(0xe9)}`);
+    const unedited = await commitCycle(await doc.save());
+    expect(await readAnnotations(unedited)).toHaveLength(1);
+    expect(await nameTypedContents(unedited)).toEqual([`caf${String.fromCharCode(0xe9)}`]);
   });
 
   it('a note the user wrote outranks a name-typed /Contents', async () => {

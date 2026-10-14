@@ -296,12 +296,12 @@ describe('a label stamp after the file is read back', () => {
 
   it('is drawn again as a label, with a new text when the user changes it', async () => {
     const once = await commit(await blankPage(), placing(LABEL));
-    expect(stampOf(await PDFDocument.load(once)).content).toContain('(APPROVED) Tj');
+    expect(stampOf(await PDFDocument.load(once)).content).toContain('<415050524f564544> Tj');
     const same = await commit(once, otherEdit);
-    expect(stampOf(await PDFDocument.load(same)).content).toContain('(APPROVED) Tj');
+    expect(stampOf(await PDFDocument.load(same)).content).toContain('<415050524f564544> Tj');
     const twice = await commit(once, editStamp((stamp) => ({ ...stamp, note: 'REJECTED', color: '#ff0000' })));
     const reading = stampOf(await PDFDocument.load(twice));
-    expect(reading.content).toContain('(REJECTED) Tj');
+    expect(reading.content).toContain('<52454a4543544544> Tj');
     expect(reading.content).toContain('1 0 0 rg');
     expect(reading.contents).toBe('REJECTED');
     await expectSound(twice, ['APPROVED']);

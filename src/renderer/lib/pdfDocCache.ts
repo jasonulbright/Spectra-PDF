@@ -3,7 +3,7 @@ import { documentPassword } from './document-passwords';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PdfBuffer } from '../state/types';
 import { releaseSelectionCache, retainSelectionCache } from './ocr-selection';
-import { releaseStampRasters, retainStampRasters } from './stamp-raster';
+import { releaseAppearanceRasters, retainAppearanceRasters } from './appearance-raster';
 import {
   bindUprightDocument, carryUprightPages, expectUprightKey, holdUprightRecord, releaseUprightRecord, uprightDocumentDestroyed,
   uprightPagesOf,
@@ -120,7 +120,7 @@ function releaseEntry(entry: CacheEntry, after?: Promise<unknown>): void {
   entry.released = true;
   void Promise.all([entry.contentKey, after]).then(([key]) => {
     releaseSelectionCache(key);
-    releaseStampRasters(key);
+    releaseAppearanceRasters(key);
     releaseUprightRecord(key);
   });
 }
@@ -155,7 +155,7 @@ export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDo
   const contentKey = contentKeyOfPlaced(buffer);
   void contentKey.then((key) => {
     retainSelectionCache(key);
-    retainStampRasters(key);
+    retainAppearanceRasters(key);
     holdUprightRecord(key);
   });
   // The pages the replaced document has an upright stamp on, or the pages it

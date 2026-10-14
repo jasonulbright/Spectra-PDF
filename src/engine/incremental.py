@@ -1001,6 +1001,33 @@ def _annotation_pages(pdf):
     return owners
 
 
+def _default_fonts(acro):
+    resources = acro.get("/DR")
+    fonts = resources.get("/Font") if isinstance(resources, pikepdf.Dictionary) else None
+    return fonts if isinstance(fonts, pikepdf.Dictionary) and not isinstance(fonts, pikepdf.Stream) else None
+
+
+def _bind_default_fonts(memo, writer, orig_acro, mod_acro) -> None:
+    """Binds each default-resource font the edit left as it was to the
+    original's object of the same name.
+
+    An annotation the edit added that draws from such a font then references
+    the original's object: the revision holds no second copy of the font."""
+    old, new = _default_fonts(orig_acro), _default_fonts(mod_acro)
+    if old is None or new is None:
+        return
+    for name in new.keys():
+        o, m = _entry(old, name), _entry(new, name)
+        if not (isinstance(o, pikepdf.Object) and isinstance(m, pikepdf.Object)):
+            continue
+        if not (o.is_indirect and m.is_indirect):
+            continue
+        if m.objgen in memo or o.objgen in memo.reverse:
+            continue
+        if _bisim(o, m, set()):
+            memo.bind(m, _writer_ref(o.objgen, writer), o)
+
+
 def _prepare_correspondence(writer, orig, mod, plan):
     """Bind every owned identity BEFORE recursively importing any delta.
 
@@ -1033,6 +1060,7 @@ def _prepare_correspondence(writer, orig, mod, plan):
     if isinstance(orig_acro, pikepdf.Dictionary) and isinstance(mod_acro, pikepdf.Dictionary):
         if orig_acro.is_indirect:
             memo.bind(mod_acro, _writer_ref(orig_acro.objgen, writer), orig_acro)
+        _bind_default_fonts(memo, writer, orig_acro, mod_acro)
         originals = _field_index(orig_acro)
         for name, modified in _field_index(mod_acro).items():
             available = list(originals.get(name, []))
