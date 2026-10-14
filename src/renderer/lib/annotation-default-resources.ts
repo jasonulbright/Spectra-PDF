@@ -195,6 +195,10 @@ function holdsSignature(output: PDFDocument): boolean {
 
 const PLAIN_NAME = /^[A-Za-z0-9_.+-]+$/;
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // How a stream is stored, not what it holds.
 const STORAGE_KEYS: ReadonlySet<string> = new Set(['Length', 'Filter', 'DecodeParms']);
 const NO_KEYS: ReadonlySet<string> = new Set<string>();
@@ -337,7 +341,7 @@ function drawnFromDefaults(output: PDFDocument, names: ReadonlySet<string>): Set
     }
     for (const name of open) {
       if (content === undefined || !PLAIN_NAME.test(name)
-        || new RegExp(`/${name.replace(/[.+]/g, '\\$&')}\\s+[-+.\\d]+\\s+Tf`).test(content)) drawn.add(name);
+        || new RegExp(`/${escapeRegExp(name)}\\s+[-+.\\d]+\\s+Tf`).test(content)) drawn.add(name);
     }
   };
   const states = (value: PDFObject | undefined): void => {

@@ -13,7 +13,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFStrin
 import type { PDFObject } from 'pdf-lib';
 import type { ExportAnnotation, ExportPage } from '../src/renderer/lib/pdfx-format';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
-import { FontComparison, interchangeableFontKey, rewriteDaFonts, sameSubsetFont } from '../src/renderer/lib/annotation-default-resources';
+import { completeAnnotationDefaultResources, FontComparison, interchangeableFontKey, rewriteDaFonts, sameSubsetFont } from '../src/renderer/lib/annotation-default-resources';
 import { docCarriesLiveSignature } from '../src/renderer/lib/signature-presence';
 import { sourceHasXfa } from '../src/renderer/lib/acroform-carry';
 import { commit, deleting } from './support/commit-cycle';
@@ -158,6 +158,39 @@ describe('the rule that makes two default resource fonts one', () => {
   it('rewrites every renamed name of a default appearance string in one pass', () => {
     expect(rewriteDaFonts('/Helv 10 Tf /Helv_1 8 Tf /HelvB 9 Tf', new Map([['Helv', 'Helv_1'], ['Helv_1', 'Helv_1_1']])))
       .toBe('/Helv_1 10 Tf /Helv_1_1 8 Tf /HelvB 9 Tf');
+  });
+});
+
+describe('appearance streams that select default-resource fonts', () => {
+  it('treats a plus in the resource name literally', async () => {
+    const output = await PDFDocument.create();
+    const page = output.addPage([300, 600]);
+    const fontTable = output.context.obj({});
+    const font = output.context.register(output.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Courier' }));
+    fontTable.set(N('A+B'), font);
+    const resources = output.context.obj({});
+    resources.set(N('Font'), fontTable);
+    const form = output.context.obj({ Fields: [] });
+    form.set(N('DR'), resources);
+    output.catalog.set(N('AcroForm'), output.context.register(form));
+
+    const appearance = output.context.stream('BT /A+B 10 Tf ET', {
+      Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 20],
+    });
+    const annotation = output.context.obj({ Type: 'Annot', Subtype: 'Stamp', Rect: [0, 0, 100, 20] });
+    const appearances = output.context.obj({});
+    appearances.set(N('N'), appearance);
+    annotation.set(N('AP'), appearances);
+    page.node.set(N('Annots'), output.context.obj([annotation]));
+
+    const original = output.context.obj({});
+    original.set(N('DA'), PDFString.of('/A+B 10 Tf'));
+    completeAnnotationDefaultResources(output, [{ source: output, copiedPages: [page] }], {
+      released: () => true,
+      redrawn: new Map([[page, [original]]]),
+    });
+
+    expect(fontTable.has(N('A+B'))).toBe(true);
   });
 });
 
