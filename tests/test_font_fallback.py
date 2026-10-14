@@ -560,3 +560,148 @@ class TestTheEmbeddedSubsetIsNotAFunctionOfTheClock:
         second, _ = _subset_font(FONT, "Authored line")
 
         assert first == second
+
+
+def _spellings(font_dict) -> dict:
+    """code -> text, from the font's /ToUnicode."""
+    import re
+
+    cmap = bytes(font_dict["/ToUnicode"].read_bytes()).decode("ascii")
+    body = cmap[cmap.index("beginbfchar"):]
+    pairs = re.findall(r"<([0-9a-f]{4})> <([0-9a-f]*)>", body)
+    codes = [int(code, 16) for code, _text in pairs]
+    assert len(codes) == len(set(codes))
+    return {int(code, 16): bytes.fromhex(text).decode("utf-16-be") for code, text in pairs}
+
+
+def _program(font_dict):
+    import io
+
+    from fontTools.ttLib import TTFont
+
+    descriptor = font_dict["/DescendantFonts"][0]["/FontDescriptor"]
+    stream = descriptor.get("/FontFile3") or descriptor.get("/FontFile2")
+    return TTFont(io.BytesIO(bytes(stream.read_bytes())))
+
+
+def _outline(font_dict, code: int) -> list:
+    """What the glyph a code selects draws."""
+    from fontTools.pens.recordingPen import RecordingPen
+
+    from engine.font_fallback import _cff_cids
+
+    program = _program(font_dict)
+    order = program.getGlyphOrder()
+    descendant = font_dict["/DescendantFonts"][0]
+    if str(descendant["/Subtype"]) == "/CIDFontType0":
+        cids = _cff_cids(program)
+        name = order[code] if cids is None else {cid: glyph for glyph, cid in cids.items()}[code]
+    else:
+        table = descendant["/CIDToGIDMap"]
+        if isinstance(table, pikepdf.Stream):
+            data = bytes(table.read_bytes())
+            name = order[(data[code * 2] << 8) | data[code * 2 + 1]]
+        else:
+            name = order[code]
+    pen = RecordingPen()
+    program.getGlyphSet()[name].draw(pen)
+    return pen.value
+
+
+# Characters the face draws with one glyph: CFF outlines keyed by CID, CFF
+# outlines keyed by name, TrueType outlines.
+_ONE_GLYPH_FACES = (
+    ("NotoSansCJKsc-Regular.otf", "\u2012\u2013"),
+    ("NotoSansCJKsc-Regular.otf", "-\u00ad\u2011"),
+    ("LibertinusSerif-Regular.otf", "\u05e2\ufb20"),
+    ("LiberationSerif-Italic.ttf", "\ufb01\uf001"),
+)
+
+
+@pytest.mark.parametrize("face, characters", _ONE_GLYPH_FACES)
+class TestCharactersOfOneGlyphTakeACodeEach:
+    def _face(self, face):
+        path = os.path.join(FONTS_DIR, face)
+        if not os.path.isfile(path):
+            pytest.skip(f"{face} not provisioned")
+        return path
+
+    def _check(self, font, encode, width_1000, characters):
+        spellings = _spellings(font)
+        codes = [int.from_bytes(encode(ch), "big") for ch in characters]
+        assert len(set(codes)) == len(characters)
+        assert [spellings[code] for code in codes] == list(characters)
+        assert len({width_1000(ch) for ch in characters}) == 1
+        outlines = [_outline(font, code) for code in codes]
+        assert outlines[0] and all(outline == outlines[0] for outline in outlines)
+        # The other glyphs of the subset draw what they drew.
+        assert _outline(font, int.from_bytes(encode("x"), "big"))
+
+    def test_in_a_subset_by_character(self, face, characters):
+        from engine.font_fallback import build_fallback_font, face_glyph_names
+
+        path = self._face(face)
+        names = face_glyph_names(path)
+        assert len({names[ord(ch)] for ch in characters}) == 1
+        with pikepdf.new() as pdf:
+            font, encode, width_1000 = build_fallback_font(pdf, path, "x" + characters)
+            self._check(font, encode, width_1000, characters)
+
+    def test_in_a_shaped_subset(self, face, characters):
+        from engine import shaping
+        from engine.font_fallback import build_shaped_font
+
+        path = self._face(face)
+        run = shaping.shape(path, "xx", rtl=False)
+        with pikepdf.new() as pdf:
+            font, encode, width_1000, glyph_encode, _glyph_width = build_shaped_font(pdf, path, "x" + characters, [run])
+            self._check(font, encode, width_1000, characters)
+            for name, spells in run.clusters:
+                assert _spellings(font)[int.from_bytes(glyph_encode(name, spells), "big")] == spells
+
+    def test_and_the_same_request_embeds_the_same_program(self, face, characters, monkeypatch):
+        import time
+
+        from engine.font_fallback import build_fallback_font
+
+        path = self._face(face)
+        programs = []
+        for clock in (1_600_000_000, 1_900_000_000):
+            monkeypatch.setattr(time, "time", lambda clock=clock: clock)
+            with pikepdf.new() as pdf:
+                font, _encode, _width = build_fallback_font(pdf, path, "x" + characters)
+                descriptor = font["/DescendantFonts"][0]["/FontDescriptor"]
+                stream = descriptor.get("/FontFile3") or descriptor.get("/FontFile2")
+                programs.append(bytes(stream.read_bytes()))
+        assert programs[0] == programs[1]
+
+
+@pytest.mark.skipif(
+    not os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")),
+    reason="CJK faces not provisioned",
+)
+def test_a_shaped_subset_that_keeps_the_last_glyph_of_a_full_face_still_takes_a_second_code():
+    from fontTools.ttLib import TTFont
+
+    from engine import shaping
+    from engine.font_fallback import build_shaped_font
+
+    path = os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+    full = TTFont(path, lazy=True)
+    try:
+        order = full.getGlyphOrder()
+        gid_of = {name: gid for gid, name in enumerate(order)}
+        last = max(full.getBestCmap().items(), key=lambda item: gid_of[item[1]])
+    finally:
+        full.close()
+    assert gid_of[last[1]] >= len(order) - 64
+    text = "x\u2012\u2013" + chr(last[0])
+    with pikepdf.new() as pdf:
+        font, encode, _width, _glyph_encode, _glyph_width = build_shaped_font(
+            pdf, path, text, [shaping.shape(path, "xx", rtl=False)]
+        )
+        spellings = _spellings(font)
+        codes = [int.from_bytes(encode(ch), "big") for ch in "\u2012\u2013"]
+        assert codes[0] != codes[1]
+        assert [spellings[code] for code in codes] == ["\u2012", "\u2013"]
+        assert _outline(font, codes[0]) == _outline(font, codes[1]) != []

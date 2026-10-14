@@ -3292,6 +3292,19 @@ input:not([type]) {
   white-space: pre-wrap;
   word-break: break-word;
   text-align: left;
+  font-family: Helvetica, Arial, sans-serif;
+}
+
+/* A text box in the lines the commit writes: one block per line, never
+   wrapped again. */
+.page-annot-text-lines {
+  white-space: pre;
+  word-break: normal;
+}
+
+.page-annot-text-line {
+  display: block;
+  white-space: pre;
 }
 
 /* Ink annotations: the rect is a plain bounding box (no border/fill), the
@@ -3443,6 +3456,16 @@ input:not([type]) {
   display: block;
   width: 100%;
   height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+/* An import whose own appearance the commit keeps as written: that
+   appearance alone, on the original's rectangle at the moved place. */
+.page-annot-kept {
+  border-width: 0;
+}
+.page-annot-kept-appearance {
+  position: absolute;
   pointer-events: none;
   user-select: none;
 }
@@ -4372,6 +4395,12 @@ input:not([type]) {
   white-space: pre-wrap;
   word-break: break-word;
   pointer-events: none;
+  font-family: Helvetica, Arial, sans-serif;
+}
+
+.page-annot-callout-text.page-annot-text-lines {
+  white-space: pre;
+  word-break: normal;
 }
 
 /* Properties-bar style controls. */

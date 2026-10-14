@@ -30,6 +30,7 @@ import {
 } from './count-marks';
 import { maxOf, minOf } from './coordinate-bounds';
 import { signatureFaceById } from './signature-fonts';
+import { withImportedState } from './imported-edit';
 
 type ImportedSubtype = ImportedAnnotationFingerprint['subtype'];
 
@@ -227,6 +228,10 @@ export async function importPageAnnotations(
   const consumedStyles = new Set<number>();
 
   const imported: PageAnnotation[] = [];
+  // Each fingerprint whose original has an appearance the canvas can show.
+  const appearances = new Map<object, NonNullable<PageAnnotation['originalAppearance']>>();
+  // Each fingerprint of a free text with its redraw record.
+  const redraws = new Map<object, NonNullable<PageAnnotation['textRedraw']>>();
   for (const a of raw) {
     if (!RECOGNIZED_SUBTYPES.has(a.subtype) || !isPlaced(a)) continue;
     const untouched = leftUntouched(rawStyles, a);
@@ -250,8 +255,15 @@ export async function importPageAnnotations(
       // its own visible body when this is true, and an invisible annotation
       // is a worse failure than a redundant duplicate rendering.
       hasAppearance: a.hasAppearance === true,
+      ...slotOf(rawStyles, a),
     };
     const sidecar = takeRawStyle(rawStyles, consumedStyles, a.subtype, a.rect);
+    if (sidecar?.textRedraw) redraws.set(importedOriginal, sidecar.textRedraw);
+    // With no sidecar a free text and a line count as drawing their text.
+    if (a.hasAppearance === true && a.id && a.subtype !== 'Stamp') {
+      const drawsText = sidecar ? sidecar.drawsContents === true : a.subtype === 'FreeText' || a.subtype === 'Line';
+      appearances.set(importedOriginal, { id: a.id, ...(drawsText ? { drawsText: true as const } : {}) });
+    }
 
     // ── Drawing shapes + callouts (sidecar-gated) ────────────────────
     if (a.subtype === 'Circle' || a.subtype === 'Line' || a.subtype === 'Polygon' || a.subtype === 'PolyLine') {
@@ -439,7 +451,24 @@ export async function importPageAnnotations(
       importedOriginal,
     });
   }
-  return imported;
+  return imported.map((entry) => {
+    const appearance = entry.importedOriginal ? appearances.get(entry.importedOriginal) : undefined;
+    const redraw = entry.importedOriginal && (entry.kind === 'freetext' || entry.kind === 'callout')
+      ? redraws.get(entry.importedOriginal) : undefined;
+    return withImportedState({
+      ...entry,
+      ...(appearance ? { originalAppearance: appearance } : {}),
+      ...(redraw ? { textRedraw: redraw } : {}),
+    });
+  });
+}
+
+/** The /Annots position of an annotation held by reference: the sidecar entry
+ *  with its object. */
+function slotOf(rawStyles: RawAnnotStyle[] | undefined, a: PlacedAnnotation): { slot?: number } {
+  if (a.id === undefined) return {};
+  const own = rawStyles?.filter((s) => s.ref === a.id && s.slot !== undefined) ?? [];
+  return own.length === 1 ? { slot: own[0].slot } : {};
 }
 
 type ViewBox = { x: number; y: number; width: number; height: number };

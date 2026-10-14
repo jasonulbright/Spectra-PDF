@@ -168,7 +168,7 @@ describe('Recognize Music', () => {
     }
 
     async function diagnostics(): Promise<string> {
-      const status = (await $(STATUS).isExisting()) ? await $(STATUS).getText() : '(no status line)';
+      const status = (await statusText()) || '(no status line)';
       const queue = (await queueRows()).map((row) => `${row.status}: ${row.text}`);
       const running = await browser.execute(function () {
         return document.querySelector('[data-testid="opqueue"]')?.getAttribute('data-running') ?? '0';
@@ -176,6 +176,13 @@ describe('Recognize Music', () => {
       const busy = await $('[data-testid="omr-stop"]').isExisting();
       return `panel busy=${busy}; status="${status}"; queue running=${running} [${queue.join(' | ')}]; `
         + `lastError=${(await harnessLastError()) ?? 'none'}`;
+    }
+
+    /** Read one render's status text without retaining a handle across it. */
+    async function statusText(): Promise<string> {
+      return browser.execute(function (selector: string) {
+        return (document.querySelector(selector) as HTMLElement | null)?.innerText ?? '';
+      }, STATUS);
     }
 
     /** The queue row index this leg's run starts from; earlier rows belong to
@@ -188,7 +195,7 @@ describe('Recognize Music', () => {
     /** The run's failure as the app shows it, or null while it has not failed:
      * the panel's error or stop status, or this leg's queue line in error. */
     async function runFailure(): Promise<string | null> {
-      const status = (await $(STATUS).isExisting()) ? await $(STATUS).getText() : '';
+      const status = await statusText();
       if (status !== statusBeforeRun) statusBeforeRun = null;
       const ours = statusBeforeRun === null;
       if (ours && (status.startsWith('Error: ') || status === 'Music recognition stopped.')) return `panel: ${status}`;
@@ -253,7 +260,7 @@ describe('Recognize Music', () => {
       }
       await answerNextSaveDialog(join(tmp, 'score.mxl'));
       firstRow = (await queueRows()).length;
-      statusBeforeRun = (await $(STATUS).isExisting()) ? await $(STATUS).getText() : '';
+      statusBeforeRun = await statusText();
       await $(RUN).click();
     }
 
@@ -266,7 +273,7 @@ describe('Recognize Music', () => {
       await runOnce();
       // The run holds no lock on the document: while it is queued, a page
       // edit is offered and lands.
-      await waitFor(async () => (await $(STATUS).getText()) === 'Recognizing music…', 60_000,
+      await waitFor(async () => (await statusText()) === 'Recognizing music…', 60_000,
         'the recognition never started running');
       const before = (await getActiveDocPages()).length;
       expect(await commandEnabled('document.insertBlankPage')).toBe(true);
@@ -274,7 +281,7 @@ describe('Recognize Music', () => {
       // The edit lands while the run is still running, not after it.
       await waitFor(async () => (await getActiveDocPages()).length === before + 1, 10_000,
         'the blank page did not land during the run');
-      expect(await $(STATUS).getText()).toBe('Recognizing music…');
+      expect(await statusText()).toBe('Recognizing music…');
       await waitShown('[data-testid="omr-result"]', 300_000, 'no result notice');
       await expect($('[data-testid="omr-not-exact"]')).toBeDisplayed();
       expect(readdirSync(tmp).filter((name) => /\.(mxl|omr)$/i.test(name)).sort()).toEqual(['score.mxl', 'score.omr']);

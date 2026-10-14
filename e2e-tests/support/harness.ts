@@ -1145,6 +1145,8 @@ export interface PageAnnotationSnapshot {
   symbolParts?: number;
   /** An imported stamp whose own appearance the commit keeps. */
   carriedAppearance?: boolean;
+  /** An import with an appearance the canvas can show from the file. */
+  originalAppearance?: boolean;
   /** Such a stamp with the NoRotate flag: its box is its upright box. */
   noRotate?: boolean;
 }

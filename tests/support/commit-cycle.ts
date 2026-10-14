@@ -2,7 +2,9 @@ import { importPage } from '../../src/renderer/lib/annotation-import';
 import { readRawAnnotationStyles } from '../../src/renderer/lib/annotation-raw-style';
 import { planCommit, buildCommitBytes } from '../../src/renderer/lib/workspace-commit';
 import type { OpenDocument, OpenFile, PageAnnotation, PageRef } from '../../src/renderer/state/types';
+import type { BuildServices } from '../../src/renderer/lib/pdfx-build';
 import { loadPdf } from './saved-pdf';
+import { pythonTextEngine } from './text-engine';
 
 /** Every page as the workspace index records it after an import. */
 export async function importedPages(bytes: Uint8Array): Promise<PageRef[]> {
@@ -26,6 +28,7 @@ export async function commit(
   bytes: Uint8Array,
   edit: (pages: PageRef[]) => PageRef[] = (pages) => pages,
   name = 'a.pdf',
+  services: BuildServices = { textBoxes: pythonTextEngine },
 ): Promise<Uint8Array> {
   const pages = edit(await importedPages(bytes));
   const file: OpenFile = {
@@ -33,7 +36,7 @@ export async function commit(
   };
   const doc: OpenDocument = { ...file, id: 'a.pdf#0', name: file.name, pages, pageCount: pages.length };
   const [plan] = planCommit({ documents: [doc] }, new Map([['a.pdf', file]]), ['a.pdf']);
-  return buildCommitBytes(plan);
+  return buildCommitBytes(plan, services);
 }
 
 /** The page with each annotation `gone` selects deleted by the user. */

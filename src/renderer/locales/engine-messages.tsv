@@ -903,6 +903,7 @@ text_authoring.textAdd	exact	text_authoring	no text to add
 text_authoring.textSetsColumnsLeft	exact	text_authoring	this text sets columns left to right — use vertical-lr
 text_authoring.textSetsColumnsRight	exact	text_authoring	this text sets columns right to left — use vertical-rl
 text_authoring.writingModeMustHorizontal	pattern	text_authoring,watermark	writing_mode must be horizontal, vertical, vertical-rl or vertical-lr (got {{writing_mode}})
+text_box.textBlockRequestMalformed	exact	text_box	a text block request is malformed
 text_export.documentTextLayerThere	exact	text_export	this document has no text layer, so there is nothing to export as text — run OCR on it first to add one
 text_export.unknownTextLayoutChoose	pattern	text_export	unknown text layout {{layout}} (choose reading or layout)
 text_match.unknownPatternBuiltPatterns	pattern	text_match	unknown pattern {{pattern_id}} — the built-in patterns are: {{known}}

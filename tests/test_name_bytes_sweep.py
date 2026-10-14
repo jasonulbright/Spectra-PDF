@@ -3361,3 +3361,259 @@ class TestACompositeFontReportsItsDescendantsTypeOfSuchBytes:
         ])
         fonts = list_document_fonts(src)["fonts"]
         assert [(f["name"], f["type"]) for f in fonts] == [("Odd", "CIDFontType#FC2")]
+
+
+def _named_font_form(tmp_dir: str, name: str, base_font: bytes) -> str:
+    """A text field and a free text annotation whose /DA select the form
+    font `/F#E9`: the field by the escape, the annotation by the byte."""
+    return _doc(tmp_dir, name, [
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /DA (/F#E9 0 Tf 0 g) "
+        b"/DR << /Font << /F#E9 6 0 R >> >> >> >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R 7 0 R] >>",
+        _stream(b""),
+        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (words) /Rect [72 600 272 620] /F 4 "
+        b"/DA (/F#E9 10 Tf 0 g) /P 3 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /" + base_font + b" >>",
+        b"<< /Type /Annot /Subtype /FreeText /Rect [72 500 272 520] /F 4 /Contents (note) "
+        b"/DA (/F\xe9 12 Tf 0 g) /P 3 0 R >>",
+    ])
+
+
+def _default_appearances(path: str) -> dict:
+    with pikepdf.open(path) as pdf:
+        fonts = pdf.Root.AcroForm.DR.Font
+        out = {"fonts": {key.encode("utf-8", "surrogateescape"): bytes(fonts[key].BaseFont) for key in fonts.keys()},
+               "fields": [], "notes": []}
+        for page in pdf.pages:
+            for annotation in page.obj.Annots:
+                kind = "fields" if annotation.get("/Subtype") == pikepdf.Name.Widget else "notes"
+                out[kind].append(bytes(annotation.DA))
+        return out
+
+
+class TestADefaultResourceFontNamedWithBytesThatAreNotUtf8:
+    """`/DR /Font` is keyed by names, and a /DA selects one by a token of a
+    content stream: `/F#E9` and the same name written with its byte are one
+    key. `Dictionary.get` refuses that key, so every reader of these fonts
+    takes it by membership and indexing."""
+
+    def test_a_token_and_its_key_are_one_name(self):
+        from engine.default_fonts import font_key, font_token, held_font
+
+        fonts = pikepdf.Dictionary()
+        fonts[font_key("F#E9")] = pikepdf.Dictionary(Type=pikepdf.Name.Font)
+        assert [key.encode("utf-8", "surrogateescape") for key in fonts.keys()] == [b"/F\xe9"]
+        assert font_key("F\xe9") == font_key("F#E9") == font_key("F#e9")
+        assert held_font(fonts, "F#E9") is not None and held_font(fonts, "F\xe9") is not None
+        assert held_font(fonts, "F#C3#A9") is None and held_font(fonts, "F") is None
+        assert held_font(fonts, "F#00") is None and held_font(None, "F") is None
+        assert font_token(font_key("F#E9")) == "F#E9"
+        assert font_token(font_key("A#20B#23(")) == "A#20B#23#28"
+        assert font_key(font_token("/éx")) == "/éx"
+
+    def test_a_merge_gives_the_second_font_of_the_name_the_next_name(self, tmp_dir):
+        from engine.merge import merge
+
+        first = _named_font_form(tmp_dir, "a.pdf", b"Helvetica")
+        second = _named_font_form(tmp_dir, "b.pdf", b"Courier")
+        out = os.path.join(tmp_dir, "m.pdf")
+        assert merge([first, second], out)["pages"] == 2
+        assert _default_appearances(out) == {
+            "fonts": {b"/F\xe9": b"/Helvetica", b"/F\xe9_1": b"/Courier"},
+            "fields": [b"/F#E9 10 Tf 0 g", b"/F#E9_1 10 Tf 0 g"],
+            "notes": [b"/F\xe9 12 Tf 0 g", b"/F\xe9_1 12 Tf 0 g"],
+        }
+
+    def test_a_merge_of_one_font_under_the_name_keeps_one_entry(self, tmp_dir):
+        from engine.merge import merge
+
+        first = _named_font_form(tmp_dir, "a.pdf", b"Helvetica")
+        second = _named_font_form(tmp_dir, "b.pdf", b"Helvetica")
+        out = os.path.join(tmp_dir, "m.pdf")
+        assert merge([first, second], out)["pages"] == 2
+        assert _default_appearances(out) == {
+            "fonts": {b"/F\xe9": b"/Helvetica"},
+            "fields": [b"/F#E9 10 Tf 0 g"] * 2,
+            "notes": [b"/F\xe9 12 Tf 0 g"] * 2,
+        }
+
+    def test_a_split_keeps_the_font_and_the_strings_that_select_it(self, tmp_dir):
+        from engine.split import split
+
+        src = _named_font_form(tmp_dir, "a.pdf", b"Helvetica")
+        out_dir = os.path.join(tmp_dir, "parts")
+        os.makedirs(out_dir)
+        split(src, ranges="1", output_dir=out_dir)
+        [part] = os.listdir(out_dir)
+        assert _default_appearances(os.path.join(out_dir, part)) == _default_appearances(src)
+
+    def test_releasing_the_form_keeps_the_font_a_free_text_names(self, tmp_dir):
+        from engine.default_fonts import release_form
+
+        src = _named_font_form(tmp_dir, "a.pdf", b"Helvetica")
+        with pikepdf.open(src) as pdf:
+            release_form(pdf)
+            fonts = pdf.Root.AcroForm.DR.Font
+            assert _spelled(fonts.keys()) == [b"/F\xe9"]
+            assert len(pdf.Root.AcroForm.Fields) == 0
+
+    def test_a_standard_font_is_held_beside_a_name_of_such_bytes(self, tmp_dir):
+        from engine.default_fonts import default_fonts, hold_simple_font, hold_standard_font
+
+        with pikepdf.open(_named_font_form(tmp_dir, "a.pdf", b"Helvetica")) as pdf:
+            assert hold_standard_font(pdf) == "Helv"
+            fonts = default_fonts(pdf)
+            assert hold_simple_font(pdf, fonts, "F#E9", "Courier") == "F#E9_1"
+            assert _spelled(fonts.keys()) == [b"/F\xe9", b"/F\xe9_1", b"/Helv"]
+
+
+def _signed_text_field(tmp_dir: str) -> tuple:
+    from test_pades import _build_pki
+
+    from engine.signatures import sign_pdf
+
+    pki = _build_pki(tmp_dir)
+    signed = os.path.join(tmp_dir, "signed.pdf")
+    sign_pdf(_pyhanko_text_field_pdf(tmp_dir), signed, pfx_path=pki["pfx"], password="pw")
+    with open(signed, "rb") as fh:
+        return signed, fh.read()
+
+
+def _add_text_box(src: str, dst: str, tmp_dir: str, text: str) -> None:
+    """What the page-tier commit writes for a text box drawn in a bundled
+    face: the face under its name in /DR /Font, the annotation with a /DA
+    that selects it and an appearance that draws from the same object."""
+    import base64
+
+    from outline_builders import FONT_DIR
+
+    from engine.text_box import text_box_appearance
+
+    answer = text_box_appearance([{"text": text, "size": 12}], os.path.abspath(FONT_DIR), True)
+    block = answer["blocks"][0]
+    with pikepdf.open(src) as pdf, pikepdf.open(io.BytesIO(base64.b64decode(answer["pdf"]))) as carrier:
+        held = pdf.Root.AcroForm.DR.Font
+        fonts = pikepdf.Dictionary()
+        for name in block["fonts"]:
+            key = "/" + name
+            if key not in held:
+                held[key] = pdf.copy_foreign(carrier.pages[0].obj.Resources.Font[key])
+            fonts[key] = held[key]
+        face = pdf.make_stream(block["content"].encode("ascii"))
+        face.Type = pikepdf.Name.XObject
+        face.Subtype = pikepdf.Name.Form
+        face.BBox = pikepdf.Array([0, -40, 200, 0])
+        face.Resources = pikepdf.Dictionary(Font=fonts)
+        page = pdf.pages[0].obj
+        kept = [a for a in page.Annots if a.get("/NM") != pikepdf.String("box")]
+        note = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.FreeText, NM=pikepdf.String("box"),
+            Rect=pikepdf.Array([60, 140, 260, 180]), F=4, P=page, Contents=pikepdf.String(text),
+            DA=pikepdf.String(f"/{block['fonts'][0]} 12 Tf 0 g"), AP=pikepdf.Dictionary(N=face)))
+        page.Annots = pikepdf.Array([*kept, note])
+        pdf.save(dst)
+
+
+class TestARevisionAfterSigningPastADefaultFontOfSuchBytes:
+    """A signed document whose `/DR /Font` holds `/F#E9`: every appended
+    revision reads that dictionary to bind the fonts the edit left as they
+    were."""
+
+    def _appended(self, tmp_dir, original, source, build, name):
+        from engine.incremental import transplant_incremental
+
+        modified = os.path.join(tmp_dir, f"modified-{name}.pdf")
+        build(source, modified)
+        out = os.path.join(tmp_dir, f"appended-{name}.pdf")
+        result = transplant_incremental(source, modified, out)
+        assert result["applied"] is True, result
+        with open(source, "rb") as fh:
+            size = len(fh.read())
+        with open(out, "rb") as fh:
+            # No revision of the build's edit copies the font of the name.
+            assert b"/BaseFont /Helvetica" not in fh.read()[size:]
+        return self._kept(original, source, out)
+
+    def _kept(self, original, source, out):
+        from engine.signatures import verify_signatures
+
+        with open(source, "rb") as fh:
+            before = fh.read()
+        with open(out, "rb") as fh:
+            data = fh.read()
+        assert data.startswith(before) and before.startswith(original)
+        revision = data[len(before):]
+        # The name is written as its bytes, and its font is the original's object.
+        assert b"/F#C3#A9" not in revision
+        [signature] = verify_signatures(out)["signatures"]
+        assert signature["intact"] is True
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.Root.AcroForm.DR.Font
+            assert b"/F\xe9" in _spelled(fonts.keys())
+            assert fonts[pikepdf.Object.parse(b"/F#E9")].objgen == pdf.pages[0].obj.Resources.Font[
+                pikepdf.Object.parse(b"/F#E9")].objgen
+        return out
+
+    def test_a_fill_a_text_box_in_a_bundled_face_and_its_redraw_are_appended(self, tmp_dir):
+        from outline_builders import FONT_DIR
+
+        from engine.forms import fill_form_fields
+
+        if not os.path.isfile(os.path.join(FONT_DIR, "LiberationSans-Regular.ttf")):
+            pytest.skip("bundled faces not provisioned")
+        signed, original = _signed_text_field(tmp_dir)
+
+        filled = os.path.join(tmp_dir, "filled.pdf")
+        fill_form_fields(signed, filled, {"words": "Filled words"})
+        self._kept(original, signed, filled)
+        boxed = self._appended(
+            tmp_dir, original, filled, lambda src, dst: _add_text_box(src, dst, tmp_dir, "Zażółć"), "box")
+        with pikepdf.open(boxed) as pdf:
+            assert _spelled(pdf.Root.AcroForm.DR.Font.keys()) == [b"/F\xe9", b"/LiberationSans"]
+        redrawn = self._appended(
+            tmp_dir, original, boxed, lambda src, dst: _add_text_box(src, dst, tmp_dir, "Zażółć"), "redraw")
+        with pikepdf.open(redrawn) as pdf:
+            assert _spelled(pdf.Root.AcroForm.DR.Font.keys()) == [b"/F\xe9", b"/LiberationSans"]
+            [note] = [a for a in pdf.pages[0].obj.Annots if a.get("/Subtype") == pikepdf.Name.FreeText]
+            assert note.AP.N.Resources.Font.LiberationSans.objgen == pdf.Root.AcroForm.DR.Font.LiberationSans.objgen
+        with open(boxed, "rb") as fh:
+            size = len(fh.read())
+        with open(redrawn, "rb") as fh:
+            # The redraw appends no second font program.
+            assert b"/FontFile2" not in fh.read()[size:]
+
+
+class TestAnAppearanceThatDrawsFromADefaultFontOfSuchBytes:
+    def test_a_moved_font_stays_the_font_of_an_appearance_that_holds_none(self, tmp_dir):
+        """A widget appearance with no font of its own takes `/F#E9` from the
+        default resources. After a merge moved that font to the next name,
+        the appearance holds it under the name it draws with."""
+        from engine.merge import merge
+
+        def form(name: str, base_font: bytes) -> str:
+            src = _named_font_form(tmp_dir, name, base_font)
+            with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+                widget = pdf.pages[0].obj.Annots[0]
+                face = pdf.make_stream(b"BT /F#E9 10 Tf 2 5 Td (words) Tj ET")
+                face.Type = pikepdf.Name.XObject
+                face.Subtype = pikepdf.Name.Form
+                face.BBox = pikepdf.Array([0, 0, 200, 20])
+                face.Resources = pikepdf.Dictionary()
+                widget.AP = pikepdf.Dictionary(N=face)
+                pdf.save(src)
+            return src
+
+        out = os.path.join(tmp_dir, "m.pdf")
+        assert merge([form("a.pdf", b"Helvetica"), form("b.pdf", b"Courier")], out)["pages"] == 2
+        with pikepdf.open(out) as pdf:
+            held = []
+            for page in pdf.pages:
+                widget = next(a for a in page.obj.Annots if a.get("/Subtype") == pikepdf.Name.Widget)
+                fonts = widget.AP.N.Resources.get("/Font")
+                held.append(
+                    {key.encode("utf-8", "surrogateescape"): bytes(fonts[key].BaseFont) for key in fonts.keys()}
+                    if fonts is not None else {}
+                )
+        assert held == [{}, {b"/F\xe9": b"/Courier"}]
+        assert _default_appearances(out)["fonts"] == {b"/F\xe9": b"/Helvetica", b"/F\xe9_1": b"/Courier"}

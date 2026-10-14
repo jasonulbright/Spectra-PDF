@@ -17,7 +17,7 @@ import {
 } from '../src/renderer/lib/annotation-view';
 import { pdfRectToDisplay, pdfRectToUprightDisplay } from '../src/renderer/lib/pdfx-build';
 import { rotateNormalizedRect } from '../src/renderer/lib/redaction';
-import { quarterTurn, stampRasterTurn } from '../src/renderer/lib/stamp-raster';
+import { quarterTurn, appearanceRasterTurn } from '../src/renderer/lib/appearance-raster';
 
 const { displayFrame, rotateAnnotationRect } = await import('../src/renderer/state/reducer');
 
@@ -90,7 +90,7 @@ describe('body, box and bitmap of a carried stamp agree', () => {
   const onScreen = (file: number, pending: number, view: number, noRotate: boolean): number => {
     // The cell is given the page with the view turn composed in.
     const cellRotation = quarterTurn(pending, view);
-    const body = stampRasterTurn(file, pendingPageRotation(cellRotation, view), noRotate);
+    const body = appearanceRasterTurn(file, pendingPageRotation(cellRotation, view), noRotate);
     const wrapper = bodyTurnsWithView({ kind: 'stamp', ...(noRotate ? { noRotate: true as const } : {}) }, view) ? view : 0;
     return quarterTurn(body, wrapper);
   };

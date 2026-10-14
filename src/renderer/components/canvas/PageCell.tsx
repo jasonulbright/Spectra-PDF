@@ -75,9 +75,14 @@ import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import { shownValue } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import { ACTION_KIND_LABEL, type ActionTrigger } from '../../lib/field-actions';
+import { editorTargetAfter, takesInput, textEditorStep } from '../../lib/text-box-edit';
+import type { EditorTarget } from '../../lib/text-box-edit';
+import { bundledFacesKnown } from '../../lib/text-box-faces';
+import { TextBoxBody } from './TextBoxBody';
 import type { FormFieldValue, FormValuePhase } from '../../lib/forms';
 import { PageView } from './PageView';
-import { CarriedStampBody } from './CarriedStampBody';
+import { CarriedStampBody, KeptAppearancePreview } from './CarriedAppearanceBody';
+import { keptAppearanceMove, resizeKeepsAppearance } from '../../lib/imported-edit';
 import { useSeparationInspector, useSeparationRaster } from '../../hooks/useSeparationPreview';
 import { isInspectClick, pointerTravel } from '../../lib/separation-preview';
 import { useFlattenerRegions } from '../../hooks/useFlattenerPreview';
@@ -1452,8 +1457,21 @@ function PageCellImpl({
   const bandActive = useRef(false);
   // Cancels the in-flight band/stroke (removes window listeners, commits nothing).
   const cancelBand = useRef<(() => void) | null>(null);
-  // Freetext annotation currently being edited inline.
-  const [editing, setEditing] = useState<string | null>(null);
+  // The annotation the inline text editor is open on. The target names the
+  // annotation and its text when the editor opened: an undo, a redo or an
+  // update the store applies later closes the editor, and nothing opens it
+  // again but the user.
+  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  const editorNow = editorTargetAfter(editorTarget, page.annotations ?? []);
+  // State adjusted while rendering: the target for the annotations of this
+  // render is settled before anything reads it.
+  if (editorNow !== editorTarget) setEditorTarget(editorNow);
+  const editing = editorNow?.seen ? editorNow.id : null;
+  const openEditor = (annotation: Pick<PageAnnotation, 'id' | 'note'>): void =>
+    setEditorTarget({ id: annotation.id, note: annotation.note ?? '', seen: false });
+  const editorField = useRef<HTMLTextAreaElement | null>(null);
+  // The editor element and the typed text for which it took the focus back.
+  const refocusedEditor = useRef<{ field: HTMLTextAreaElement; value: string } | null>(null);
   // In-progress ink stroke, flat [x0,y0,x1,y1,...] display-normalized points.
   const [inkPoints, setInkPoints] = useState<number[] | null>(null);
   // In-progress measurement: committed vertices + the live
@@ -1463,6 +1481,9 @@ function PageCellImpl({
   const [measureCursor, setMeasureCursor] = useState<{ x: number; y: number } | null>(null);
   const measureSeqActive = useRef(false);
 
+  // The page width in points in the frame annotations are stored in: the
+  // width the commit lays a text box out against.
+  const storedWidthPt = page.rotation === 90 || page.rotation === 270 ? page.height : page.width;
   // Display px of the page's own point size — scales freetext to the cell.
   const freetextFontPx =
     (FREETEXT_FONT_PT / (page.rotation === 90 || page.rotation === 270 ? page.width : page.height)) *
@@ -1896,6 +1917,9 @@ function PageCellImpl({
   // through local state in the STORED frame (so the render-side projection is
   // the ONE projection), and dispatch a single batch edit on release — one
   // gesture, one undo step. Escape/blur/pointercancel abandon cleanly.
+  // Imports whose appearance could not be rastered: the overlay draws their
+  // body itself.
+  const [unrasteredAppearances, setUnrasteredAppearances] = useState<ReadonlySet<string>>(() => new Set());
   const [manipPreview, setManipPreview] = useState<Map<
     string,
     { x: number; y: number; w: number; h: number; points?: number[] }
@@ -2079,6 +2103,9 @@ function PageCellImpl({
     // resizing keeps their aspect unless Shift says otherwise; a text stamp's
     // box does not. A carried appearance is a picture as well.
     const aspectByDefault = a.kind === 'stamp' && (!!a.imageData || !!a.symbolParts || (!!a.carriedAppearance && !a.signatureFont));
+    // A text box whose original appearance the commit keeps scales by one
+    // factor: its glyphs are never stretched, with or without Shift.
+    const aspectAlways = resizeKeepsAppearance(a);
     let activated = false;
     let lastStored: { x: number; y: number; w: number; h: number; points?: number[] } | null = null;
     // A resize DRAGS one handle, so the pointer IS the moving geometry —
@@ -2096,7 +2123,7 @@ function PageCellImpl({
         index: resizeIndex,
         ...(ownBox ? { unclamped: true } : {}),
       });
-      const keepAspect = aspectByDefault ? !ev.shiftKey : ev.shiftKey;
+      const keepAspect = aspectAlways || (aspectByDefault ? !ev.shiftKey : ev.shiftKey);
       let stored: { x: number; y: number; w: number; h: number; points?: number[] };
       if (ownBox) {
         stored = resizedInView(a, handle, p.x, p.y, keepAspect, viewRotation, storedFrame);
@@ -3044,7 +3071,7 @@ function PageCellImpl({
         note: '',
       };
       onAddAnnotation(docId, page.id, annotation);
-      setEditing(annotation.id);
+      openEditor(annotation);
       return;
     }
     if (tool === 'count') {
@@ -3333,7 +3360,7 @@ function PageCellImpl({
             strokeWidth: 1,
           };
           onAddAnnotation(docId, page.id, annotation);
-          setEditing(annotation.id); // type the text straight away, like freetext
+          openEditor(annotation); // type the text straight away, like freetext
         } else {
           const annotation: PageAnnotation = {
             id: crypto.randomUUID(),
@@ -3342,7 +3369,7 @@ function PageCellImpl({
             color: annotationColor ?? defaultColorFor(kind),
           };
           onAddAnnotation(docId, page.id, annotation);
-          if (kind === 'freetext') setEditing(annotation.id);
+          if (kind === 'freetext') openEditor(annotation);
         }
       }
     };
@@ -3371,11 +3398,43 @@ function PageCellImpl({
   // gone. Harmless on the always-mounted board (regression).
   useEffect(() => () => cancelBand.current?.(), []);
 
-  const finishEditing = (annotation: PageAnnotation, value: string): void => {
-    setEditing(null);
-    const note = value.trim();
-    if (!note) onRemoveAnnotation(docId, page.id, annotation.id);
-    else if (note !== annotation.note) onUpdateAnnotation(docId, page.id, annotation.id, note);
+  // Escape: the text stays as it was. A box that never had a text leaves.
+  const cancelEditing = (annotation: PageAnnotation): void => {
+    setEditorTarget(null);
+    if (!annotation.note) onRemoveAnnotation(docId, page.id, annotation.id);
+  };
+  // The store refuses a text the commit cannot draw and shows the notice
+  // (`textEditorStep`). The editor then stays open with the text as typed
+  // and holds the focus, or it closes: it is never open without the focus.
+  // It takes the focus back once for a typed text.
+  const finishEditing = (
+    annotation: PageAnnotation, value: string, by: 'confirm' | 'blur', focusTo: EventTarget | null = null,
+  ): void => {
+    const field = editorField.current;
+    const before = refocusedEditor.current;
+    const step = textEditorStep(annotation, value, visibleNumber, {
+      by,
+      windowFocused: document.hasFocus(),
+      editorShown: field !== null && field.isConnected && field.getClientRects().length > 0,
+      facesKnown: bundledFacesKnown(),
+      toControl: focusTo instanceof HTMLElement && focusTo !== field && takesInput(focusTo),
+      refocusedFor: before !== null && before.field === field ? before.value : null,
+    });
+    refocusedEditor.current = step.editor === 'refocus' && field ? { field, value: value.trim() } : null;
+    if (step.editor === 'close') setEditorTarget(null);
+    if (step.send === 'remove') onRemoveAnnotation(docId, page.id, annotation.id);
+    else if (step.send === 'update') onUpdateAnnotation(docId, page.id, annotation.id, value.trim());
+    if (step.drop) onRemoveAnnotation(docId, page.id, annotation.id);
+    if (step.editor === 'refocus') {
+      // The focus is given back after the blur has ended. An editor that
+      // cannot take it closes.
+      requestAnimationFrame(() => {
+        const still = editorField.current;
+        if (!still || still !== field) return;
+        still.focus();
+        if (document.activeElement !== still) cancelEditing(annotation);
+      });
+    }
   };
 
   // A link region. The region arrives already projected into the frame shown
@@ -3578,7 +3637,15 @@ function PageCellImpl({
         // (same as any brand-new, uncommitted annotation always does).
         // A baked annotation is in the loaded bytes with the appearance the
         // commit wrote, and no edit reaches it until its read-back.
+        // An import whose appearance the commit keeps as written shows that
+        // appearance and no body of the overlay: in the raster while it is in
+        // place, and from its own bitmap at the place a move puts it.
+        const kept = keptAppearanceMove(raw, previewBox);
+        const keptInPlace = kept !== null && !previewBox && Math.abs(kept.dx) <= 1e-9 && Math.abs(kept.dy) <= 1e-9;
+        // An annotation whose text is being typed shows the editor alone.
+        const keptPreview = kept !== null && !keptInPlace && editing !== raw.id && !!raw.originalAppearance && !unrasteredAppearances.has(raw.id);
         const pristineImport =
+          keptInPlace || keptPreview ||
           (!!a.baked && !a.geometryDiverged) ||
           (!!a.importedOriginal &&
             a.importedOriginal.hasAppearance && // else pdf.js draws nothing to avoid duplicating
@@ -3631,6 +3698,7 @@ function PageCellImpl({
           data-annot-id={a.id}
           className={
             annotationBodyClasses(a.kind, pristineImport) +
+            (keptPreview ? ' page-annot-kept' : '') +
             (selectedAnnotationIds.includes(a.id) ? ' page-annot-selected' : '')
           }
           title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' || a.kind === 'shape' || a.kind === 'count' ? a.note : undefined}
@@ -3695,7 +3763,7 @@ function PageCellImpl({
             a.kind === 'freetext' || a.kind === 'callout'
               ? (e) => {
                   e.stopPropagation();
-                  setEditing(a.id);
+                  openEditor(a);
                 }
               : undefined
           }
@@ -3710,6 +3778,21 @@ function PageCellImpl({
               : undefined
           }
         >
+          {keptPreview && kept && raw.originalAppearance && (
+            <KeptAppearancePreview
+              pdf={pdf}
+              pageNumber={page.sourcePageIndex + 1}
+              annotationId={raw.originalAppearance.id}
+              moved={kept}
+              pendingRotation={pendingRotation}
+              viewRotation={viewRotation}
+              origin={{ x: da.x, y: da.y }}
+              displayWidth={displayWidth}
+              pageHeight={pageHeight}
+              pixelsPerPoint={Math.sqrt((displayWidth * pageHeight) / Math.max(1, page.width * page.height))}
+              onMissing={() => setUnrasteredAppearances((standing) => (standing.has(raw.id) ? standing : new Set([...standing, raw.id])))}
+            />
+          )}
           {a.kind === 'count' && !pristineImport && (
             // The same unit-square parts the appearance stream draws, so what
             // is on screen and what prints are one geometry, not two.
@@ -4042,7 +4125,10 @@ function PageCellImpl({
             );
           })()}
           {a.kind === 'callout' && editing !== a.id && !pristineImport && da.calloutBox && (
-            <span
+            <TextBoxBody
+              annotation={a}
+              boxWidthPt={(a.calloutBox ?? [0, 0, a.w, 0])[2] * storedWidthPt}
+              fontPx={freetextFontPx}
               className="page-annot-callout-text"
               style={{
                 left: `${da.w > 0 ? ((da.calloutBox[0] - da.x) / da.w) * 100 : 0}%`,
@@ -4050,15 +4136,12 @@ function PageCellImpl({
                 width: `${da.w > 0 ? (da.calloutBox[2] / da.w) * 100 : 100}%`,
                 height: `${da.h > 0 ? (da.calloutBox[3] / da.h) * 100 : 100}%`,
                 color: a.color,
-                fontSize: freetextFontPx,
               }}
-            >
-              {a.note}
-            </span>
+            />
           )}
           <MaybeTurn style={turnStyle}>
             {a.kind === 'freetext' && editing !== a.id && !pristineImport && (
-              <span className="page-annot-text-body">{a.note}</span>
+              <TextBoxBody annotation={a} boxWidthPt={a.w * storedWidthPt} fontPx={freetextFontPx} className="page-annot-text-body" />
             )}
             {a.kind === 'stamp' && !pristineImport && (
               a.symbolParts ? (
@@ -4158,6 +4241,7 @@ function PageCellImpl({
             // covers its TEXT BOX, not the whole (leader-including) extent.
             <MaybeTurn style={turnStyle}>
               <textarea
+                ref={editorField}
                 className="page-annot-editor"
                 style={{
                   fontSize: freetextFontPx,
@@ -4188,21 +4272,22 @@ function PageCellImpl({
                     : {}),
                 }}
                 autoFocus
+                dir="auto"
                 defaultValue={a.note ?? ''}
                 spellCheck
                 lang={spellLang}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
-                onBlur={(e) => finishEditing(a, e.currentTarget.value)}
+                onBlur={(e) => finishEditing(a, e.currentTarget.value, 'blur', e.relatedTarget)}
                 onKeyDown={(e) => {
                   e.stopPropagation();
                   if (e.key === 'Escape') {
                     e.preventDefault();
-                    finishEditing(a, a.note ?? ''); // revert (removes if never had text)
+                    cancelEditing(a);
                   } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
-                    finishEditing(a, e.currentTarget.value);
+                    finishEditing(a, e.currentTarget.value, 'confirm');
                   }
                 }}
               />
