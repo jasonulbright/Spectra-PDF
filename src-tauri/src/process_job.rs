@@ -128,6 +128,43 @@ fn resume_initial_thread(pid: u32) -> Result<(), String> {
     Err(format!("no initial thread found for process {pid}"))
 }
 
+impl ProcessJob {
+    /// The number of processes still in the job; `None` when it cannot be read.
+    pub fn active_processes(&self) -> Option<u32> {
+        use windows::Win32::System::JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        };
+        let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        unsafe {
+            QueryInformationJobObject(
+                Some(HANDLE(self.0 as *mut _)),
+                JobObjectBasicAccountingInformation,
+                (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                None,
+            )
+        }
+        .ok()?;
+        Some(info.ActiveProcesses)
+    }
+
+    /// Ends every process in the job and waits, at most `timeout`, until the
+    /// job holds none. Returns whether the job is empty.
+    pub fn terminate_and_wait(&self, timeout: std::time::Duration) -> bool {
+        use windows::Win32::System::JobObjects::TerminateJobObject;
+        let _ = unsafe { TerminateJobObject(HANDLE(self.0 as *mut _), 1) };
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match self.active_processes() {
+                Some(0) => return true,
+                _ if std::time::Instant::now() >= deadline => return false,
+                _ => std::thread::sleep(std::time::Duration::from_millis(100)),
+            }
+        }
+    }
+}
+
 impl Drop for ProcessJob {
     fn drop(&mut self) {
         unsafe {

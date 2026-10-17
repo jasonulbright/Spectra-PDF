@@ -3329,7 +3329,7 @@ function AppContent(): React.ReactElement {
   // writes recorded for them and asks about the bytes they produced. The
   // documents stop leaving once it is answered, so this window stays usable
   // while other windows answer; its close step leaves again (`exitDocuments`).
-  const handleExit = useCallback(async () => {
+  const handleExit = useCallback(async (relaunch?: boolean) => {
     const paths = () => [...readState().files.keys()];
     const { readiness } = await closeAfterWrites(
       paths(),
@@ -3371,14 +3371,14 @@ function AppContent(): React.ReactElement {
     // window closing anyway would leave it standing behind a session record
     // that stopped being written the moment Exit was chosen.
     const result = await finishCoordinatedExit(
-      () => app.requestQuit(),
+      () => app.requestQuit(relaunch === true),
       () => confirmCurrentDirtyFiles(
         paths,
         (names) => tChrome('app.exit.unsaved', { names }),
         alreadyAnswered,
       ),
       (sessionId) => app.quitCancelled(sessionId),
-      () => closeGated((force) => app.confirmClose(force), exitDocuments(paths)),
+      (sessionId) => closeGated((force) => app.confirmClose(force, sessionId), exitDocuments(paths)),
     );
     if (result === 'cancelled') return;
     // A missing peer receipt, malformed quit result, or failed session
@@ -3387,6 +3387,11 @@ function AppContent(): React.ReactElement {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
     }
   }, [readState, confirmCurrentDirtyFiles, closeAfterWrites, showNotice, closeGated, exitDocuments]);
+
+  // "Restart now" is an Exit that asks to relaunch. Every early return of the
+  // exit sends nothing to Rust, and a quit cancelled later lifts its seal, so
+  // no relaunch survives a quit that did not happen.
+  const restartForUpdate = useCallback(() => handleExit(true), [handleExit]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
   // this workspace, so two live copies of one file never exist and every
@@ -3828,9 +3833,9 @@ function AppContent(): React.ReactElement {
   // this session away with nothing left standing to capture it from. Silence
   // there reads as a dead close button.
   const closeOrReport = useCallback(
-    async (minimizeToTray: boolean): Promise<GatedClose> => {
+    async (minimizeToTray: boolean, sessionId: number | null = null): Promise<GatedClose> => {
       flushReadingViewHistory();
-      const closed = await closeGated((force) => app.closeWindow(minimizeToTray, force));
+      const closed = await closeGated((force) => app.closeWindow(minimizeToTray, force, sessionId));
       if (closed === 'aborted') {
         await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
       }
@@ -3921,7 +3926,7 @@ function AppContent(): React.ReactElement {
           () => [...filesRef.current.keys()],
           (names) => tChrome('app.window.unsaved', { names }),
         ),
-        () => closeOrReport(minimizeToTray),
+        () => closeOrReport(minimizeToTray, sessionId),
       );
       if (readiness !== 'go' || closed === 'stayed') await app.quitCancelled(sessionId);
     });
@@ -4348,7 +4353,7 @@ function AppContent(): React.ReactElement {
       {!(state.ui.readingMode && isDocTab(state.ui.focusedTab)) && <MainToolbar />}
 
       <PortfolioAutoOpen />
-      <UpdateBar checkSignal={updateCheckSignal} />
+      <UpdateBar checkSignal={updateCheckSignal} onRestart={restartForUpdate} />
 
       {commitError && (
         <div data-testid="commit-error-bar" className="app-banner flex items-center gap-3 px-4 py-2 bg-red-600/20 border-b border-red-500/40 text-sm text-red-200 shrink-0">

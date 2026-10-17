@@ -97,6 +97,15 @@
 # The .sig itself is never an asset. Without -LinuxDir the Windows-only set is
 # the whole contract, which is what a tag built without Linux is held to.
 #
+# -ExpectPortableEntry adds the portable zip's updater entry: latest.json
+# carries `windows-x86_64-portable` with the portable zip's asset url and the
+# built `<zip>.sig` (never an asset). The signatures of the downloaded portable
+# zip and the downloaded installer are then verified against the updater public
+# key (-PublicKey, else `plugins.updater.pubkey` of -CargoPackage's
+# tauri.conf.json) by scripts/verify_minisign.py, and each trusted comment must
+# name the file that was signed: the updater refuses a signature whose `file:`
+# field is not the asset it expects for that version.
+#
 # -Offline <dir> skips the API and reads <dir>/release.json, <dir>/assets.json
 # and the "downloaded" asset files from <dir>; the comparison is otherwise the
 # same, which is what tests/test_ci_capability_setup.py drives. -Repo is still
@@ -114,6 +123,9 @@ param(
     [string]$CargoPackage = "src-tauri",
     [string]$LinuxDir = "",
     [switch]$ExpectSigned,
+    [switch]$ExpectPortableEntry,
+    [string]$PublicKey = "",
+    [string]$Python = "python",
     [string]$SignerCommonName = "Jason Ulbright"
 )
 
@@ -179,6 +191,9 @@ if ($LinuxDir) {
     $linux = Get-LinuxReleaseAssets -Directory $LinuxDir -Version $version
     $expectedPlatforms += "linux-x86_64"
 }
+if ($ExpectPortableEntry) {
+    $expectedPlatforms += "windows-x86_64-portable"
+}
 
 if ($Offline) {
     $Downloads = $Offline
@@ -206,6 +221,12 @@ if ($installer.Count -ne 1) { throw "expected one installer, found $($installer.
 $signature = Get-Item -LiteralPath (Join-Path $Bundle "$($installer[0].Name).sig")
 $portableZip = @(Get-ChildItem -LiteralPath $Portable -Filter "*-portable.zip" -File)
 if ($portableZip.Count -ne 1) { throw "expected one portable zip, found $($portableZip.Count)" }
+$portableSig = $null
+if ($ExpectPortableEntry) {
+    $portableSigPath = Join-Path $Portable "$($portableZip[0].Name).sig"
+    if (-not (Test-Path -LiteralPath $portableSigPath -PathType Leaf)) { throw "no portable updater signature at $portableSigPath" }
+    $portableSig = Get-Item -LiteralPath $portableSigPath
+}
 $sums = Get-Item -LiteralPath (Join-Path $Bundle "SHA256SUMS.txt")
 $local = @($installer) + @($signature) + @($portableZip) + @($sums)
 if ($linux) { $local += $linux.Uploaded }
@@ -319,6 +340,12 @@ if ($linux) {
     $appImageSig = (Get-Content -LiteralPath $linux.Sig.FullName -Raw).Trim()
     $entryOf["linux-x86_64"] = @{ url = $appImageUrl; signature = $appImageSig; artifact = "built AppImage" }
 }
+if ($portableSig) {
+    $portableId = (Get-Downloaded $assetNameOf[$portableZip[0].Name]).id
+    $portableUrl = "https://api.github.com/repos/$Repo/releases/assets/$portableId"
+    $portableSigText = (Get-Content -LiteralPath $portableSig.FullName -Raw).Trim()
+    $entryOf["windows-x86_64-portable"] = @{ url = $portableUrl; signature = $portableSigText; artifact = "built portable zip" }
+}
 # Platform entries are re-keyed into an ordinal map: `$manifest.platforms.$name`
 # resolves a property case-insensitively, which would let `Windows-x86_64-NSIS`
 # stand in for the key the updater actually looks up.
@@ -341,6 +368,20 @@ foreach ($name in $expectedPlatforms) {
     if ([string]$platform.url -cne $want.url) {
         throw "latest.json url mismatch (platform $name): '$($platform.url)' != '$($want.url)'"
     }
+}
+
+# The updater signatures over the bytes the public downloads, against the key
+# the shipped binaries carry. Each trusted comment names the file the build
+# signed, under its build name.
+function Assert-UpdaterSignature([string]$signatureFile, [string]$downloadedPath, [string]$signedName) {
+    $verifier = Join-Path $PSScriptRoot "verify_minisign.py"
+    $key = if ($PublicKey) { @("--public-key", $PublicKey) } else { @("--public-key-from-conf", (Join-Path $CargoPackage "tauri.conf.json")) }
+    & $Python -I $verifier @key --signature-file $signatureFile --file $downloadedPath --expect-file $signedName
+    if ($LASTEXITCODE -ne 0) { throw "the updater signature of $signedName does not verify (exit $LASTEXITCODE)" }
+}
+if ($portableSig) {
+    Assert-UpdaterSignature $portableSig.FullName (Get-Downloaded $assetNameOf[$portableZip[0].Name]).path $portableZip[0].Name
+    Assert-UpdaterSignature $signature.FullName (Get-Downloaded $assetNameOf[$installer[0].Name]).path $installer[0].Name
 }
 
 # The real on-disk path: full, and with each segment's case as the file system
@@ -518,6 +559,13 @@ try {
     $env:SPECTRAPDF_UPDATER_PLATFORMS = $expectedPlatforms -join ","
     $env:SPECTRAPDF_UPDATER_URL = $installerUrl
     $env:SPECTRAPDF_UPDATER_SIGNATURE_FILE = (Resolve-Path -LiteralPath (Get-Downloaded $assetNameOf[$signature.Name]).path).Path
+    if ($portableSig) {
+        $env:SPECTRAPDF_UPDATER_PORTABLE_URL = $portableUrl
+        $env:SPECTRAPDF_UPDATER_PORTABLE_SIGNATURE_FILE = $portableSig.FullName
+    } else {
+        Remove-Item Env:SPECTRAPDF_UPDATER_PORTABLE_URL -ErrorAction SilentlyContinue
+        Remove-Item Env:SPECTRAPDF_UPDATER_PORTABLE_SIGNATURE_FILE -ErrorAction SilentlyContinue
+    }
     if ($linux) {
         $env:SPECTRAPDF_UPDATER_LINUX_URL = $appImageUrl
         $env:SPECTRAPDF_UPDATER_LINUX_SIGNATURE_FILE = $linux.Sig.FullName

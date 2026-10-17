@@ -123,6 +123,7 @@ pub mod feature {
     pub const START_MINIMIZED: &str = "Starting minimized to the tray";
     pub const TRAY_RESIDENCY: &str = "The system tray";
     pub const EXPLORER_MENU: &str = "The File Explorer context menu";
+    pub const AUTOMATIC_UPDATES: &str = "Automatic updates";
 }
 
 #[cfg(test)]

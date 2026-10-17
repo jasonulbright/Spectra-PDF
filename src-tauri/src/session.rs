@@ -490,6 +490,14 @@ impl SessionState {
         self.sealed.load(Ordering::SeqCst)
     }
 
+    /// The id of the app-level exit that holds the seal. `None` when the file
+    /// is unsealed or a close without an id sealed it.
+    pub fn sealed_by(&self) -> Option<u64> {
+        let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let id = self.sealed_by.load(Ordering::SeqCst);
+        (self.sealed.load(Ordering::SeqCst) && id != 0).then_some(id)
+    }
+
     fn new_seal_id(&self) -> u64 {
         self.next_seal_id.fetch_add(1, Ordering::SeqCst) + 1
     }
@@ -2334,6 +2342,19 @@ mod tests {
             state.unseal_and_write_for(Some(new_exit), || Ok(())),
             WriteOutcome::Written
         );
+    }
+
+    #[test]
+    fn the_seal_names_its_exit_only_while_that_exit_holds_it() {
+        let state = SessionState::new();
+        assert_eq!(state.sealed_by(), None);
+        let exit = state.new_seal_id();
+        assert_eq!(state.seal_and_write_for(Some(exit), || Ok(())), WriteOutcome::Written);
+        assert_eq!(state.sealed_by(), Some(exit));
+        assert_eq!(state.unseal_and_write_for(Some(exit), || Ok(())), WriteOutcome::Written);
+        assert_eq!(state.sealed_by(), None, "a cancelled exit leaves no owner");
+        assert_eq!(state.seal_and_write(|| Ok(())), WriteOutcome::Written);
+        assert_eq!(state.sealed_by(), None, "a plain last-window close seals without an exit id");
     }
 
     #[test]
