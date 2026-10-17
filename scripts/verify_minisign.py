@@ -227,11 +227,11 @@ def main(argv: list[str] | None = None) -> int:
         signature = args.signature
         if args.signature_file is not None:
             signature = args.signature_file.read_text(encoding="utf-8")
-        verified = verify_file(public_key, signature, args.file, args.expect_file)
+        verify_file(public_key, signature, args.file, args.expect_file)
     except (SignatureError, OSError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 1
-    print(f"verified {args.file.name}: trusted comment '{verified.trusted_comment}'")
+    print(f"verified {args.file.name}")
     return 0
 
 
