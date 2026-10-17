@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.1017.157
+
+**Updates download and install automatically on Windows**
+
+### New
+- Download, verify and install new versions automatically, for installed and portable copies.
+- Turn off automatic update checks or automatic installs in Settings.
+- Install updates on exit, or click Restart now to update immediately.
+- Install this version by hand once; later versions install automatically.
+
+### Fixed
+- Keep the Edit toolbar at a fixed height with contextual controls in an overlay.
+- Delete an edit selection with Delete or Backspace, and clear it with Escape.
+- Add Edit to the main toolbar as an optional command.
+- Stop a system error dialog when the Audiveris setting points to an invalid file.
+
 ## 2026.1014.156
 
 **More reliable text editing, annotations and long-running work**
