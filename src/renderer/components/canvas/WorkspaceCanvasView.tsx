@@ -4973,6 +4973,60 @@ export function WorkspaceCanvasView({
     [editSel, focusedDoc, docs, onEditImage, onEditImagesGroup, editBusy, editImagesByPage],
   );
 
+  // Edit-mode keyboard actions target the same transient object selection as
+  // the contextual controls. Text deletion uses the existing replacement
+  // path with an empty value (the engine's supported run-removal operation),
+  // so every delete stays in the normal undo/save flow.
+  useEffect(() => {
+    if (
+      activeToolId !== 'edit' ||
+      tool !== 'edit' ||
+      (!editSel && !selectedVector)
+    ) return;
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' || target.isContentEditable)
+      ) return;
+      if (
+        (event.key !== 'Delete' && event.key !== 'Backspace') ||
+        event.ctrlKey || event.metaKey || event.altKey
+      ) return;
+      event.preventDefault();
+      if (editBusy) return;
+      if (editSel?.kind === 'image') {
+        void runEditAction('delete');
+      } else if (editSel?.kind === 'text') {
+        const run = editTextByPage.get(editSel.pageId)?.runBoxes.find(
+          (candidate) => candidate.index === editSel.index,
+        );
+        if (run?.editable) void handleCommitTextEdit(editSel.pageId, editSel.index, '');
+      } else if (editSel?.kind === 'para') {
+        const paragraph = editTextByPage.get(editSel.pageId)?.paragraphs.find(
+          (candidate) => candidate.index === editSel.index,
+        );
+        if (paragraph) void handleCommitParagraphEdit(editSel.pageId, editSel.index, '');
+      } else if (selectedVector) {
+        void handleDeleteVector();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    activeToolId,
+    tool,
+    editSel,
+    selectedVector,
+    editTextByPage,
+    editBusy,
+    runEditAction,
+    handleCommitTextEdit,
+    handleCommitParagraphEdit,
+    handleDeleteVector,
+  ]);
+
   // The selected image's transform context is its user-space matrix plus the
   // page geometry the gesture needs to convert pointer↔user space. Null unless
   // exactly one image is selected and its page geometry is loaded. A group
@@ -5217,6 +5271,41 @@ export function WorkspaceCanvasView({
   useEffect(() => {
     setImageCropArmed(false);
   }, [editSel]);
+
+  // Escape unwinds Edit's local state before the app-level Escape chain exits
+  // the tool: first cancel crop, then clear the selected object. In Add Text
+  // or Add Image it returns to Select & Edit. A live text-placement card owns
+  // Escape itself and is left to its existing dismiss interceptor.
+  useEffect(() => {
+    if (activeToolId !== 'edit' || liveAddTextPlacement !== null) return;
+    const editMode = tool === 'edit' || tool === 'addtext' || tool === 'addimage';
+    if (!editMode) return;
+    if (
+      tool === 'edit' &&
+      !imageCropArmed &&
+      !editSel &&
+      !selectedVector
+    ) return;
+    return pushEscapeInterceptor(() => {
+      if (imageCropArmed) {
+        setImageCropArmed(false);
+      } else if (tool === 'addtext' || tool === 'addimage') {
+        setTool('edit');
+      } else {
+        setEditSel(null);
+        setSelectedVector(null);
+      }
+      return true;
+    });
+  }, [
+    activeToolId,
+    liveAddTextPlacement,
+    tool,
+    imageCropArmed,
+    editSel,
+    selectedVector,
+    setTool,
+  ]);
 
   // The overlay reports pageId/index explicitly; they always match the
   // selection (the overlay only renders for it) — verified, then routed
@@ -7288,8 +7377,8 @@ export function WorkspaceCanvasView({
         calibration={calibration}
         onApplyCalibration={applyCalibration}
         onCancelCalibration={() => setCalibration(null)}
-        editHasSelection={editSel !== null}
-        editSelectionKind={editSel?.kind ?? null}
+        editHasSelection={editSel !== null || selectedVector !== null}
+        editSelectionKind={selectedVector ? 'vector' : (editSel?.kind ?? null)}
         editTextEditable={
           editSel?.kind === 'text'
             ? (editTextByPage

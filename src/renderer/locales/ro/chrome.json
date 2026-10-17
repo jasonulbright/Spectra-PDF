@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "Copiază o zonă a paginii în clipboard ca imagine.",
   "tool.desc.takeoff": "Numărați elemente pe un desen, pe grupuri, apoi exportați antemăsurătoarea sau plasați o legendă.",
   "tool.desc.watermark": "Ștampilați text pe fiecare pagină.",
+  "toolbar.group.edit": "Editare",
   "toolbar.group.file": "Fișier",
   "toolbar.group.find": "Găsire",
   "toolbar.group.history": "Anulare și refacere",

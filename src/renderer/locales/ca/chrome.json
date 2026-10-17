@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "Copia una regió de la pàgina al porta-retalls com a imatge.",
   "tool.desc.takeoff": "Compteu elements d'un dibuix per grups i després exporteu l'amidament o col·loqueu-hi una llegenda.",
   "tool.desc.watermark": "Segelleu text a totes les pàgines.",
+  "toolbar.group.edit": "Edita",
   "toolbar.group.file": "Fitxer",
   "toolbar.group.find": "Cerca",
   "toolbar.group.history": "Desfés i refés",

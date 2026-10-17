@@ -19,6 +19,7 @@ export type ChromeIconId =
   | 'find'
   | 'home'
   | 'tools'
+  | 'edit'
   | 'close'
   | 'overflow'
   | 'document'
@@ -140,6 +141,15 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
   // Wrench.
   tools: (
     <path d="M14.5 4a4.5 4.5 0 0 0-5.9 5.7L4 14.3a2 2 0 1 0 2.8 2.8l4.6-4.6A4.5 4.5 0 0 0 18 7l-2.6 2.6-2-2L16 5a4.5 4.5 0 0 0-1.5-1z" />
+  ),
+  // Pencil over a page — the optional direct entry to Edit.
+  edit: (
+    <>
+      <path d="M5 4h8l4 4v3" />
+      <path d="M13 4v4h4" />
+      <path d="M5 4v16h7" />
+      <path d="m14 17 5.5-5.5a1.4 1.4 0 0 1 2 2L16 19l-3 1z" />
+    </>
   ),
   // X.
   close: <path d="M6 6l12 12M18 6L6 18" />,

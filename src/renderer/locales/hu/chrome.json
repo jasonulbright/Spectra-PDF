@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "A lap egy területét képként a vágólapra másolja.",
   "tool.desc.takeoff": "Számlálja meg egy rajzon az elemeket csoportonként, majd exportálja a felmérést, vagy helyezzen el jelmagyarázatot.",
   "tool.desc.watermark": "Bélyegezzen szöveget minden oldalra.",
+  "toolbar.group.edit": "Szerkesztés",
   "toolbar.group.file": "Fájl",
   "toolbar.group.find": "Keresés",
   "toolbar.group.history": "Visszavonás és újra",

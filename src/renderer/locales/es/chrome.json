@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "Copia una región de la página al portapapeles como imagen.",
   "tool.desc.takeoff": "Cuenta elementos de un plano por grupos y exporta las mediciones o coloca una leyenda.",
   "tool.desc.watermark": "Estampe texto en todas las páginas.",
+  "toolbar.group.edit": "Editar",
   "toolbar.group.file": "Archivo",
   "toolbar.group.find": "Buscar",
   "toolbar.group.history": "Deshacer y rehacer",

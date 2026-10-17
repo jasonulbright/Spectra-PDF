@@ -6504,6 +6504,7 @@
   "tool.desc.snapshot": "Copy a region of the page to the clipboard as a picture.",
   "tool.desc.takeoff": "Count items on a drawing by group, then export the takeoff or place a legend.",
   "tool.desc.watermark": "Stamp text across every page.",
+  "toolbar.group.edit": "Edit",
   "toolbar.group.file": "File",
   "toolbar.group.find": "Find",
   "toolbar.group.history": "Undo & redo",

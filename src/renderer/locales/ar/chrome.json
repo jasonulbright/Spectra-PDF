@@ -6932,6 +6932,7 @@
   "tool.desc.snapshot": "تنسخ منطقة من الصفحة إلى الحافظة كصورة.",
   "tool.desc.takeoff": "عُدّ العناصر في الرسم حسب المجموعة، ثم صدّر الحصر أو ضع مفتاحًا.",
   "tool.desc.watermark": "اختم نصًا على كل صفحة.",
+  "toolbar.group.edit": "تحرير",
   "toolbar.group.file": "ملف",
   "toolbar.group.find": "بحث",
   "toolbar.group.history": "التراجع والإعادة",
