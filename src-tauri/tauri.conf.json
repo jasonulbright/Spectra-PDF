@@ -86,13 +86,7 @@
       "open": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEQzlDNjNDODZBNkY2MEMKUldRTTlxYUdQTWJKdmJ6ck1IYytzQms1RjY3QW5lYjJRck52R0Q1emxIaGNFdVlOWllOdHc4N1gK",
-      "endpoints": [
-        "https://github.com/jasonulbright/Spectra-PDF/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEQzlDNjNDODZBNkY2MEMKUldRTTlxYUdQTWJKdmJ6ck1IYytzQms1RjY3QW5lYjJRck52R0Q1emxIaGNFdVlOWllOdHc4N1gK"
     },
     "fs": {}
   }

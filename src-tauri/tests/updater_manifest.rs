@@ -1,26 +1,31 @@
-//! `latest.json` is accepted by the updater's own deserializer.
+//! `latest.json` is accepted by the update reader of earlier releases.
 //!
-//! The manifest has exactly one reader: the pinned updater plugin inside
-//! every installed copy. A manifest the release verifier accepts and the
-//! plugin refuses breaks the launch update check on every install at once,
-//! so the file is parsed with the plugin's `RemoteRelease` deserializer --
-//! its `time` RFC 3339 parse of `pub_date`, its unknown-field policy -- and
-//! never with a re-implementation of the shape. What the plugin accepts but
-//! leaves optional (`notes`, `pub_date`) is required here, because the
-//! release always carries both and the update notice shows them.
+//! Every copy released before automatic updates (up to 2026.1014.156) reads
+//! the manifest with the updater plugin 2.10.1. A manifest the release
+//! verifier accepts and that reader refuses breaks the launch update check on
+//! every such install at once. The reader's rules are applied here: unknown
+//! fields are ignored; `version` is a release number without leading zeros;
+//! `notes` is a string; `pub_date` is an RFC 3339 date-time with seconds
+//! and an offset, where a space may replace `T`; `platforms` maps each
+//! platform to an absolute http or https `url` and a string `signature`.
+//! This file is copied into the packages of earlier tags, so it uses no crate
+//! beyond `serde_json`. What the reader accepts but leaves optional
+//! (`notes`, `pub_date`) is required here, because the release always
+//! carries both and the update notice shows them.
 //!
 //! With `SPECTRAPDF_UPDATER_MANIFEST` set (the release verifier's mode), the
 //! named manifest is verified against the expectations in the sibling
 //! variables; unset, that test returns and only the fixture tests run. A
 //! platform named `linux-*` takes its url and signature from the `_LINUX_`
-//! variables (the AppImage), every other platform from the installer's.
+//! variables (the AppImage), `windows-x86_64-portable` from the `_PORTABLE_`
+//! variables (the portable archive), every other platform from the
+//! installer's.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use tauri_plugin_updater::{RemoteRelease, RemoteReleaseInner};
 
 const MANIFEST_ENV: &str = "SPECTRAPDF_UPDATER_MANIFEST";
 const VERSION_ENV: &str = "SPECTRAPDF_UPDATER_VERSION";
@@ -30,6 +35,9 @@ const URL_ENV: &str = "SPECTRAPDF_UPDATER_URL";
 const SIGNATURE_FILE_ENV: &str = "SPECTRAPDF_UPDATER_SIGNATURE_FILE";
 const LINUX_URL_ENV: &str = "SPECTRAPDF_UPDATER_LINUX_URL";
 const LINUX_SIGNATURE_FILE_ENV: &str = "SPECTRAPDF_UPDATER_LINUX_SIGNATURE_FILE";
+const PORTABLE_URL_ENV: &str = "SPECTRAPDF_UPDATER_PORTABLE_URL";
+const PORTABLE_SIGNATURE_FILE_ENV: &str = "SPECTRAPDF_UPDATER_PORTABLE_SIGNATURE_FILE";
+const PORTABLE_PLATFORM: &str = "windows-x86_64-portable";
 
 /// What one platform entry must carry: the asset url, its signature, and the
 /// artifact's name for the refusal message.
@@ -46,8 +54,199 @@ struct Expected {
     platforms: BTreeMap<String, Target>,
 }
 
+/// A release number as the earlier reader orders it: three decimal fields,
+/// none with a leading zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ReleaseVersion([u64; 3]);
+
+impl std::fmt::Display for ReleaseVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.0[0], self.0[1], self.0[2])
+    }
+}
+
+fn parse_version(text: &str) -> Result<ReleaseVersion, String> {
+    let invalid = || format!("invalid version {text:?}");
+    let mut fields = [0u64; 3];
+    let mut parts = text.split('.');
+    for field in fields.iter_mut() {
+        let part = parts.next().ok_or_else(invalid)?;
+        let numeric = !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+        if !numeric || (part.len() > 1 && part.starts_with('0')) {
+            return Err(invalid());
+        }
+        *field = part.parse().map_err(|_| invalid())?;
+    }
+    if parts.next().is_some() {
+        return Err(invalid());
+    }
+    Ok(ReleaseVersion(fields))
+}
+
+fn kind_of(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "sequence",
+        Value::Object(_) => "map",
+    }
+}
+
+fn expect_string<'a>(value: &'a Value, field: &str) -> Result<&'a str, String> {
+    value
+        .as_str()
+        .ok_or_else(|| format!("invalid type: {}, expected a string (`{field}`)", kind_of(value)))
+}
+
+fn number_at(text: &[u8], range: std::ops::Range<usize>, max: u32) -> bool {
+    match text.get(range) {
+        Some(d) if d.iter().all(u8::is_ascii_digit) => std::str::from_utf8(d)
+            .ok()
+            .and_then(|d| d.parse::<u32>().ok())
+            .is_some_and(|n| n <= max),
+        _ => false,
+    }
+}
+
+/// RFC 3339 date-time: `YYYY-MM-DD`, then `T`, `t` or a space, `HH:MM:SS`, an
+/// optional fraction, then `Z`, `z`, or `+HH:MM` / `-HH:MM`.
+fn is_rfc3339(text: &str) -> bool {
+    let b = text.as_bytes();
+    if b.len() < 20 || !number_at(b, 0..4, 9999) || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    if !number_at(b, 5..7, 12) || &b[5..7] == b"00" || !number_at(b, 8..10, 31) || &b[8..10] == b"00" {
+        return false;
+    }
+    if !matches!(b[10], b'T' | b't' | b' ') {
+        return false;
+    }
+    if !number_at(b, 11..13, 23) || b[13] != b':' || !number_at(b, 14..16, 59) || b[16] != b':' {
+        return false;
+    }
+    if !number_at(b, 17..19, 60) {
+        return false;
+    }
+    let mut i = 19;
+    if b[i] == b'.' {
+        i += 1;
+        let start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == start {
+            return false;
+        }
+    }
+    match b.get(i) {
+        Some(b'Z' | b'z') => i + 1 == b.len(),
+        Some(b'+' | b'-') => {
+            b.len() == i + 6
+                && number_at(b, i + 1..i + 3, 23)
+                && b[i + 3] == b':'
+                && number_at(b, i + 4..i + 6, 59)
+        }
+        _ => false,
+    }
+}
+
+fn is_absolute_web_url(text: &str) -> bool {
+    let rest = text.strip_prefix("https://").or_else(|| text.strip_prefix("http://"));
+    match rest {
+        Some(rest) => {
+            let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+            !host.is_empty() && !text.chars().any(char::is_whitespace)
+        }
+        None => false,
+    }
+}
+
+struct Platform {
+    url: String,
+    signature: String,
+}
+
+enum ReleaseData {
+    Static { platforms: BTreeMap<String, Platform> },
+    Dynamic,
+}
+
+struct Release {
+    version: ReleaseVersion,
+    notes: Option<String>,
+    pub_date: Option<String>,
+    data: ReleaseData,
+}
+
+fn required<'a>(object: &'a serde_json::Map<String, Value>, field: &str) -> Result<&'a Value, String> {
+    object.get(field).ok_or_else(|| format!("missing field `{field}`"))
+}
+
+fn optional_string(object: &serde_json::Map<String, Value>, field: &str) -> Result<Option<String>, String> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => expect_string(value, field).map(|s| Some(s.to_string())),
+    }
+}
+
+/// The earlier reader's acceptance of one manifest.
+fn read_release(manifest: &str) -> Result<Release, String> {
+    let value: Value = serde_json::from_str(manifest).map_err(|e| e.to_string())?;
+    let object = value.as_object().ok_or("invalid type: expected a map")?;
+    let version = parse_version(expect_string(required(object, "version")?, "version")?)?;
+    let notes = optional_string(object, "notes")?;
+    let pub_date = optional_string(object, "pub_date")?;
+    if let Some(date) = pub_date.as_deref() {
+        if !is_rfc3339(date) {
+            return Err(format!("invalid value for `pub_date`: {date:?}"));
+        }
+    }
+    let data = match object.get("platforms") {
+        Some(platforms) => {
+            let platforms = platforms
+                .as_object()
+                .ok_or("invalid type for `platforms`: expected a map")?;
+            let mut read = BTreeMap::new();
+            for (name, entry) in platforms {
+                let entry = entry
+                    .as_object()
+                    .ok_or_else(|| format!("invalid type for platform {name}: expected a map"))?;
+                let url = expect_string(required(entry, "url")?, "url")?;
+                if !is_absolute_web_url(url) {
+                    return Err(format!("invalid url {url:?} (platform {name})"));
+                }
+                let signature = expect_string(required(entry, "signature")?, "signature")?;
+                read.insert(
+                    name.clone(),
+                    Platform {
+                        url: url.to_string(),
+                        signature: signature.to_string(),
+                    },
+                );
+            }
+            ReleaseData::Static { platforms: read }
+        }
+        None => {
+            let url = expect_string(required(object, "url")?, "url")?;
+            if !is_absolute_web_url(url) {
+                return Err(format!("invalid url {url:?}"));
+            }
+            expect_string(required(object, "signature")?, "signature")?;
+            ReleaseData::Dynamic
+        }
+    };
+    Ok(Release {
+        version,
+        notes,
+        pub_date,
+        data,
+    })
+}
+
 fn verify(manifest: &str, expected: &Expected) -> Result<(), String> {
-    let release: RemoteRelease = serde_json::from_str(manifest)
+    let release = read_release(manifest)
         .map_err(|e| format!("the updater's deserializer refuses latest.json: {e}"))?;
 
     let version = release.version.to_string();
@@ -71,8 +270,8 @@ fn verify(manifest: &str, expected: &Expected) -> Result<(), String> {
         return Err("latest.json carries no `pub_date`".to_string());
     }
     let platforms = match &release.data {
-        RemoteReleaseInner::Static { platforms } => platforms,
-        RemoteReleaseInner::Dynamic(_) => {
+        ReleaseData::Static { platforms } => platforms,
+        ReleaseData::Dynamic => {
             return Err(
                 "latest.json is the single-platform shape; the `platforms` map is expected"
                     .to_string(),
@@ -131,7 +330,13 @@ fn verifies_the_manifest_named_by_the_environment() {
     };
     let mut platforms = BTreeMap::new();
     for name in env(PLATFORMS_ENV).split(',') {
-        let target = if name.starts_with("linux-") {
+        let target = if name == PORTABLE_PLATFORM {
+            Target {
+                url: env(PORTABLE_URL_ENV),
+                signature: read(Path::new(&env(PORTABLE_SIGNATURE_FILE_ENV))).trim().to_string(),
+                artifact: "portable archive",
+            }
+        } else if name.starts_with("linux-") {
             Target {
                 url: env(LINUX_URL_ENV),
                 signature: read(Path::new(&env(LINUX_SIGNATURE_FILE_ENV))).trim().to_string(),
@@ -179,6 +384,60 @@ fn fixture() -> (String, Expected) {
     (read(&dir.join("latest.json")), expected)
 }
 
+const PORTABLE_URL: &str =
+    "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538528111";
+const PORTABLE_SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHBvcnRhYmxl";
+
+/// The fixture with the portable archive's entry: its own asset url and
+/// signature beside the installer's.
+fn portable_fixture() -> (String, Expected) {
+    let (manifest, mut expected) = fixture();
+    let manifest = mutated(&manifest, |m| {
+        m["platforms"].as_object_mut().unwrap().insert(
+            PORTABLE_PLATFORM.to_string(),
+            serde_json::json!({ "url": PORTABLE_URL, "signature": PORTABLE_SIGNATURE }),
+        );
+    });
+    expected.platforms.insert(
+        PORTABLE_PLATFORM.to_string(),
+        Target {
+            url: PORTABLE_URL.to_string(),
+            signature: PORTABLE_SIGNATURE.to_string(),
+            artifact: "portable archive",
+        },
+    );
+    (manifest, expected)
+}
+
+#[test]
+fn accepts_the_portable_entry_beside_the_installer_entries() {
+    let (manifest, expected) = portable_fixture();
+    verify(&manifest, &expected).unwrap();
+}
+
+#[test]
+fn refuses_a_portable_entry_without_a_url() {
+    let (manifest, expected) = portable_fixture();
+    let wrong = mutated(&manifest, |m| {
+        m["platforms"][PORTABLE_PLATFORM].as_object_mut().unwrap().remove("url");
+    });
+    let message = refusal(&wrong, &expected);
+    assert!(message.contains("the updater's deserializer refuses latest.json"), "{message}");
+}
+
+#[test]
+fn refuses_a_portable_entry_carrying_the_installer_signature() {
+    let (manifest, expected) = portable_fixture();
+    let wrong = mutated(&manifest, |m| {
+        let installer = m["platforms"]["windows-x86_64"]["signature"].clone();
+        m["platforms"][PORTABLE_PLATFORM]["signature"] = installer;
+    });
+    assert_eq!(
+        refusal(&wrong, &expected),
+        "latest.json signature is not the portable archive's .sig (platform windows-x86_64-portable)"
+    );
+}
+
 const APPIMAGE_URL: &str =
     "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/538527999";
 const APPIMAGE_SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IGFwcGltYWdl";
@@ -205,11 +464,11 @@ fn linux_fixture() -> (String, Expected) {
 }
 
 /// The release an installed copy reads from the fixture carrying `version`.
-fn release_at(manifest: &str, version: &str) -> RemoteRelease {
+fn release_at(manifest: &str, version: &str) -> Release {
     let text = mutated(manifest, |m| {
         m.insert("version".to_string(), Value::from(version));
     });
-    serde_json::from_str(&text).unwrap_or_else(|e| panic!("version {version:?} must parse: {e}"))
+    read_release(&text).unwrap_or_else(|e| panic!("version {version:?} must parse: {e}"))
 }
 
 fn mutated(manifest: &str, mutate: impl FnOnce(&mut serde_json::Map<String, Value>)) -> String {

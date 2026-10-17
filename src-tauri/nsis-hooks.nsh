@@ -376,9 +376,26 @@ FunctionEnd
   ; the loopback queue.
   !insertmacro SPECTRA_VIRTUAL_PRINTER "retire-legacy"
 
+  ; The SYSTEM task that installs verified updates, on every install so the
+  ; task names this copy's executable. Exit 3: another account can change the
+  ; install folder, so no SYSTEM task may run from it. A failure never fails
+  ; the install; the app then asks for elevation when it applies an update.
+  ClearErrors
+  ExecWait '"$INSTDIR\spectrapdf.exe" --register-update-task' $R9
+  ${If} ${Errors}
+    DetailPrint "Automatic updates: spectrapdf.exe could not be started."
+  ${ElseIf} $R9 == 3
+    DetailPrint "Automatic updates: the install folder can be changed by other accounts; the update task was not registered."
+  ${ElseIf} $R9 != 0
+    DetailPrint "Automatic updates: the update task could not be registered (exit $R9)."
+  ${EndIf}
+
   SetRegView 64
-  ; Silent install (MECM/Intune/PDQ): disable auto-update so IT controls the update cycle
+  ; Silent install (MECM/Intune/PDQ): disable auto-update so IT controls the
+  ; update cycle. An automatic update runs silently with /UPDATE and keeps the
+  ; policy as it found it.
   ${If} ${Silent}
+  ${AndIf} $UpdateMode <> 1
     WriteRegDWORD HKLM "${SPECTRA_POLICY_KEY}" "DisableAutoUpdate" 1
   ${EndIf}
   !insertmacro SPECTRA_RESTORE_POLICY "DisableAutoUpdate" $SpectraPolicyAutoUpdate
@@ -407,6 +424,7 @@ FunctionEnd
   !insertmacro SPECTRA_READ_REPLACEMENT
   ${If} $SpectraReplacing <> 1
     ExecWait '"$INSTDIR\spectrapdf.exe" shell-menu uninstall-machine' $R9
+    ExecWait '"$INSTDIR\spectrapdf.exe" --unregister-update-task' $R9
     !insertmacro SPECTRA_VIRTUAL_PRINTER "remove-all"
     !insertmacro SPECTRA_DROP_EMPTY_MARKER_PARENTS
     !insertmacro SPECTRA_RETIRE_SHELL_DLL "x64"

@@ -31,7 +31,6 @@
     "@tauri-apps/plugin-dialog": "2.7.2",
     "@tauri-apps/plugin-fs": "2.5.1",
     "@tauri-apps/plugin-shell": "2.3.5",
-    "@tauri-apps/plugin-updater": "2.10.1",
     "@tesseract.js-data/ara": "1.0.0",
     "@tesseract.js-data/bul": "1.0.0",
     "@tesseract.js-data/cat": "1.0.0",

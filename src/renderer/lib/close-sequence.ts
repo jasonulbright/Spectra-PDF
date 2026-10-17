@@ -48,7 +48,7 @@ export async function finishCoordinatedExit(
   request: () => Promise<CoordinatedQuitResult>,
   confirmDirty: () => Promise<boolean>,
   cancelQuit: (sessionId: number) => Promise<unknown>,
-  close: () => Promise<GatedClose>,
+  close: (sessionId: number) => Promise<GatedClose>,
 ): Promise<CoordinatedExitResult> {
   const result = await request();
   if (!result.proceed || result.sessionId === null) return 'aborted';
@@ -56,7 +56,7 @@ export async function finishCoordinatedExit(
     await cancelQuit(result.sessionId);
     return 'cancelled';
   }
-  const closed = await close();
+  const closed = await close(result.sessionId);
   if (closed === 'stayed') {
     await cancelQuit(result.sessionId);
     return 'cancelled';

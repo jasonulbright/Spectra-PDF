@@ -113,7 +113,7 @@ describe('tray Quit', () => {
     // while engine writes are running.
     const close = stepCall(3);
     expect(calleePath(close.expression)).toBe('closeGated');
-    expect(print(close.arguments[0])).toBe('(force) => app.confirmClose(force)');
+    expect(print(close.arguments[0])).toBe('(force) => app.confirmClose(force, sessionId)');
     // The close step leaves again with this window's documents: a write
     // started after the first prompt is waited for and asked about.
     expect(close.arguments).toHaveLength(2);

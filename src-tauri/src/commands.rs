@@ -1380,13 +1380,9 @@ pub async fn get_app_version() -> Result<String, String> {
 
 /// Opens the project's releases page in the user's browser.
 ///
-/// Takes no argument on purpose. The update check is notify-only: the app
-/// never downloads or installs a release itself,
-/// and the destination is compiled in rather than read from the update
-/// manifest. So even a forged `latest.json` can only lie about a version
-/// NUMBER — it cannot point a user anywhere, and there is no install path for
-/// it to reach. That is the whole security argument for this design.
-#[tauri::command]
+/// Takes no argument: the destination is compiled in rather than read from
+/// the update manifest, so a forged `latest.json` cannot point a user
+/// anywhere.
 pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
     const RELEASES_URL: &str = "https://github.com/jasonulbright/Spectra-PDF/releases/latest";
     use tauri_plugin_shell::ShellExt;
@@ -2197,6 +2193,7 @@ pub async fn close_window(
     window: tauri::WebviewWindow,
     minimize_to_tray: bool,
     force: Option<bool>,
+    session_id: Option<u64>,
 ) -> Result<CloseOutcome, String> {
     let labels = crate::app_windows::app_window_labels(&app);
     let others = claim_close(&CLOSING, &labels, window.label());
@@ -2231,6 +2228,7 @@ pub async fn close_window(
             release_close(&CLOSING, window.label());
             return Ok(CloseOutcome::Aborted);
         }
+        crate::updates::arm_relaunch_at_exit(&app, session_id);
         // Set the quitting flag so ExitRequested handler allows exit
         crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = window.destroy();
@@ -2293,8 +2291,9 @@ pub async fn confirm_close(
     app: AppHandle,
     window: tauri::WebviewWindow,
     force: Option<bool>,
+    session_id: Option<u64>,
 ) -> Result<CloseOutcome, String> {
-    close_window(app, window, false, force).await
+    close_window(app, window, false, force, session_id).await
 }
 
 /// Ask every OTHER workspace window to run its own close flow. Each answers by
@@ -2364,6 +2363,7 @@ fn ack_round(
 pub async fn request_quit(
     app: AppHandle,
     window: tauri::WebviewWindow,
+    relaunch: Option<bool>,
 ) -> Result<QuitRequestResult, String> {
     let peers: Vec<String> = crate::app_windows::app_window_labels(&app)
         .into_iter()
@@ -2385,6 +2385,11 @@ pub async fn request_quit(
         )
     })
     .await;
+    // The request is bound to this quit's seal: a cancel lifts the seal, and
+    // the final exit relaunches only while the seal is still this quit's.
+    if matches!(sequenced, Ok(true)) && relaunch == Some(true) {
+        crate::updates::request_relaunch_for(&app, session_id);
+    }
     match sequenced {
         Ok(proceed) => Ok(QuitRequestResult {
             proceed,
@@ -2422,6 +2427,7 @@ pub async fn quit_ack(
 #[tauri::command]
 pub async fn quit_cancelled(app: AppHandle, session_id: Option<u64>) -> Result<(), String> {
     if let Some(session_id) = session_id {
+        crate::updates::forget_relaunch_for(&app, session_id);
         let _ = crate::session::unseal_for(&app, session_id);
     }
     Ok(())
@@ -2691,11 +2697,6 @@ pub async fn take_unreadable_records(
 }
 
 // ── Enterprise policy ─────────────────────────────────────────────────────
-
-#[tauri::command]
-pub async fn check_auto_update_disabled() -> Result<bool, String> {
-    Ok(machine_policy_set("DisableAutoUpdate"))
-}
 
 /// Whether an administrator set a machine policy flag to 1.
 #[cfg(windows)]

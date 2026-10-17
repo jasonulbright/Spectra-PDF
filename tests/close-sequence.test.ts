@@ -155,6 +155,14 @@ describe('finishCoordinatedExit', () => {
     )).resolves.toBe('closed');
     expect(decide).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledWith(18);
+  });
+
+  it('closes the initiating window under the quit id, so only that quit can relaunch', async () => {
+    const source = await import('node:fs').then((fs) => fs.readFileSync('src/renderer/App.tsx', 'utf8'));
+    expect(source).toContain('(sessionId) => closeGated((force) => app.confirmClose(force, sessionId), exitDocuments(paths)),');
+    expect(source).toContain('() => closeOrReport(minimizeToTray, sessionId),');
+    expect(source).toContain('app.closeWindow(minimizeToTray, force, sessionId)');
   });
 
   it('unseals the quit when the last window stays for running writes', async () => {

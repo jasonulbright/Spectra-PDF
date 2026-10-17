@@ -667,6 +667,32 @@ jobs:
           if ($exes.Count -ne 1) { throw "expected one spectrapdf.exe in the portable zip, found $($exes.Count)" }
           Assert-AuthenticodeSigned -Path $exes[0].FullName -ExpectedSubjectCommonName $env:SPECTRAPDF_SIGN_SUBJECT_CN
 
+      # The portable zip's updater signature, over the finished zip. The .sig
+      # stays beside the zip and reaches latest.json only, never the release
+      # page. An empty-valued environment variable does not survive on
+      # Windows, and the signer prompts when the password variable is absent,
+      # so the key's empty password is passed as `--password=`.
+      - name: Sign the portable zip for the updater
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $zips = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -File)
+          if ($zips.Count -ne 1) { throw "expected one portable zip to sign, found $($zips.Count)" }
+          $sig = "$($zips[0].FullName).sig"
+          if (Test-Path -LiteralPath $sig) { Remove-Item -LiteralPath $sig -Force }
+          npx tauri signer sign --password= $zips[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed (exit $LASTEXITCODE)" }
+          if (-not (Test-Path -LiteralPath $sig -PathType Leaf)) { throw "the signer wrote no $sig" }
+
+      - name: Verify the portable zip's updater signature
+        shell: pwsh
+        run: |
+          $zips = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -File)
+          if ($zips.Count -ne 1) { throw "expected one portable zip to verify, found $($zips.Count)" }
+          python -I scripts/verify_minisign.py --public-key-from-conf src-tauri/tauri.conf.json --signature-file "$($zips[0].FullName).sig" --file $zips[0].FullName --expect-file $zips[0].Name
+          if ($LASTEXITCODE -ne 0) { throw "the portable zip's updater signature does not verify (exit $LASTEXITCODE)" }
+
       # The shipped tree itself, after both containers are assembled: a
       # `resources` directory entry is copied whole, so an engine source tree
       # carrying ignored __pycache__ would put cached bytecode in the installer
@@ -759,6 +785,15 @@ jobs:
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
         run: pwsh -NoProfile -File scripts/add-linux-updater-entry.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -LinuxDir src-tauri/target/release/bundle/linux
 
+      # The portable zip's entry: the zip's asset url and its updater .sig.
+      # Every key tauri-action and the Linux step wrote stays as it is.
+      - name: Upload latest.json with the portable updater entry
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
+        run: pwsh -NoProfile -File scripts/add-portable-updater-entry.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}"
+
       # The portable zip carries no Authenticode signature, so the published
       # checksum is how a user confirms a downloaded file is the file this workflow built.
       - name: Upload SHA-256 checksums to the draft
@@ -811,7 +846,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.releaseId }}
-        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -ExpectSigned ${{ needs.verify.outputs.linux == 'true' && '-LinuxDir src-tauri/target/release/bundle/linux' || '' }}
+        run: pwsh -NoProfile -File scripts/verify-release-draft.ps1 -Repo "${{ github.repository }}" -ReleaseId $env:RELEASE_ID -Tag "${{ github.ref_name }}" -ExpectPortableEntry -ExpectSigned ${{ needs.verify.outputs.linux == 'true' && '-LinuxDir src-tauri/target/release/bundle/linux' || '' }}
 
       # The ONLY step that makes anything public. Must stay last.
       - name: Publish the release

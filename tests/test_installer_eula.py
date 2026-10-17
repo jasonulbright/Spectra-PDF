@@ -49,13 +49,16 @@ def test_the_installer_runs_and_offers_no_ghostscript() -> None:
     assert "SpectraGhostscriptInstalled" not in hooks
     assert "SPECTRA_GS_SCAN" not in hooks
     # The installer runs no program but its own executable's File Explorer
-    # registration and virtual-printer step: never Ghostscript, not even to
-    # read its version.
+    # registration, virtual-printer step and update-task registration: never
+    # Ghostscript, not even to read its version.
     executed = re.findall(r"\bExecWait '([^']*)'", hooks)
-    assert hooks.count("ExecWait") == len(executed) == 3
+    assert hooks.count("ExecWait") == len(executed) == 5
     for command in executed:
         assert command.startswith(
             ('"$INSTDIR\\spectrapdf.exe" shell-menu ', '"$INSTDIR\\spectrapdf.exe" virtual-printer ')
+        ) or command in (
+            '"$INSTDIR\\spectrapdf.exe" --register-update-task',
+            '"$INSTDIR\\spectrapdf.exe" --unregister-update-task',
         ), command
     assert "nsExec" not in hooks and "gswin" not in "".join(executed)
 

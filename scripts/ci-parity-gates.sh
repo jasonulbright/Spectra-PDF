@@ -166,6 +166,11 @@ print("auditing", req)
 sys.exit(subprocess.run([sys.executable, "-m", "pip_audit", "-r", str(out), "--no-deps"]).returncode)
 PY
 
+# --- Release job: the portable zip's updater signature is verified against
+#     plugins.updater.pubkey of tauri.conf.json, after a full build. Here the
+#     key itself must resolve and parse as a minisign Ed25519 key. ---
+gate updater-key "$R/.venv/Scripts/python.exe" -I scripts/verify_minisign.py --public-key-from-conf src-tauri/tauri.conf.json --key-only
+
 # Inspect the production renderer already built by candidate validation.
 gate release-bundle "$R/.venv/Scripts/python.exe" scripts/check-release-bundle.py
 

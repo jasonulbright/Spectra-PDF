@@ -7,7 +7,6 @@
     "core:default",
     "core:window:allow-set-theme",
     "core:window:allow-set-fullscreen",
-    "updater:allow-check",
     {
       "identifier": "fs:allow-read-file",
       "allow": [{ "path": "$TEMP/spectrapdf/**" }]

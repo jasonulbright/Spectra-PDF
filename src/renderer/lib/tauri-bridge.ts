@@ -5,7 +5,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { withFileLock } from './engine-lock';
 import { withFileSave } from './file-save-barrier';
-import { listen } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UpdatePrefs, UpdateStatus } from './update-check';
 import type { CloseOutcome } from './close-writes';
 import type {
   ScanEvent,
@@ -1045,9 +1046,6 @@ export const app = {
    *  OS default handler — resolved against the app's resource dir in Rust. */
   openThirdPartyLicenses: (file: 'THIRD-PARTY-LICENSES.md' | 'THIRD-PARTY-LICENSES-RUST.html') =>
     invoke('open_third_party_licenses', { file }),
-  /** Open the releases page in the browser. Destination is compiled into the
-   *  Rust command — nothing about it comes from the update manifest. */
-  openReleasesPage: () => invoke('open_releases_page'),
   /** Open a web address a PDF link names in the default browser, after the
    *  reader chose to. The Rust command re-checks it (http/https/mailto only,
    *  no hidden characters, no user-info, at most 2048 bytes) and refuses
@@ -1068,7 +1066,6 @@ export const app = {
   settleWindowCompose: (viewportWidth: number, viewportHeight: number) =>
     invoke('settle_window_compose', { viewportWidth, viewportHeight }),
   appendOperationLog: (line: string) => invoke('append_operation_log', { line }),
-  checkAutoUpdateDisabled: () => invoke<boolean>('check_auto_update_disabled'),
   checkFieldScriptsDisabled: () => invoke<boolean>('check_field_scripts_disabled'),
   /** `path` when nothing exists there, else the first free `<stem> (n)<ext>`. */
   freeOutputPath: (path: string) => invoke<string>('free_output_path', { path }),
@@ -1102,7 +1099,8 @@ export const app = {
   /** Close THIS window, quitting only when it was the last one. The count is
    * taken in Rust: a renderer knows nothing about another window's unsaved
    * work, and destroying a fixed label discards whichever window did not ask. */
-  confirmClose: (force = false) => invoke<CloseOutcome>('confirm_close', { force }),
+  confirmClose: (force = false, sessionId: number | null = null) =>
+    invoke<CloseOutcome>('confirm_close', { force, sessionId }),
 
   /** The window × : close, or hide to tray when this is the only window left.
    * Tray residency is an app-level state, so a second window's × closes that
@@ -1113,8 +1111,8 @@ export const app = {
    * teardown off rather than exiting with an older run's record on the file.
    * `writing` means engine writes are running and this is the last window;
    * `force` closes it anyway and stops them. */
-  closeWindow: (minimizeToTray: boolean, force = false) =>
-    invoke<CloseOutcome>('close_window', { minimizeToTray, force }),
+  closeWindow: (minimizeToTray: boolean, force = false, sessionId: number | null = null) =>
+    invoke<CloseOutcome>('close_window', { minimizeToTray, force, sessionId }),
 
   /** Ask every other window to run its own close flow. Each answers by closing
    * itself and the last one out exits, so a window that cancels keeps the app.
@@ -1125,7 +1123,8 @@ export const app = {
    * hears it and never closes, and closing anyway would leave it standing
    * behind a session record frozen at the moment Exit was chosen. False means
    * the quit is off — nothing closed, and the record is live again. */
-  requestQuit: () => invoke<{ proceed: boolean; sessionId: number | null }>('request_quit'),
+  requestQuit: (relaunch = false) =>
+    invoke<{ proceed: boolean; sessionId: number | null }>('request_quit', { relaunch }),
 
   /** Acknowledge a beforeClose that belongs to a quit. Receipt only: it says
    * this renderer heard the request and is running its close flow, which is
@@ -1251,7 +1250,22 @@ export const scanner = {
   scanDiscard: (scratch: string) => invoke<void>('scan_discard', { scratch }),
 };
 
-// ── Auto-updater ──────────────────────────────────────────────────────────
-// Tauri's updater plugin is invoked from JS directly, not through custom commands.
+// ── Updates ───────────────────────────────────────────────────────────────
 
-export { check as checkForUpdate } from '@tauri-apps/plugin-updater';
+export const updates = {
+  /** Push both update preferences; Rust holds them app-wide. */
+  configure: (prefs: UpdatePrefs) =>
+    invoke<void>('update_configure', {
+      prefs: { checkOnLaunch: prefs.checkOnLaunch, applyAutomatically: prefs.applyAutomatically },
+    }),
+  status: () => invoke<UpdateStatus>('update_status'),
+  /** Rejects with `{ kind }`. */
+  check: () => invoke<{ version: string } | null>('update_check'),
+  /** Download, verify and stage the checked version. Idempotent. `automatic`
+   * is true when the standing preference asks, false for an Install click. */
+  prepare: (automatic = false) => invoke<void>('update_prepare', { automatic }),
+  /** The release page URL is compiled into the Rust command; it takes no argument. */
+  openRelease: () => invoke<void>('update_open_release'),
+  onStatus: (callback: (status: UpdateStatus) => void): Promise<UnlistenFn> =>
+    listen<UpdateStatus>('update://status', (event) => callback(event.payload)),
+};

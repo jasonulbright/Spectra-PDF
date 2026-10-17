@@ -45,6 +45,7 @@ import { OCR_LANGUAGES } from '../ocr/languages';
 import { AUTO_OCR_LANGUAGE } from '../ocr/language-selection';
 import type { PanelKey } from '../i18n-panels';
 import { jobReportLine } from '../lib/virtual-printer-report';
+import { useUpdateStatus } from '../hooks/useUpdateStatus';
 // Re-exported for the ~6 existing panel consumers; the implementation is the
 // leaf module (the keymap reads it too — see lib/app-settings.ts).
 export { getSettings } from '../lib/app-settings';
@@ -624,6 +625,9 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   }, []);
 
   const fieldScripts = useFieldScriptsAllowed();
+  const updateStatus = useUpdateStatus();
+  const updatesPolicyOff = updateStatus?.policyDisabled === true;
+  const updatesNotifyOnly = updateStatus?.container === 'unsupported';
   const update = useCallback((key: keyof Settings, value: string | boolean | number) => {
     setSettings((prev) => {
       const next = { ...prev, [key]: value };
@@ -1116,14 +1120,31 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             type="checkbox"
             data-testid="pref-check-updates"
             checked={settings.checkUpdatesOnLaunch}
+            disabled={updatesPolicyOff}
             onChange={() => update('checkUpdatesOnLaunch', !settings.checkUpdatesOnLaunch)}
             className="rounded bg-neutral-800 border-neutral-700"
           />
           <span className="text-sm text-neutral-400">{tChrome('panel.settings.checkOnLaunch')}</span>
         </label>
+        <label className="flex items-center gap-2 cursor-default mt-1.5">
+          <input
+            type="checkbox"
+            data-testid="pref-apply-updates"
+            checked={settings.applyUpdatesAutomatically}
+            disabled={updatesPolicyOff || updatesNotifyOnly}
+            onChange={() => update('applyUpdatesAutomatically', !settings.applyUpdatesAutomatically)}
+            className="rounded bg-neutral-800 border-neutral-700"
+          />
+          <span className="text-sm text-neutral-400">{tChrome('panel.settings.applyAutomatically')}</span>
+        </label>
         <p className="text-xs text-neutral-500 mt-1.5">
-          {tChrome('panel.settings.updatesHint')}
+          {tChrome(updatesNotifyOnly ? 'panel.settings.updatesNotifyOnly' : 'panel.settings.updatesHint')}
         </p>
+        {updatesPolicyOff && (
+          <p data-testid="updates-policy" className="text-xs text-amber-300/80 mt-1.5">
+            {tChrome('panel.settings.updatesPolicy')}
+          </p>
+        )}
       </div>
       <div data-testid="field-scripts-pref" className="mb-4">
         <label className="block text-sm text-neutral-400 mb-2">

@@ -70,6 +70,17 @@ export const DIALOG_STRINGS = {
   'dialog.update.available': 'Update available: v{{version}}',
   'dialog.update.viewRelease': 'View release',
   'dialog.update.dismiss': 'Dismiss',
+  'dialog.update.install': 'Install update',
+  'dialog.update.downloading': 'Downloading update…',
+  'dialog.update.downloadingPercent': 'Downloading update… {{percent}}%',
+  'dialog.update.verifying': 'Verifying update…',
+  'dialog.update.ready': 'Update ready — restart to install it.',
+  'dialog.update.restartNow': 'Restart now',
+  'dialog.update.prepareFailed': 'The update could not be downloaded and verified. Spectra PDF tries again later.',
+  'dialog.update.appliedInstalled': 'Spectra PDF was updated to v{{version}}.',
+  'dialog.update.appliedDeferred':
+    'Update v{{version}} was not installed because Spectra PDF was still running. It is tried again later.',
+  'dialog.update.appliedFailed': 'Update v{{version}} could not be installed.',
 
   // The colour-profile licence. Presented on a portable copy's first run,
   // because a portable copy has no installer to present it — the installed

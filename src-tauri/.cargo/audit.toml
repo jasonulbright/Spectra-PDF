@@ -46,14 +46,6 @@ ignore = [
     "RUSTSEC-2025-0098", # unic-ucd-version
     "RUSTSEC-2025-0100", # unic-ucd-ident
 
-    # ── zip 4.6.1 extraction (vulnerability class) — unfixable here ──
-    # Pulled by tauri-plugin-updater, which requires zip ^4 through 2.14.0;
-    # the patched line is zip 9. The app calls the updater for the version
-    # check only and never downloads or extracts an update archive.
-    "RUSTSEC-2026-0367", # SUID/SGID bits preserved on extraction
-    "RUSTSEC-2026-0368", # symlink targets outside the destination
-    "RUSTSEC-2026-0369", # permissions applied through symlinks
-
     # ── unsound (informational) ──
     "RUSTSEC-2024-0429", # glib VariantStrIter iterator unsoundness (transitive)
     "RUSTSEC-2026-0190", # anyhow Error::downcast_mut unsoundness (transitive)

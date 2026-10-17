@@ -93,6 +93,7 @@ pub mod store_certs;
 pub mod csc_oauth;
 pub mod session;
 pub mod tabdrag;
+pub mod updates;
 mod prompt_turn;
 mod web_link;
 
@@ -305,6 +306,7 @@ pub fn run() {
         .manage(commands::StartupEntryNotice::new())
         .manage(shell_menu::RepairNotice::new())
         .manage(commands::UnreadableRecords::new())
+        .manage(updates::UpdateState::new())
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 webview
@@ -315,8 +317,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_shell::init());
 
     // In-app W3C WebDriver server (TRIAL). Double-gated on purpose: the
     // `webdriver` Cargo feature keeps it out of a release binary at compile
@@ -427,7 +428,6 @@ pub fn run() {
             commands::get_app_version,
             commands::open_third_party_licenses,
             commands::reveal_in_file_manager,
-            commands::open_releases_page,
             commands::open_web_link,
             commands::get_system_accent_color,
             commands::get_window_backdrop,
@@ -460,7 +460,6 @@ pub fn run() {
             engine::cancel_engine_request,
             engine_writes::engine_writes_in_flight,
             engine_writes::set_shutdown_block_reason,
-            commands::check_auto_update_disabled,
             commands::check_field_scripts_disabled,
             commands::check_explorer_menu_disabled,
             commands::free_output_path,
@@ -516,12 +515,18 @@ pub fn run() {
             portable::icc_assent_state,
             portable::icc_license_text,
             portable::record_icc_assent,
+            updates::update_configure,
+            updates::update_status,
+            updates::update_check,
+            updates::update_prepare,
+            updates::update_open_release,
         ])
         .setup(move |app| {
             // Off the main thread: the tree can hold thousands of folders,
             // and nothing here waits on the pass.
             std::thread::spawn(scratch::reclaim_at_startup);
             engine_writes::spawn_watcher(&app.handle().clone());
+            updates::on_launch(app.handle());
 
             // The battery's fallback spec launches with
             // SPECTRAPDF_E2E_FORCE_OPAQUE=1 so the opaque presentation runs
@@ -703,6 +708,11 @@ pub fn run() {
                 // rather than left to the job object that backstops a crash.
                 #[cfg(any(windows, target_os = "linux"))]
                 scan_host::shutdown();
+                // Only the quit flow sets QUITTING: every window has closed
+                // and every save choice has been made before an update starts.
+                if !e2e && QUITTING.load(Ordering::SeqCst) {
+                    updates::on_exit(_app);
+                }
             }
         });
 }

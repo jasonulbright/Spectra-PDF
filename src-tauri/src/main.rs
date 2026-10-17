@@ -20,6 +20,28 @@ fn main() {
         std::process::exit(spectrapdf_lib::scan_host::serve());
     }
 
+    // The update modes run headless with no console, before the parser and
+    // before anything that would create a window.
+    if let Some(code) = spectrapdf_lib::updates::cli::dispatch(&argv) {
+        std::process::exit(code);
+    }
+
+    // A portable update cut off mid-swap is settled before any part of the
+    // payload is loaded.
+    {
+        use spectrapdf_lib::updates::cli::StartDecision;
+        let command_line = spectrapdf_lib::cli::is_command_line_run(&argv);
+        match spectrapdf_lib::updates::cli::recover_portable_swap_at_start(&argv, command_line, attach_parent_console) {
+            StartDecision::Start => {}
+            StartDecision::HandOver => std::process::exit(0),
+            StartDecision::Exit(code) => std::process::exit(code),
+            StartDecision::Refuse(why) => {
+                report_refused_start(&argv, &why);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Handle /? before anything else — show a GUI help dialog.
     // Clap doesn't recognize / switches, so we intercept early.
     if std::env::args().any(|a| a == "/?" || a == "-?") {
@@ -168,6 +190,39 @@ fn attach_parent_console() {
 fn attach_parent_console() {
     // No-op on non-Windows platforms
 }
+
+/// Names why the app did not start: on stderr for every run, and in a message
+/// box for a window launch, which has no console to read.
+fn report_refused_start(argv: &[String], why: &str) {
+    attach_parent_console();
+    eprintln!("error: {why}");
+    if classify_launch(argv) == LaunchMode::Gui {
+        refused_start_box(why);
+    }
+}
+
+#[cfg(windows)]
+fn refused_start_box(why: &str) {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    extern "system" {
+        fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, utype: u32) -> i32;
+    }
+
+    const MB_OK: u32 = 0x00000000;
+    const MB_ICONWARNING: u32 = 0x00000030;
+
+    let wide = |text: &str| -> Vec<u16> { OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect() };
+    let text = wide(why);
+    let caption = wide("Spectra PDF did not start");
+    unsafe {
+        MessageBoxW(0, text.as_ptr(), caption.as_ptr(), MB_OK | MB_ICONWARNING);
+    }
+}
+
+#[cfg(not(windows))]
+fn refused_start_box(_why: &str) {}
 
 /// Show a Win32 MessageBox with CLI usage examples.
 /// MessageBox natively supports Ctrl+C to copy full contents

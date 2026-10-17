@@ -35,12 +35,12 @@ export interface Settings {
    * bare letters arming tools surprise
    * anyone who doesn't know the preset exists. */
   singleKeyAccelerators: boolean;
-  /** Check GitHub for a newer release shortly after launch. Default ON, and
-   * safe to leave on: the check only ever shows a banner; the app never
-   * downloads or installs anything itself. Turn it off for air-gapped
-   * deployments, or suppress it machine-wide with the DisableAutoUpdate
-   * policy, which still wins over this preference. */
+  /** Check for a newer release shortly after launch. Default ON. The
+   * DisableAutoUpdate policy outranks it; Help ▸ Check for Updates ignores it. */
   checkUpdatesOnLaunch: boolean;
+  /** Download, verify and stage a found update without a click, and install
+   * it at the next exit. Default ON. The DisableAutoUpdate policy outranks it. */
+  applyUpdatesAutomatically: boolean;
   /** Offer the Ghostscript set-up route at launch when nothing answers.
    *
    * Default ON. A copy where no Ghostscript resolves — the included copy
@@ -164,6 +164,7 @@ export const DEFAULTS: Settings = {
   startMinimized: false,
   singleKeyAccelerators: false,
   checkUpdatesOnLaunch: true,
+  applyUpdatesAutomatically: true,
   promptGhostscriptOnLaunch: true,
   restoreWindowsOnLaunch: false,
   batchLogEnabled: true,
@@ -223,9 +224,11 @@ function coerceViewSettings(s: Settings): Settings {
   };
 }
 
+export const SETTINGS_KEY = 'spectra-settings';
+
 export function loadSettings(): Settings {
   try {
-    const stored = localStorage.getItem('spectra-settings');
+    const stored = localStorage.getItem(SETTINGS_KEY);
     if (!stored) return DEFAULTS;
     const parsed = JSON.parse(stored);
     // Fix string-boolean corruption from earlier bug
@@ -258,8 +261,16 @@ export function subscribeSettings(listener: (settings: Settings) => void): () =>
 }
 
 export function saveSettings(settings: Settings): void {
-  localStorage.setItem('spectra-settings', JSON.stringify(settings));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   for (const listener of settingsListeners) listener(settings);
+}
+
+/** The two update preferences as Rust receives them. Only a stored `false` turns one off. */
+export function updatePrefsOf(settings: Settings): { checkOnLaunch: boolean; applyAutomatically: boolean } {
+  return {
+    checkOnLaunch: settings.checkUpdatesOnLaunch !== false,
+    applyAutomatically: settings.applyUpdatesAutomatically !== false,
+  };
 }
 
 export function getSettings(): Settings {

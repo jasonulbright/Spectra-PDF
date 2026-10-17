@@ -1,0 +1,17 @@
+{
+  "version": "2026.1014.156",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRTTlxYUdQTWJKdlJYbDB6M1AybGRDc055UnAvNFFxMEJGbXkwaXlhMUUyeUJOVjZkNzJSNE90WFFCSFRhdnNQZ0VOQ0tieVZvWmpFaXA5MmtkcmIrOVo3NkVaV2J3dFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMDIwNTQ0CWZpbGU6U3BlY3RyYSBQREZfMjAyNi4xMDE0LjE1Nl94NjQtc2V0dXAuZXhlCjBBWE9PTDE0MEZ4UjZuZXdRSVhJQ1RJbVdFMlE5MjE1aFFuRFVqd1pWeVNmOUVDWk1KNllEc1ZZMXg1dWllN3F0eTJOZllRN0VhS1BhNEUvcm1YckJRPT0K",
+      "url": "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/642009060"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRTTlxYUdQTWJKdlJYbDB6M1AybGRDc055UnAvNFFxMEJGbXkwaXlhMUUyeUJOVjZkNzJSNE90WFFCSFRhdnNQZ0VOQ0tieVZvWmpFaXA5MmtkcmIrOVo3NkVaV2J3dFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMDIwNTQ0CWZpbGU6U3BlY3RyYSBQREZfMjAyNi4xMDE0LjE1Nl94NjQtc2V0dXAuZXhlCjBBWE9PTDE0MEZ4UjZuZXdRSVhJQ1RJbVdFMlE5MjE1aFFuRFVqd1pWeVNmOUVDWk1KNllEc1ZZMXg1dWllN3F0eTJOZllRN0VhS1BhNEUvcm1YckJRPT0K",
+      "url": "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/642009060"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRTTlxYUdQTWJKdmF6RnNwcGxvUzJWOU9Qb2s5UnFubURGM2R2Nmluekc5TTBWenpPemF4SUV0aHJjc3hqRkZwODQ2STlPUVJldFBQcXBseCsweWZ5Zk5KUWhoWjAxZ0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMDE2NjY4CWZpbGU6c3BlY3RyYXBkZl8yMDI2LjEwMTQuMTU2X2FtZDY0LkFwcEltYWdlClVtNTVXL1FTejMzdGZBRG1wdGdZTHFqdUlIeEVVUXE3M3NDVTNzZis4c3NUTkdZTUVmYzZHRVErdjNHVGNnSXhjUW42TllVRlM5eGZFRzdRN0pFZUFnPT0K",
+      "url": "https://api.github.com/repos/jasonulbright/Spectra-PDF/releases/assets/642037542"
+    }
+  }
+}
