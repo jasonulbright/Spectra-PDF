@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "Kopieert een deel van de pagina als afbeelding naar het klembord.",
   "tool.desc.takeoff": "Tel items op een tekening per groep en exporteer daarna de hoeveelheden of plaats een legenda.",
   "tool.desc.watermark": "Stempel tekst over elke pagina.",
+  "toolbar.group.edit": "Bewerken",
   "toolbar.group.file": "Bestand",
   "toolbar.group.find": "Zoeken",
   "toolbar.group.history": "Ongedaan maken en opnieuw",

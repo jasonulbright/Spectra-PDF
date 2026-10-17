@@ -6232,6 +6232,7 @@
   "tool.desc.snapshot": "페이지의 한 영역을 이미지로 클립보드에 복사합니다.",
   "tool.desc.takeoff": "도면의 항목을 그룹별로 세고 산출 결과를 내보내거나 범례를 배치합니다.",
   "tool.desc.watermark": "모든 페이지에 텍스트를 찍습니다.",
+  "toolbar.group.edit": "편집",
   "toolbar.group.file": "파일",
   "toolbar.group.find": "찾기",
   "toolbar.group.history": "실행 취소 및 다시 실행",

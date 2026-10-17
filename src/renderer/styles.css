@@ -3794,6 +3794,56 @@ input:not([type]) {
   /* The symbol palette hangs off this strip. */
   position: relative;
 }
+.secondary-toolbar[data-tool="edit"] {
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  flex-wrap: nowrap;
+}
+.secondary-toolbar[data-tool="edit"] .secondary-toolbar-title {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.secondary-toolbar[data-tool="edit"] .secondary-toolbar-modes {
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+.secondary-toolbar-edit-menu {
+  position: static;
+  flex: 0 0 auto;
+}
+.secondary-toolbar-edit-toggle {
+  flex: 0 0 auto;
+}
+.secondary-toolbar-edit-popover {
+  position: absolute;
+  z-index: 30;
+  inset-block-start: calc(100% + 5px);
+  inset-inline-end: 8px;
+  inline-size: min(640px, calc(100% - 16px));
+  max-block-size: min(70vh, 520px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #3a3a40;
+  border-radius: 6px;
+  background: #1f1f1f;
+  box-shadow: 0 8px 24px #0008;
+}
+.secondary-toolbar-edit-popover.secondary-toolbar-edit-options {
+  max-inline-size: none;
+  flex-wrap: wrap;
+}
+[data-theme="light"] .secondary-toolbar-edit-popover {
+  border-color: #d1d5db;
+  background: #f9fafb;
+  box-shadow: 0 8px 24px #0003;
+}
+[data-theme="high-contrast"] .secondary-toolbar-edit-popover {
+  border-color: #fff;
+  background: #000;
+  box-shadow: 0 0 0 1px #fff;
+}
 
 /* Home: quick actions, a quiet drop target, hierarchical recents, and tools. */
 .home-shell {

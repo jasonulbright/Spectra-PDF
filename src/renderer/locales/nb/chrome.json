@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "Kopierer et område av siden til utklippstavlen som et bilde.",
   "tool.desc.takeoff": "Tell elementer på en tegning gruppevis, og eksporter deretter mengdene eller plasser en forklaring.",
   "tool.desc.watermark": "Stemple tekst over hver eneste side.",
+  "toolbar.group.edit": "Rediger",
   "toolbar.group.file": "Fil",
   "toolbar.group.find": "Søk",
   "toolbar.group.history": "Angre og gjør om",

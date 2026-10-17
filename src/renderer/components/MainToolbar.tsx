@@ -31,6 +31,7 @@ const TESTID_FOR: Partial<Record<CommandId, string>> = {
   'view.navPanel.tags': 'toolbar-nav-tags',
   'view.navPanel.signatures': 'toolbar-nav-signatures',
   'view.toolsPane': 'toolbar-tools-pane',
+  'tools.open.edit': 'toolbar-edit',
 };
 
 function ToolbarButton({

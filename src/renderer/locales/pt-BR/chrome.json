@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "Copia uma região da página para a área de transferência como imagem.",
   "tool.desc.takeoff": "Conte itens em um desenho por grupo e depois exporte o levantamento ou coloque uma legenda.",
   "tool.desc.watermark": "Carimbe um texto em todas as páginas.",
+  "toolbar.group.edit": "Editar",
   "toolbar.group.file": "Arquivo",
   "toolbar.group.find": "Localizar",
   "toolbar.group.history": "Desfazer e refazer",

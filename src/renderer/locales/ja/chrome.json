@@ -6232,6 +6232,7 @@
   "tool.desc.snapshot": "ページの一部を画像としてクリップボードにコピーします。",
   "tool.desc.takeoff": "図面上の要素をグループごとにカウントし、拾い出しを書き出したり凡例を配置したりします。",
   "tool.desc.watermark": "すべてのページにテキストを押します。",
+  "toolbar.group.edit": "編集",
   "toolbar.group.file": "ファイル",
   "toolbar.group.find": "検索",
   "toolbar.group.history": "元に戻す・やり直し",

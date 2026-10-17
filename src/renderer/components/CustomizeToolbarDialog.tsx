@@ -55,7 +55,12 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
           {TOOLBAR_CATALOG.map((group) => (
             <div key={group.id}>
               <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-1">
-                {tToolbarGroup(group.id, group.label)}
+                {tToolbarGroup(
+                  group.id,
+                  group.id === 'edit'
+                    ? tCommandTitle('tools.open.edit', group.label)
+                    : group.label,
+                )}
               </div>
               <div className="flex flex-col gap-0.5">
                 {group.items.map((item) => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
@@ -33,6 +33,7 @@ import {
   tToolTitle,
 } from '../../i18n';
 import { RangeInput } from '../RangeInput';
+import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
 
 /** The colour a symbol arms in when the tool has no colour set —
  * markup red, the same default a drawing shape takes. */
@@ -136,9 +137,9 @@ export interface SecondaryToolbarProps {
    * options in the stamp-preset sense (props+callbacks, not commands: they
    * act on transient canvas selection the registry can't see). */
   editHasSelection: boolean;
-  /** Which kind of edit object is selected: image, text run, or
-   * paragraph box (the primary text surface). */
-  editSelectionKind: 'image' | 'text' | 'para' | null;
+  /** Which kind of edit object is selected: image, text run, paragraph box,
+   * or a vector object whose controls are anchored beside the selection. */
+  editSelectionKind: 'image' | 'text' | 'para' | 'vector' | null;
   /** Selected text run's/paragraph's editability + refusal reason
    * (paragraph boxes list only when editable, so 'para' is always true). */
   editTextEditable: boolean;
@@ -348,6 +349,8 @@ export function SecondaryToolbar({
   // default — it is a searchable library, not a row of pills, and the strip is
   // a strip.
   const [showSymbols, setShowSymbols] = useState(false);
+  const [showEditActions, setShowEditActions] = useState(false);
+  const editActionsRootRef = useRef<HTMLDivElement | null>(null);
   const [newStampLabel, setNewStampLabel] = useState('');
   const [newStampColor, setNewStampColor] = useState(ANNOTATION_PALETTE[3]);
   const [actionsEl, setActionsEl] = useState<HTMLDivElement | null>(null);
@@ -424,6 +427,20 @@ export function SecondaryToolbar({
   // Only a tool that drives the canvas has one — Optimize has nothing to say
   // about a page.
   const owner = activeToolId ? toolById(activeToolId) : undefined;
+  useEffect(() => {
+    if (owner?.id !== 'edit' || editSelectionKind === 'vector') setShowEditActions(false);
+  }, [owner?.id, editSelectionKind]);
+  useDismissOnEscape(showEditActions, () => setShowEditActions(false));
+  useEffect(() => {
+    if (!showEditActions) return;
+    const closeOutside = (event: PointerEvent): void => {
+      if (!editActionsRootRef.current?.contains(event.target as Node)) {
+        setShowEditActions(false);
+      }
+    };
+    window.addEventListener('pointerdown', closeOutside);
+    return () => window.removeEventListener('pointerdown', closeOutside);
+  }, [showEditActions]);
   if (!owner?.canvasTools?.length) return null;
 
   const modes = owner.canvasTools;
@@ -589,12 +606,28 @@ export function SecondaryToolbar({
           )}
         </div>
       )}
-      {owner.id === 'edit' && (
-        <div
-          className="secondary-toolbar-opts"
-          role="group"
-          aria-label={tChrome('canvas.edit.actionsGroup')}
-        >
+      {owner.id === 'edit' && editSelectionKind !== 'vector' && (
+        <div className="secondary-toolbar-edit-menu" ref={editActionsRootRef}>
+          <button
+            type="button"
+            className="secondary-tool secondary-toolbar-edit-toggle"
+            data-testid="edit-actions-toggle"
+            aria-expanded={showEditActions}
+            aria-controls="edit-actions-popover"
+            aria-label={tToolTitle(owner.id, owner.title)}
+            title={tToolTitle(owner.id, owner.title)}
+            onClick={() => setShowEditActions((open) => !open)}
+          >
+            <span aria-hidden="true">⋯</span>
+          </button>
+          {showEditActions && (
+            <div
+              id="edit-actions-popover"
+              data-testid="edit-actions-popover"
+              className="secondary-toolbar-edit-popover secondary-toolbar-opts secondary-toolbar-edit-options"
+              role="group"
+              aria-label={tToolTitle(owner.id, owner.title)}
+            >
           {!editHasSelection && !editBusy && !editNotice && (
             <span className="secondary-toolbar-hint" data-testid="edit-hint">
               {tChrome('canvas.edit.hint')}
@@ -634,6 +667,8 @@ export function SecondaryToolbar({
               {editNotice.text}
             </span>
           )}
+          {editSelectionKind === 'image' && (
+            <>
           {/* Inline images replace (promoted to an ordinary embedded
               image) and extract like any other — the old disable is gone.
               Replace/extract/crop are single-target — they disable on a
@@ -911,6 +946,10 @@ export function SecondaryToolbar({
                 {tChromeCount('canvas.edit.groupCount', editImageCount)}
               </span>
             </span>
+          )}
+            </>
+          )}
+            </div>
           )}
         </div>
       )}

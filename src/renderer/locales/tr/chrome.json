@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "Sayfanın bir bölgesini görüntü olarak panoya kopyalar.",
   "tool.desc.takeoff": "Bir çizimdeki öğeleri gruba göre sayın, sonra metrajı dışa aktarın veya bir gösterge yerleştirin.",
   "tool.desc.watermark": "Her sayfaya metin damgalayın.",
+  "toolbar.group.edit": "Düzenle",
   "toolbar.group.file": "Dosya",
   "toolbar.group.find": "Bul",
   "toolbar.group.history": "Geri al ve yinele",

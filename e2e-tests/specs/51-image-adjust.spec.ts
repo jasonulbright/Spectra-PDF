@@ -10,6 +10,7 @@ import {
   getState,
   invokeAppCommand,
   editImagePageIds,
+  editImageListingSettled,
   editImagePlacements,
   editImageSelect,
   editImageSelection,
@@ -189,6 +190,95 @@ describe('image adjustments', () => {
     );
   });
 
+  it('keeps the Edit strip and document viewport steady while exposing contextual actions', async function () {
+    this.timeout(180_000);
+    await waitForHarness();
+    const originalSize = await browser.getWindowSize();
+    try {
+      await browser.setWindowSize(1024, 768);
+      await openByPaths([pdfPath]);
+      await browser.waitUntil(
+        async () => ((await getState()).activeFile?.path ?? '').includes('adjust.pdf'),
+        { timeout: 15_000, timeoutMsg: 'fixture never became active' },
+      );
+      expect(await invokeAppCommand('tools.open.edit')).toBe(true);
+      await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
+        timeout: 30_000,
+        timeoutMsg: 'edit placements never loaded',
+      });
+      const { pageId } = await firstPlacement();
+
+      const layout = async (): Promise<{ toolbarHeight: number; documentTop: number; flexWrap: string }> =>
+        await browser.execute(() => {
+          const toolbar = document.querySelector('[data-testid="secondary-toolbar"]');
+          const documentView = document.querySelector('[data-testid="document-view"]');
+          if (!toolbar || !documentView) throw new Error('Edit toolbar or document view is missing');
+          return {
+            toolbarHeight: Math.round(toolbar.getBoundingClientRect().height),
+            documentTop: Math.round(documentView.getBoundingClientRect().top),
+            flexWrap: getComputedStyle(toolbar).flexWrap,
+          };
+        });
+      const before = await layout();
+      await editImageSelect(pageId, 0);
+      await browser.waitUntil(
+        async () => (await editImageSelection())?.kind === 'image',
+        { timeout: 10_000, timeoutMsg: 'image selection did not settle' },
+      );
+      const selected = await layout();
+      expect(selected.flexWrap).toBe('nowrap');
+      expect(selected.toolbarHeight).toBe(before.toolbarHeight);
+      expect(selected.documentTop).toBe(before.documentTop);
+
+      await $('[data-testid="edit-actions-toggle"]').click();
+      const rotate = await $('[data-testid="edit-action-rotate-cw"]');
+      await rotate.waitForDisplayed({ timeout: 5_000 });
+      const expanded = await layout();
+      expect(expanded.toolbarHeight).toBe(selected.toolbarHeight);
+      expect(expanded.documentTop).toBe(selected.documentTop);
+
+      // Escape closes the overflow first, then clears the selection while
+      // keeping Edit's Select & Edit mode armed.
+      await browser.keys(['Escape']);
+      await browser.waitUntil(
+        async () => !(await $('[data-testid="edit-actions-popover"]').isExisting()),
+        { timeout: 5_000, timeoutMsg: 'Escape did not close contextual actions' },
+      );
+      await browser.keys(['Escape']);
+      await browser.waitUntil(async () => (await editImageSelection()) === null, {
+        timeout: 5_000,
+        timeoutMsg: 'Escape did not clear the selected image',
+      });
+      expect(await $('[data-testid="tool-edit"]').getAttribute('aria-pressed')).toBe('true');
+
+      // Backspace/Delete use the same undoable image-removal path as the
+      // contextual Delete button.
+      await editImageSelect(pageId, 0);
+      const beforeDelete = await workingHash();
+      await browser.keys(['Delete']);
+      await browser.waitUntil(
+        async () => {
+          if ((await workingHash()) === beforeDelete || !(await editImageListingSettled())) return false;
+          const ids = await editImagePageIds();
+          const lists = await Promise.all(ids.map(editImagePlacements));
+          return lists.flat().length === 0;
+        },
+        { timeout: 30_000, timeoutMsg: 'Delete did not remove the selected image' },
+      );
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(
+        async () => {
+          if (!(await editImageListingSettled())) return false;
+          const lists = await Promise.all((await editImagePageIds()).map(editImagePlacements));
+          return lists.flat().length === 1;
+        },
+        { timeout: 30_000, timeoutMsg: 'undo did not restore the image' },
+      );
+    } finally {
+      await browser.setWindowSize(originalSize.width, originalSize.height);
+    }
+  });
+
   it('rotate-90 toolbar button turns the placement via the transform', async function () {
     this.timeout(120_000);
     await waitForHarness();
@@ -202,6 +292,7 @@ describe('image adjustments', () => {
     expect(Math.abs(p!.matrix[1])).toBeLessThan(0.5);
 
     await editImageSelect(pageId, 0);
+    await $('[data-testid="edit-actions-toggle"]').click();
     const btn = await $('[data-testid="edit-action-rotate-cw"]');
     await btn.waitForEnabled({ timeout: 10_000 });
     await btn.click();
