@@ -51,6 +51,13 @@ export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
     items: [item('tools.hand', 'hand'), item('tools.select', 'cursor')],
   },
   {
+    id: 'edit',
+    label: 'Edit',
+    // Direct entry to the Edit tool is optional: it occupies toolbar space,
+    // so users opt in through Customize Toolbar.
+    items: [item('tools.open.edit', 'edit', false)],
+  },
+  {
     id: 'zoom',
     label: 'Zoom',
     items: [item('view.zoomOut', 'zoomOut'), item('view.fit', 'fit'), item('view.zoomIn', 'zoomIn')],

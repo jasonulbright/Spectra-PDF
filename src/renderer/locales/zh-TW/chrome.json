@@ -6232,6 +6232,7 @@
   "tool.desc.snapshot": "將頁面的某個區域以影像形式複製到剪貼簿。",
   "tool.desc.takeoff": "依群組計數圖面上的項目，然後匯出估算結果或放置圖例。",
   "tool.desc.watermark": "在每一頁上蓋上文字。",
+  "toolbar.group.edit": "編輯",
   "toolbar.group.file": "檔案",
   "toolbar.group.find": "尋找",
   "toolbar.group.history": "復原與重做",

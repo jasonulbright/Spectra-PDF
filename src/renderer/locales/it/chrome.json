@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "Copia negli appunti una regione della pagina come immagine.",
   "tool.desc.takeoff": "Contare gli elementi di un disegno per gruppo, poi esportare il computo metrico o collocare una legenda.",
   "tool.desc.watermark": "Applicare un testo su ogni pagina.",
+  "toolbar.group.edit": "Modifica",
   "toolbar.group.file": "File",
   "toolbar.group.find": "Cerca",
   "toolbar.group.history": "Annulla e ripristina",

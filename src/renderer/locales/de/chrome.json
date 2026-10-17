@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "Kopiert einen Seitenbereich als Bild in die Zwischenablage.",
   "tool.desc.takeoff": "Elemente auf einer Zeichnung nach Gruppen zählen, dann die Mengenermittlung exportieren oder eine Legende platzieren.",
   "tool.desc.watermark": "Text über jede Seite stempeln.",
+  "toolbar.group.edit": "Bearbeiten",
   "toolbar.group.file": "Datei",
   "toolbar.group.find": "Suchen",
   "toolbar.group.history": "Rückgängig und wiederholen",

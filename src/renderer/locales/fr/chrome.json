@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "Copie une zone de la page dans le presse-papiers sous forme d’image.",
   "tool.desc.takeoff": "Comptez les éléments d’un plan par groupe, puis exportez le métré ou placez une légende.",
   "tool.desc.watermark": "Apposez un texte sur chaque page.",
+  "toolbar.group.edit": "Modifier",
   "toolbar.group.file": "Fichier",
   "toolbar.group.find": "Rechercher",
   "toolbar.group.history": "Annuler et rétablir",

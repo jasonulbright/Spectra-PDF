@@ -6652,6 +6652,7 @@
   "tool.desc.snapshot": "Kopiuje obszar strony do schowka jako obraz.",
   "tool.desc.takeoff": "Zliczaj elementy na rysunku według grup, potem wyeksportuj obmiary albo umieść legendę.",
   "tool.desc.watermark": "Nanieś tekst na każdą stronę.",
+  "toolbar.group.edit": "Edycja",
   "toolbar.group.file": "Plik",
   "toolbar.group.find": "Wyszukiwanie",
   "toolbar.group.history": "Cofanie i ponawianie",

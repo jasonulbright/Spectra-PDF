@@ -6652,6 +6652,7 @@
   "tool.desc.snapshot": "Zkopíruje oblast stránky do schránky jako obrázek.",
   "tool.desc.takeoff": "Počítejte prvky na výkresu podle skupin, pak vyexportujte výkaz nebo umístěte legendu.",
   "tool.desc.watermark": "Umístěte text na každou stránku.",
+  "toolbar.group.edit": "Úpravy",
   "toolbar.group.file": "Soubor",
   "toolbar.group.find": "Hledání",
   "toolbar.group.history": "Zpět a znovu",

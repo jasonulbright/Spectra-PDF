@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "Kopioi sivun alueen leikepöydälle kuvana.",
   "tool.desc.takeoff": "Laske piirustuksen kohteita ryhmittäin ja vie sitten määrät tai sijoita selite.",
   "tool.desc.watermark": "Leimaa teksti jokaisen sivun poikki.",
+  "toolbar.group.edit": "Muokkaa",
   "toolbar.group.file": "Tiedosto",
   "toolbar.group.find": "Etsi",
   "toolbar.group.history": "Kumoa ja tee uudelleen",

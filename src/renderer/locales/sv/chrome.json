@@ -6372,6 +6372,7 @@
   "tool.desc.snapshot": "Kopierar ett område av sidan till urklipp som en bild.",
   "tool.desc.takeoff": "Räkna objekt på en ritning per grupp och exportera sedan mängdningen eller placera en förteckning.",
   "tool.desc.watermark": "Stämpla text tvärs över varje sida.",
+  "toolbar.group.edit": "Redigera",
   "toolbar.group.file": "Arkiv",
   "toolbar.group.find": "Sök",
   "toolbar.group.history": "Ångra och gör om",

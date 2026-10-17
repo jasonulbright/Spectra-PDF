@@ -6512,6 +6512,7 @@
   "tool.desc.snapshot": "מעתיק אזור מהעמוד ללוח כתמונה.",
   "tool.desc.takeoff": "ספור פריטים בשרטוט לפי קבוצה, ולאחר מכן ייצא את הכימות או מקם מקרא.",
   "tool.desc.watermark": "הטבע טקסט על כל העמודים.",
+  "toolbar.group.edit": "עריכה",
   "toolbar.group.file": "קובץ",
   "toolbar.group.find": "חפש",
   "toolbar.group.history": "ביטול וביצוע חוזר",
