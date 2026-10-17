@@ -236,7 +236,7 @@ import type { TestStateSnapshot } from './testHarness';
 import {
   commandBlockText,
   getCanvasServices,
-  pushEscapeInterceptor,
+  pushEscapeFallback,
   invokeCommand,
   registerAppCommandHandlers,
   setCommandStateSource,
@@ -3603,13 +3603,13 @@ function AppContent(): React.ReactElement {
   );
 
   // --- Command layer ----------------------------------------------------
-  // Reading mode's Escape exit. An interceptor, not a keymap entry —
-  // in-flight drags push their own interceptors ABOVE this one (LIFO), so Esc
-  // still cancels a drag first, then leaves reading mode on the next press.
+  // Reading mode's Escape exit. A fallback, not a keymap entry: every
+  // interceptor (an in-flight drag, an open menu, a tool's selection) takes
+  // Escape first, then the next press leaves reading mode.
   const readingModeOn = state.ui.readingMode;
   useEffect(() => {
     if (!readingModeOn) return;
-    const pop = pushEscapeInterceptor(() => {
+    const pop = pushEscapeFallback(() => {
       dispatch({ type: 'UI_TOGGLE_READING_MODE' });
       return true;
     });

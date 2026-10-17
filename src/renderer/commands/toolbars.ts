@@ -53,8 +53,6 @@ export const TOOLBAR_CATALOG: readonly ToolbarCatalogGroup[] = [
   {
     id: 'edit',
     label: 'Edit',
-    // Direct entry to the Edit tool is optional: it occupies toolbar space,
-    // so users opt in through Customize Toolbar.
     items: [item('tools.open.edit', 'edit', false)],
   },
   {

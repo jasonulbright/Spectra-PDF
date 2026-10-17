@@ -3,11 +3,20 @@
 // the Escape chain.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KEY_BINDINGS, type KeyBinding } from '../src/renderer/commands/standard-keys';
-import { dispatchKeyEvent, isEditable, resolveBinding, shortcutForCommand } from '../src/renderer/commands/keymap';
+import {
+  deleteKeyRoute,
+  dispatchKeyEvent,
+  isEditable,
+  resolveBinding,
+  shortcutForCommand,
+  type DeleteKeyInput,
+} from '../src/renderer/commands/keymap';
 import { COMMANDS } from '../src/renderer/commands/registry';
 import { registerOmniSearchFocus } from '../src/renderer/commands/omnisearch-focus';
 import {
+  pushEscapeFallback,
   pushEscapeInterceptor,
+  pushObjectDeleteTarget,
   registerAppCommandHandlers,
   registerCanvasServices,
   setCommandStateSource,
@@ -22,6 +31,7 @@ interface FakeEventInit {
   meta?: boolean;
   shift?: boolean;
   alt?: boolean;
+  repeat?: boolean;
   target?: unknown;
 }
 
@@ -33,6 +43,7 @@ function fakeEvent(init: FakeEventInit): KeyboardEvent & { defaultPrevented: boo
     metaKey: init.meta ?? false,
     shiftKey: init.shift ?? false,
     altKey: init.alt ?? false,
+    repeat: init.repeat ?? false,
     target: init.target ?? null,
     defaultPrevented: false,
     preventDefault(): void {
@@ -501,7 +512,164 @@ describe('dispatchKeyEvent', () => {
   });
 });
 
+describe('deleteKeyRoute', () => {
+  const press = (partial: Partial<DeleteKeyInput>): DeleteKeyInput => ({
+    key: 'Delete',
+    repeat: false,
+    defaultPrevented: false,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    editableTarget: false,
+    overlayOpen: false,
+    canvasFocused: true,
+    objectSelected: false,
+    ...partial,
+  });
+
+  it('a selected object outranks the page selection', () => {
+    expect(deleteKeyRoute(press({ objectSelected: true }))).toBe('object');
+  });
+
+  it('with no object selected the key goes to the page delete binding', () => {
+    expect(deleteKeyRoute(press({}))).toBe('binding');
+  });
+
+  it('Backspace routes the same as Delete', () => {
+    expect(deleteKeyRoute(press({ key: 'Backspace', objectSelected: true }))).toBe('object');
+    expect(deleteKeyRoute(press({ key: 'Backspace' }))).toBe('binding');
+  });
+
+  it('a focused field, select or contenteditable owns the key', () => {
+    expect(deleteKeyRoute(press({ editableTarget: true, objectSelected: true }))).toBe('none');
+    expect(deleteKeyRoute(press({ editableTarget: true }))).toBe('none');
+  });
+
+  it('an open menu, modal or dialog owns the key', () => {
+    expect(deleteKeyRoute(press({ overlayOpen: true, objectSelected: true }))).toBe('none');
+    expect(deleteKeyRoute(press({ overlayOpen: true }))).toBe('none');
+  });
+
+  it('auto-repeat deletes no object; the page delete keeps its repeat', () => {
+    expect(deleteKeyRoute(press({ repeat: true, objectSelected: true }))).toBe('none');
+    expect(deleteKeyRoute(press({ repeat: true }))).toBe('binding');
+  });
+
+  it('an already-handled press deletes nothing', () => {
+    expect(deleteKeyRoute(press({ defaultPrevented: true, objectSelected: true }))).toBe('none');
+    expect(deleteKeyRoute(press({ defaultPrevented: true }))).toBe('none');
+  });
+
+  it('a modified press with an object selected deletes neither the object nor the pages', () => {
+    expect(deleteKeyRoute(press({ ctrlKey: true, objectSelected: true }))).toBe('none');
+    expect(deleteKeyRoute(press({ altKey: true, objectSelected: true }))).toBe('none');
+  });
+
+  it('outside a document tab nothing is deleted', () => {
+    expect(deleteKeyRoute(press({ canvasFocused: false, objectSelected: true }))).toBe('none');
+  });
+
+  it('other keys are not routed', () => {
+    expect(deleteKeyRoute(press({ key: 'a' }))).toBeNull();
+  });
+});
+
+describe('Delete with a selected canvas object', () => {
+  it('deletes the object only, never the selected pages', async () => {
+    const { dispatched } = wire(
+      uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }),
+    );
+    const run = vi.fn();
+    const pop = pushObjectDeleteTarget({ active: () => true, run });
+    try {
+      const e = fakeEvent({ key: 'Delete', target: DIV });
+      dispatchKeyEvent(e);
+      dispatchKeyEvent(fakeEvent({ key: 'Backspace', target: DIV }));
+      await settle();
+      expect(e.defaultPrevented).toBe(true);
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(dispatched).toEqual([]);
+    } finally {
+      pop();
+    }
+  });
+
+  it('an inactive target leaves the page delete in place', async () => {
+    const { dispatched } = wire(
+      uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }),
+    );
+    const run = vi.fn();
+    const pop = pushObjectDeleteTarget({ active: () => false, run });
+    try {
+      dispatchKeyEvent(fakeEvent({ key: 'Delete', target: DIV }));
+      await settle();
+      expect(run).not.toHaveBeenCalled();
+      expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
+    } finally {
+      pop();
+    }
+  });
+
+  it('a held key deletes once', async () => {
+    const { dispatched } = wire(
+      uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }),
+    );
+    const run = vi.fn();
+    const pop = pushObjectDeleteTarget({ active: () => true, run });
+    try {
+      dispatchKeyEvent(fakeEvent({ key: 'Delete', target: DIV, repeat: true }));
+      await settle();
+      expect(run).not.toHaveBeenCalled();
+      expect(dispatched).toEqual([]);
+    } finally {
+      pop();
+    }
+  });
+
+  it('a focused field keeps the key from both deletes', async () => {
+    const { dispatched } = wire(
+      uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }),
+    );
+    const run = vi.fn();
+    const pop = pushObjectDeleteTarget({ active: () => true, run });
+    try {
+      const e = fakeEvent({ key: 'Backspace', target: INPUT });
+      dispatchKeyEvent(e);
+      await settle();
+      expect(e.defaultPrevented).toBe(false);
+      expect(run).not.toHaveBeenCalled();
+      expect(dispatched).toEqual([]);
+    } finally {
+      pop();
+    }
+  });
+});
+
 describe('the Escape chain', () => {
+  it('a tool interceptor registered before a mode-exit fallback still takes Escape first', () => {
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, tool: 'edit' }));
+    let selection = true;
+    const local = vi.fn(() => {
+      if (!selection) return false;
+      selection = false;
+      return true;
+    });
+    const leaveReading = vi.fn(() => true);
+    const popLocal = pushEscapeInterceptor(local);
+    const popReading = pushEscapeFallback(leaveReading);
+    try {
+      dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+      expect(local).toHaveBeenCalledOnce();
+      expect(leaveReading).not.toHaveBeenCalled();
+      dispatchKeyEvent(fakeEvent({ key: 'Escape', target: DIV }));
+      expect(leaveReading).toHaveBeenCalledOnce();
+      expect(dispatched).toEqual([]);
+    } finally {
+      popReading();
+      popLocal();
+    }
+  });
+
   it('an interceptor (drag/menu) consumes Escape ahead of everything', () => {
     const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, tool: 'highlight' }));
     const consumed = vi.fn(() => true);

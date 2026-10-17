@@ -64,7 +64,7 @@ export const CANVAS_STRINGS = {
   'canvas.measure.measured': 'Measured {{length}} pt =',
 
   // Edit tool — image/text/paragraph actions.
-  'canvas.edit.actionsGroup': 'Image actions',
+  'canvas.edit.moreActions': 'More edit actions',
   'canvas.edit.hint': 'Click an image, a paragraph, or a line of text on the page',
   'canvas.edit.editParagraph': 'Edit Paragraph…',
   'canvas.edit.editText': 'Edit Text…',

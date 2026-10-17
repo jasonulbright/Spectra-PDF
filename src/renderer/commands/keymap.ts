@@ -8,6 +8,7 @@ import { KEY_BINDINGS, type KeyBinding } from './standard-keys';
 import { COMMANDS, type CommandId } from './registry';
 import { commandAvailable } from './platform';
 import {
+  activeObjectDeleteTarget,
   appModalCount,
   closeTopAppModal,
   getCommandContext,
@@ -172,6 +173,38 @@ function radixDialogOpen(): boolean {
   );
 }
 
+export interface DeleteKeyInput {
+  key: string;
+  repeat: boolean;
+  defaultPrevented: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  /** The event target is a field, a select or contenteditable. */
+  editableTarget: boolean;
+  /** A menu, an app modal or a dialog owns the keyboard. */
+  overlayOpen: boolean;
+  /** The focused tab is a document. */
+  canvasFocused: boolean;
+  /** A canvas surface holds a selected object (Edit object, annotation). */
+  objectSelected: boolean;
+}
+
+/**
+ * Where a Delete or Backspace press goes: `object` deletes the selected
+ * canvas object only, `binding` hands the key to the table binding (the
+ * page delete), `none` consumes nothing. Null for any other key. A selected
+ * object always outranks the page selection, so a modified or repeated press
+ * with an object selected deletes nothing.
+ */
+export function deleteKeyRoute(e: DeleteKeyInput): 'object' | 'binding' | 'none' | null {
+  const k = e.key.toLowerCase();
+  if (k !== 'delete' && k !== 'backspace') return null;
+  if (e.overlayOpen || e.defaultPrevented || e.editableTarget || !e.canvasFocused) return 'none';
+  if (e.objectSelected) return e.repeat || e.ctrlKey || e.metaKey || e.altKey ? 'none' : 'object';
+  return 'binding';
+}
+
 // Space temporarily activates Hand while held. Module state stores the prior
 // mode to restore on keyup. It is deliberately restored
 // by direct dispatch (not a command) so the release always works — even if a
@@ -266,6 +299,25 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   }
   if (e.key === 'Escape') {
     dispatchEscape(ctx, e.target);
+    return;
+  }
+  const objectTarget = activeObjectDeleteTarget();
+  const deleteRoute = deleteKeyRoute({
+    key: e.key,
+    repeat: e.repeat === true,
+    defaultPrevented: e.defaultPrevented,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+    altKey: e.altKey,
+    editableTarget: isEditable(e.target),
+    overlayOpen: radixMenuOpen() || appModalCount() > 0 || radixDialogOpen(),
+    canvasFocused: isDocTab(ctx.state.ui.focusedTab),
+    objectSelected: objectTarget !== null,
+  });
+  if (deleteRoute === 'none') return;
+  if (deleteRoute === 'object' && objectTarget) {
+    e.preventDefault();
+    objectTarget.run();
     return;
   }
   const binding = resolveBinding(e);

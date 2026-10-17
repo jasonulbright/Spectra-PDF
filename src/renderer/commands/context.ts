@@ -124,10 +124,28 @@ export function pushEscapeInterceptor(handler: EscapeInterceptor): () => void {
   };
 }
 
-/** Run the stack LIFO; true if any interceptor consumed the key. */
+// A whole-view mode exit (reading mode) runs only after every interceptor
+// has declined, so a tool's local state (a selection, an armed crop) unwinds
+// first whichever was registered first.
+const escapeFallbacks: EscapeInterceptor[] = [];
+
+/** Register a mode-exit fallback; returns its unregister function. */
+export function pushEscapeFallback(handler: EscapeInterceptor): () => void {
+  escapeFallbacks.push(handler);
+  return () => {
+    const i = escapeFallbacks.lastIndexOf(handler);
+    if (i !== -1) escapeFallbacks.splice(i, 1);
+  };
+}
+
+/** Run the interceptors LIFO, then the fallbacks LIFO; true if one
+ * consumed the key. */
 export function runEscapeInterceptors(): boolean {
   for (let i = escapeInterceptors.length - 1; i >= 0; i--) {
     if (escapeInterceptors[i]()) return true;
+  }
+  for (let i = escapeFallbacks.length - 1; i >= 0; i--) {
+    if (escapeFallbacks[i]()) return true;
   }
   return false;
 }
@@ -135,6 +153,38 @@ export function runEscapeInterceptors(): boolean {
 /** Test-only: the current stack depth. */
 export function escapeInterceptorCount(): number {
   return escapeInterceptors.length;
+}
+
+// --- Object delete targets -------------------------------------------------
+//
+// A canvas surface with a selected object (an Edit object, an annotation)
+// owns Delete/Backspace while that object is selected. The keymap asks the
+// stack before the table binding, so one key press deletes the object or the
+// selected pages, never both.
+export interface ObjectDeleteTarget {
+  /** True while the surface holds a selected object the key deletes. */
+  active(): boolean;
+  /** Delete the selected object, or show why it cannot be deleted. */
+  run(): void;
+}
+
+const objectDeleteTargets: ObjectDeleteTarget[] = [];
+
+/** Register a target; returns its unregister function. */
+export function pushObjectDeleteTarget(target: ObjectDeleteTarget): () => void {
+  objectDeleteTargets.push(target);
+  return () => {
+    const i = objectDeleteTargets.lastIndexOf(target);
+    if (i !== -1) objectDeleteTargets.splice(i, 1);
+  };
+}
+
+/** The most recently registered active target, or null. */
+export function activeObjectDeleteTarget(): ObjectDeleteTarget | null {
+  for (let i = objectDeleteTargets.length - 1; i >= 0; i--) {
+    if (objectDeleteTargets[i].active()) return objectDeleteTargets[i];
+  }
+  return null;
 }
 
 // --- App-modal stack (the dialog keyboard model) ---------------------------
