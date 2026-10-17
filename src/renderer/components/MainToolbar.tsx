@@ -92,6 +92,7 @@ export function MainToolbar(): React.ReactElement {
   const pressedFor = (command: CommandId): boolean | undefined => {
     if (command === 'tools.hand') return state.ui.tool === 'hand';
     if (command === 'tools.select') return state.ui.tool === 'select';
+    if (command === 'tools.open.edit') return state.ui.activeToolId === 'edit';
     return undefined;
   };
   // The rendered layout: the catalog filtered by the user's show/hide

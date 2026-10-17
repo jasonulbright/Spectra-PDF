@@ -239,7 +239,13 @@ import {
 } from '../../components/FieldActionsControl';
 import type { FieldActions } from '../../lib/form-candidates';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasSnapshot, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
-import { invokeCommand, confirmPageEditNow, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
+import {
+  invokeCommand,
+  confirmPageEditNow,
+  registerCanvasServices,
+  pushEscapeInterceptor,
+  pushObjectDeleteTarget,
+} from '../../commands/context';
 import type { CandidatePublish } from '../../commands/types';
 import { publishToShownDocument } from '../../lib/active-publish';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
@@ -3039,8 +3045,25 @@ export function WorkspaceCanvasView({
     setSelectedAnnot(null);
   }, [resolvedAnnots, dispatch]);
 
-  // Keyboard on the selection: Delete removes, arrows nudge 1pt (Shift:
-  // 10pt) — skipped while typing in any editable surface.
+  const annotationDeleteRef = useRef<{ active: boolean; run: () => void }>({
+    active: false,
+    run: () => {},
+  });
+  annotationDeleteRef.current = {
+    active: resolvedAnnots !== null && tool === 'select',
+    run: onRemoveSelection,
+  };
+  useEffect(
+    () =>
+      pushObjectDeleteTarget({
+        active: () => annotationDeleteRef.current.active,
+        run: () => annotationDeleteRef.current.run(),
+      }),
+    [],
+  );
+
+  // Arrows nudge the selection 1pt (Shift: 10pt) — skipped while typing in
+  // any editable surface. Delete routes through the keymap's object target.
   useEffect(() => {
     if (!resolvedAnnots || tool !== 'select') return;
     const onKey = (e: KeyboardEvent): void => {
@@ -3050,11 +3073,6 @@ export function WorkspaceCanvasView({
         (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       )
         return;
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault();
-        onRemoveSelection();
-        return;
-      }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         const movable = resolvedAnnots.annotations.filter(isTransformable);
         if (movable.length === 0) return;
@@ -3093,7 +3111,7 @@ export function WorkspaceCanvasView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [resolvedAnnots, tool, onRemoveSelection, onTransformAnnotations, state.ui.viewRotationByPath]);
+  }, [resolvedAnnots, tool, onTransformAnnotations, state.ui.viewRotationByPath]);
 
   // Marks whose page still exists in the workspace — a deleted page's marks
   // drop out of the count and the apply payload rather than being guessed at.
@@ -4973,28 +4991,15 @@ export function WorkspaceCanvasView({
     [editSel, focusedDoc, docs, onEditImage, onEditImagesGroup, editBusy, editImagesByPage],
   );
 
-  // Edit-mode keyboard actions target the same transient object selection as
-  // the contextual controls. Text deletion uses the existing replacement
-  // path with an empty value (the engine's supported run-removal operation),
-  // so every delete stays in the normal undo/save flow.
-  useEffect(() => {
-    if (
-      activeToolId !== 'edit' ||
-      tool !== 'edit' ||
-      (!editSel && !selectedVector)
-    ) return;
-    const onKey = (event: KeyboardEvent): void => {
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' || target.isContentEditable)
-      ) return;
-      if (
-        (event.key !== 'Delete' && event.key !== 'Backspace') ||
-        event.ctrlKey || event.metaKey || event.altKey
-      ) return;
-      event.preventDefault();
+  // Text deletion commits an empty replacement, the engine's run-removal
+  // operation, so a keyboard delete is one undoable edit like the toolbar's.
+  const editDeleteRef = useRef<{ active: boolean; run: () => void }>({
+    active: false,
+    run: () => {},
+  });
+  editDeleteRef.current = {
+    active: activeToolId === 'edit' && tool === 'edit' && (editSel !== null || selectedVector !== null),
+    run: () => {
       if (editBusy) return;
       if (editSel?.kind === 'image') {
         void runEditAction('delete');
@@ -5002,30 +5007,33 @@ export function WorkspaceCanvasView({
         const run = editTextByPage.get(editSel.pageId)?.runBoxes.find(
           (candidate) => candidate.index === editSel.index,
         );
-        if (run?.editable) void handleCommitTextEdit(editSel.pageId, editSel.index, '');
+        if (run?.editable) {
+          void handleCommitTextEdit(editSel.pageId, editSel.index, '');
+        } else {
+          setEditNotice({ text: run?.reason ?? tChrome('canvas.edit.textNotEditable'), error: true });
+        }
       } else if (editSel?.kind === 'para') {
         const paragraph = editTextByPage.get(editSel.pageId)?.paragraphs.find(
           (candidate) => candidate.index === editSel.index,
         );
-        if (paragraph) void handleCommitParagraphEdit(editSel.pageId, editSel.index, '');
+        if (paragraph) {
+          void handleCommitParagraphEdit(editSel.pageId, editSel.index, '');
+        } else {
+          setEditNotice({ text: tChrome('canvas.edit.textNotEditable'), error: true });
+        }
       } else if (selectedVector) {
         void handleDeleteVector();
       }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [
-    activeToolId,
-    tool,
-    editSel,
-    selectedVector,
-    editTextByPage,
-    editBusy,
-    runEditAction,
-    handleCommitTextEdit,
-    handleCommitParagraphEdit,
-    handleDeleteVector,
-  ]);
+    },
+  };
+  const editToolOpen = activeToolId === 'edit';
+  useEffect(() => {
+    if (!editToolOpen) return;
+    return pushObjectDeleteTarget({
+      active: () => editDeleteRef.current.active,
+      run: () => editDeleteRef.current.run(),
+    });
+  }, [editToolOpen]);
 
   // The selected image's transform context is its user-space matrix plus the
   // page geometry the gesture needs to convert pointer↔user space. Null unless
@@ -5272,40 +5280,31 @@ export function WorkspaceCanvasView({
     setImageCropArmed(false);
   }, [editSel]);
 
-  // Escape unwinds Edit's local state before the app-level Escape chain exits
-  // the tool: first cancel crop, then clear the selected object. In Add Text
-  // or Add Image it returns to Select & Edit. A live text-placement card owns
-  // Escape itself and is left to its existing dismiss interceptor.
-  useEffect(() => {
-    if (activeToolId !== 'edit' || liveAddTextPlacement !== null) return;
-    const editMode = tool === 'edit' || tool === 'addtext' || tool === 'addimage';
-    if (!editMode) return;
-    if (
-      tool === 'edit' &&
-      !imageCropArmed &&
-      !editSel &&
-      !selectedVector
-    ) return;
-    return pushEscapeInterceptor(() => {
-      if (imageCropArmed) {
-        setImageCropArmed(false);
-      } else if (tool === 'addtext' || tool === 'addimage') {
-        setTool('edit');
-      } else {
-        setEditSel(null);
-        setSelectedVector(null);
-      }
+  // One interceptor for the whole Edit session, registered when Edit opens:
+  // a surface opened later (the overflow menu, a text-placement card) sits
+  // above it on the LIFO stack and takes Escape first. Order inside: cancel
+  // crop, leave Add Text/Add Image for Select & Edit, clear the selection.
+  const editEscapeRef = useRef<() => boolean>(() => false);
+  editEscapeRef.current = () => {
+    if (liveAddTextPlacement !== null) return false;
+    if (tool !== 'edit' && tool !== 'addtext' && tool !== 'addimage') return false;
+    if (imageCropArmed) {
+      setImageCropArmed(false);
       return true;
-    });
-  }, [
-    activeToolId,
-    liveAddTextPlacement,
-    tool,
-    imageCropArmed,
-    editSel,
-    selectedVector,
-    setTool,
-  ]);
+    }
+    if (tool === 'addtext' || tool === 'addimage') {
+      setTool('edit');
+      return true;
+    }
+    if (!editSel && !selectedVector) return false;
+    setEditSel(null);
+    setSelectedVector(null);
+    return true;
+  };
+  useEffect(() => {
+    if (!editToolOpen) return;
+    return pushEscapeInterceptor(() => editEscapeRef.current());
+  }, [editToolOpen]);
 
   // The overlay reports pageId/index explicitly; they always match the
   // selection (the overlay only renders for it) — verified, then routed

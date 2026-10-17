@@ -15,6 +15,9 @@ import {
   editImageSelect,
   editImageSelection,
   editImageAct,
+  getSelectedCanvasPageIds,
+  selectCanvasPages,
+  setUiLanguage,
 } from '../support/harness.js';
 import type { ImagePlacement } from '../support/harness.js';
 
@@ -37,6 +40,64 @@ async function firstPlacement(): Promise<{ pageId: string; p: ImagePlacement | u
   return { pageId: ids[0], p: (await editImagePlacements(ids[0]))[0] };
 }
 
+interface StripLayout {
+  height: number;
+  documentTop: number;
+  flexWrap: string;
+  allInside: boolean;
+  toggleVisible: boolean;
+  overflowCount: number;
+  status: { kind: string | null; text: boolean; live: string | null } | null;
+}
+
+/** The Edit strip's box, whether Close Tool, the overflow toggle and every
+ * inline control lie inside it, and what the status line shows. */
+async function stripLayout(): Promise<StripLayout> {
+  return await browser.execute(() => {
+    const strip = document.querySelector('[data-testid="secondary-toolbar"]');
+    const view = document.querySelector('[data-testid="document-view"]');
+    if (!strip || !view) throw new Error('Edit strip or document view is missing');
+    const box = strip.getBoundingClientRect();
+    const inside = (el: Element | null): boolean => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.width > 0;
+    };
+    const toggle = strip.querySelector('[data-testid="edit-actions-toggle"]');
+    const status = strip.querySelector('[data-testid="edit-status"]');
+    const inline = Array.from(strip.querySelectorAll('.edit-strip-inline [data-edit-item]'));
+    return {
+      height: Math.round(box.height),
+      documentTop: Math.round(view.getBoundingClientRect().top),
+      flexWrap: getComputedStyle(strip).flexWrap,
+      allInside:
+        inside(strip.querySelector('[data-testid="secondary-action-tools.close"]')) &&
+        inside(toggle) &&
+        inline.every(inside),
+      toggleVisible: !!toggle && getComputedStyle(toggle).visibility === 'visible',
+      overflowCount: strip.querySelectorAll('#edit-actions-popover [data-edit-item]').length,
+      status: status
+        ? {
+            kind: status.getAttribute('data-kind'),
+            text: (status.textContent ?? '').trim().length > 0,
+            live: status.getAttribute('aria-live'),
+          }
+        : null,
+    };
+  });
+}
+
+/** An Edit control that may sit inline or in the overflow menu. */
+async function revealEditControl(testId: string) {
+  const el = $(`[data-testid="${testId}"]`);
+  await el.waitForExist({ timeout: 10_000 });
+  if (!(await el.isDisplayed())) {
+    await $('[data-testid="edit-actions-toggle"]').click();
+    await el.waitForDisplayed({ timeout: 5_000 });
+  }
+  return el;
+}
+
 async function workingHash(): Promise<string> {
   const wp = (await getState()).activeFile?.workingPath;
   if (!wp || !existsSync(wp)) return '';
@@ -46,6 +107,7 @@ async function workingHash(): Promise<string> {
 describe('image adjustments', () => {
   let tmp: string;
   let pdfPath: string;
+  let stripPdfPath: string;
 
   before(async () => {
     tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-imgadj-'));
@@ -55,6 +117,12 @@ describe('image adjustments', () => {
     const page = doc.addPage([400, 300]);
     page.drawImage(png, { x: 100, y: 100, width: 120, height: 90 });
     writeFileSync(pdfPath, await doc.save());
+    stripPdfPath = resolve(tmp, 'strip.pdf');
+    const two = await PDFDocument.create();
+    const twoPng = await two.embedPng(RED_DOT_PNG);
+    two.addPage([400, 300]).drawImage(twoPng, { x: 100, y: 100, width: 120, height: 90 });
+    two.addPage([400, 300]);
+    writeFileSync(stripPdfPath, await two.save());
   });
 
   after(() => {
@@ -190,95 +258,6 @@ describe('image adjustments', () => {
     );
   });
 
-  it('keeps the Edit strip and document viewport steady while exposing contextual actions', async function () {
-    this.timeout(180_000);
-    await waitForHarness();
-    const originalSize = await browser.getWindowSize();
-    try {
-      await browser.setWindowSize(1024, 768);
-      await openByPaths([pdfPath]);
-      await browser.waitUntil(
-        async () => ((await getState()).activeFile?.path ?? '').includes('adjust.pdf'),
-        { timeout: 15_000, timeoutMsg: 'fixture never became active' },
-      );
-      expect(await invokeAppCommand('tools.open.edit')).toBe(true);
-      await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
-        timeout: 30_000,
-        timeoutMsg: 'edit placements never loaded',
-      });
-      const { pageId } = await firstPlacement();
-
-      const layout = async (): Promise<{ toolbarHeight: number; documentTop: number; flexWrap: string }> =>
-        await browser.execute(() => {
-          const toolbar = document.querySelector('[data-testid="secondary-toolbar"]');
-          const documentView = document.querySelector('[data-testid="document-view"]');
-          if (!toolbar || !documentView) throw new Error('Edit toolbar or document view is missing');
-          return {
-            toolbarHeight: Math.round(toolbar.getBoundingClientRect().height),
-            documentTop: Math.round(documentView.getBoundingClientRect().top),
-            flexWrap: getComputedStyle(toolbar).flexWrap,
-          };
-        });
-      const before = await layout();
-      await editImageSelect(pageId, 0);
-      await browser.waitUntil(
-        async () => (await editImageSelection())?.kind === 'image',
-        { timeout: 10_000, timeoutMsg: 'image selection did not settle' },
-      );
-      const selected = await layout();
-      expect(selected.flexWrap).toBe('nowrap');
-      expect(selected.toolbarHeight).toBe(before.toolbarHeight);
-      expect(selected.documentTop).toBe(before.documentTop);
-
-      await $('[data-testid="edit-actions-toggle"]').click();
-      const rotate = await $('[data-testid="edit-action-rotate-cw"]');
-      await rotate.waitForDisplayed({ timeout: 5_000 });
-      const expanded = await layout();
-      expect(expanded.toolbarHeight).toBe(selected.toolbarHeight);
-      expect(expanded.documentTop).toBe(selected.documentTop);
-
-      // Escape closes the overflow first, then clears the selection while
-      // keeping Edit's Select & Edit mode armed.
-      await browser.keys(['Escape']);
-      await browser.waitUntil(
-        async () => !(await $('[data-testid="edit-actions-popover"]').isExisting()),
-        { timeout: 5_000, timeoutMsg: 'Escape did not close contextual actions' },
-      );
-      await browser.keys(['Escape']);
-      await browser.waitUntil(async () => (await editImageSelection()) === null, {
-        timeout: 5_000,
-        timeoutMsg: 'Escape did not clear the selected image',
-      });
-      expect(await $('[data-testid="tool-edit"]').getAttribute('aria-pressed')).toBe('true');
-
-      // Backspace/Delete use the same undoable image-removal path as the
-      // contextual Delete button.
-      await editImageSelect(pageId, 0);
-      const beforeDelete = await workingHash();
-      await browser.keys(['Delete']);
-      await browser.waitUntil(
-        async () => {
-          if ((await workingHash()) === beforeDelete || !(await editImageListingSettled())) return false;
-          const ids = await editImagePageIds();
-          const lists = await Promise.all(ids.map(editImagePlacements));
-          return lists.flat().length === 0;
-        },
-        { timeout: 30_000, timeoutMsg: 'Delete did not remove the selected image' },
-      );
-      expect(await invokeAppCommand('edit.undo')).toBe(true);
-      await browser.waitUntil(
-        async () => {
-          if (!(await editImageListingSettled())) return false;
-          const lists = await Promise.all((await editImagePageIds()).map(editImagePlacements));
-          return lists.flat().length === 1;
-        },
-        { timeout: 30_000, timeoutMsg: 'undo did not restore the image' },
-      );
-    } finally {
-      await browser.setWindowSize(originalSize.width, originalSize.height);
-    }
-  });
-
   it('rotate-90 toolbar button turns the placement via the transform', async function () {
     this.timeout(120_000);
     await waitForHarness();
@@ -292,8 +271,7 @@ describe('image adjustments', () => {
     expect(Math.abs(p!.matrix[1])).toBeLessThan(0.5);
 
     await editImageSelect(pageId, 0);
-    await $('[data-testid="edit-actions-toggle"]').click();
-    const btn = await $('[data-testid="edit-action-rotate-cw"]');
+    const btn = await revealEditControl('edit-action-rotate-cw');
     await btn.waitForEnabled({ timeout: 10_000 });
     await btn.click();
     // After ±90°, the linear part goes off-diagonal: |b| ≈ 120, |a| ≈ 0.
@@ -451,5 +429,103 @@ describe('image adjustments', () => {
       },
       { timeout: 30_000, timeoutMsg: 'undo did not remove the mask' },
     );
+  });
+
+  it('keeps the Edit strip one row, its controls reachable, and Delete off the pages', async function () {
+    this.timeout(240_000);
+    await waitForHarness();
+    const originalSize = await browser.getWindowSize();
+    const imageCount = async (): Promise<number> =>
+      (await Promise.all((await editImagePageIds()).map(editImagePlacements))).flat().length;
+    const deleteByKey = async (key: 'Delete' | 'Backspace'): Promise<void> => {
+      const pages = await browser.execute(() =>
+        ((window as any).__SPECTRA_TEST__.getActiveDocPages() as { id: string }[]).map((pg) => pg.id),
+      );
+      expect(pages.length).toBe(2);
+      await selectCanvasPages(pages);
+      const { pageId } = await firstPlacement();
+      await editImageSelect(pageId, 0);
+      expect((await getSelectedCanvasPageIds()).sort()).toEqual([...pages].sort());
+      const before = await workingHash();
+      await browser.keys([key]);
+      await browser.waitUntil(
+        async () =>
+          (await workingHash()) !== before &&
+          (await editImageListingSettled()) &&
+          (await imageCount()) === 0,
+        { timeout: 30_000, timeoutMsg: `${key} did not remove the selected image` },
+      );
+      expect((await getState()).activeFile?.pageCount).toBe(2);
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await browser.waitUntil(
+        async () => (await editImageListingSettled()) && (await imageCount()) === 1,
+        { timeout: 30_000, timeoutMsg: 'undo did not restore the image' },
+      );
+    };
+    try {
+      await browser.setWindowSize(1024, 768);
+      await openByPaths([stripPdfPath]);
+      await browser.waitUntil(
+        async () => ((await getState()).activeFile?.path ?? '').includes('strip.pdf'),
+        { timeout: 15_000, timeoutMsg: 'fixture never became active' },
+      );
+      expect(await invokeAppCommand('tools.open.edit')).toBe(true);
+      await browser.waitUntil(async () => (await imageCount()) === 1, {
+        timeout: 30_000,
+        timeoutMsg: 'edit placements never loaded',
+      });
+
+      await deleteByKey('Delete');
+      await deleteByKey('Backspace');
+
+      await browser.setWindowSize(800, 768);
+      await setUiLanguage('de');
+      const idle = await stripLayout();
+      expect(idle.status).toEqual({ kind: 'hint', text: true, live: 'polite' });
+      const { pageId } = await firstPlacement();
+      await editImageSelect(pageId, 0);
+      await browser.waitUntil(async () => (await editImageSelection())?.kind === 'image', {
+        timeout: 10_000,
+        timeoutMsg: 'image selection did not settle',
+      });
+      const selected = await stripLayout();
+      expect(selected.flexWrap).toBe('nowrap');
+      expect(selected.height).toBe(idle.height);
+      expect(selected.documentTop).toBe(idle.documentTop);
+      expect(selected.allInside).toBe(true);
+      expect(selected.toggleVisible).toBe(true);
+      expect(selected.overflowCount).toBeGreaterThan(0);
+
+      await $('[data-testid="edit-actions-toggle"]').click();
+      await $('[data-testid="edit-actions-popover"]').waitForDisplayed({ timeout: 5_000 });
+      const expanded = await stripLayout();
+      expect(expanded.height).toBe(idle.height);
+      expect(expanded.documentTop).toBe(idle.documentTop);
+
+      // Escape closes the menu first, then clears the selection, and leaves
+      // Select & Edit armed.
+      await browser.keys(['Escape']);
+      await $('[data-testid="edit-actions-popover"]').waitForDisplayed({ reverse: true, timeout: 5_000 });
+      expect((await editImageSelection())?.kind).toBe('image');
+      await browser.keys(['Escape']);
+      await browser.waitUntil(async () => (await editImageSelection()) === null, {
+        timeout: 5_000,
+        timeoutMsg: 'Escape did not clear the selected image',
+      });
+      expect(await $('[data-testid="tool-edit"]').getAttribute('aria-pressed')).toBe('true');
+
+      await setUiLanguage('he');
+      await editImageSelect(pageId, 0);
+      await browser.waitUntil(async () => (await editImageSelection())?.kind === 'image', {
+        timeout: 10_000,
+        timeoutMsg: 'image selection did not settle in a right-to-left layout',
+      });
+      const rtl = await stripLayout();
+      expect(rtl.height).toBe(idle.height);
+      expect(rtl.allInside).toBe(true);
+    } finally {
+      await setUiLanguage('en');
+      await browser.setWindowSize(originalSize.width, originalSize.height);
+    }
   });
 });
