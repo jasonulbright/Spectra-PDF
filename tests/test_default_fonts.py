@@ -375,6 +375,7 @@ class TestNoFormStatus:
         forms_bytes = next(c["bytes"] for c in space_audit.audit_space_usage(form)["categories"] if c["id"] == "forms")
         assert forms_bytes > 0
 
+    @pytest.mark.usefixtures("srgb_profile")
     def test_a_pdfa_conversion_reports_the_same_losses(self, pair, gs_path, tmp_path):
         from engine.pdfa import convert_pdfa
 
