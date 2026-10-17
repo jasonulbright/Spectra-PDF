@@ -34,6 +34,7 @@ import {
 } from '../../i18n';
 import { RangeInput } from '../RangeInput';
 import { useDismissOnEscape } from '../../hooks/useDismissOnEscape';
+import { editStripStatus, inlineItemCount } from '../../lib/edit-strip';
 
 /** The colour a symbol arms in when the tool has no colour set —
  * markup red, the same default a drawing shape takes. */
@@ -42,6 +43,10 @@ const SYMBOL_STAMP_COLOR = '#e0393e';
 /** The inline size the actions group and the strip gap before it take, read by
  * `.secondary-toolbar-opts` in styles.css. */
 const STRIP_ACTIONS_RESERVE = '--strip-actions-reserve';
+
+/** The inline size the Edit strip always keeps for its status line, so a
+ * notice that comes and goes never moves a control into the overflow menu. */
+const EDIT_STATUS_RESERVE = 120;
 
 /** Read + downscale a picked raster into a library-sized PNG data URL (long
  * edge capped — stamps are page furniture, not photo archives, and the
@@ -212,6 +217,25 @@ function alignTitleKey(
   return `canvas.edit.align${mode.charAt(0).toUpperCase()}${mode.slice(1)}` as CanvasStringKey;
 }
 
+const BLEND_MODES = [
+  'Normal',
+  'Multiply',
+  'Screen',
+  'Overlay',
+  'Darken',
+  'Lighten',
+  'ColorDodge',
+  'ColorBurn',
+  'HardLight',
+  'SoftLight',
+  'Difference',
+  'Exclusion',
+  'Hue',
+  'Saturation',
+  'Color',
+  'Luminosity',
+] as const;
+
 /** "Measured N pt = [value][unit] Apply" — the calibration drag's
  * follow-up. Local state per pending span (keyed remount on lengthPts). */
 function CalibrationApplyRow({
@@ -314,7 +338,7 @@ export function SecondaryToolbar({
   onToggleImageCrop,
   onRotateImage,
 }: SecondaryToolbarProps): React.JSX.Element | null {
-  useTranslation();
+  const { i18n } = useTranslation();
   // Custom stamp library: loaded once, persisted on every
   // change. Hooks live above the early return (rules of hooks).
   const [customStamps, setCustomStamps] = useState<CustomStamp[]>(() => loadCustomStamps());
@@ -351,6 +375,23 @@ export function SecondaryToolbar({
   const [showSymbols, setShowSymbols] = useState(false);
   const [showEditActions, setShowEditActions] = useState(false);
   const editActionsRootRef = useRef<HTMLDivElement | null>(null);
+  const [stripEl, setStripEl] = useState<HTMLDivElement | null>(null);
+  const [editInlineCount, setEditInlineCount] = useState(Number.POSITIVE_INFINITY);
+  // A control that moves between the row and the menu is a new element; the
+  // test id of the focused one is held across the move and focused again.
+  const refocusRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const testId = refocusRef.current;
+    if (testId === null || !stripEl) return;
+    refocusRef.current = null;
+    const target = stripEl.querySelector<HTMLElement>(`[data-testid="${CSS.escape(testId)}"]`);
+    if (target && document.activeElement !== target) target.focus();
+  });
+  // Pending values live above the split, so a move between the row and the
+  // menu keeps what the user has dragged or typed. Each draft is bound to the
+  // seed it was started from.
+  const [opacityDraft, setOpacityDraft] = useState<{ seed: number; value: number } | null>(null);
+  const [fadeDraft, setFadeDraft] = useState<{ seed: string; a0: string; a1: string } | null>(null);
   const [newStampLabel, setNewStampLabel] = useState('');
   const [newStampColor, setNewStampColor] = useState(ANNOTATION_PALETTE[3]);
   const [actionsEl, setActionsEl] = useState<HTMLDivElement | null>(null);
@@ -428,8 +469,78 @@ export function SecondaryToolbar({
   // about a page.
   const owner = activeToolId ? toolById(activeToolId) : undefined;
   useEffect(() => {
-    if (owner?.id !== 'edit' || editSelectionKind === 'vector') setShowEditActions(false);
-  }, [owner?.id, editSelectionKind]);
+    if (owner?.id !== 'edit') setShowEditActions(false);
+  }, [owner?.id]);
+  const editStatus = editStripStatus({
+    busy: editBusy,
+    notice: editNotice,
+    hasSelection: editHasSelection,
+    selectionKind: editSelectionKind,
+    textEditable: editTextEditable,
+    textReason: editTextReason,
+  });
+  // Every input that adds, removes or resizes a fixed part of the Edit strip.
+  const editLayoutKey =
+    owner?.id === 'edit'
+      ? [
+          i18n.language,
+          tool,
+          editSelectionKind,
+          editImageCount > 1,
+          editImageCount > 2,
+          editImageOpacity !== null,
+          editImageBlend !== null,
+          editImageMask?.kind ?? null,
+        ].join('|')
+      : null;
+  // Items keep their priority order in the DOM (inline row, then menu), and
+  // an item box has the same width in both places, so the split is a pure
+  // function of the measured widths and the strip's inner width.
+  useLayoutEffect(() => {
+    if (editLayoutKey === null || !stripEl) return;
+    const measure = (): void => {
+      const style = getComputedStyle(stripEl);
+      const stripGap = parseFloat(style.columnGap) || 0;
+      const inner =
+        stripEl.clientWidth -
+        (parseFloat(style.paddingInlineStart) || 0) -
+        (parseFloat(style.paddingInlineEnd) || 0);
+      let fixed = stripGap * Math.max(0, stripEl.children.length - 1);
+      let itemGap = 0;
+      for (const child of Array.from(stripEl.children) as HTMLElement[]) {
+        if (child.classList.contains('edit-strip-inline')) {
+          itemGap = parseFloat(getComputedStyle(child).columnGap) || 0;
+        } else if (child.classList.contains('edit-strip-status')) {
+          fixed += EDIT_STATUS_RESERVE;
+        } else if (child.classList.contains('secondary-toolbar-title')) {
+          fixed += child.scrollWidth + (child.offsetWidth - child.clientWidth);
+        } else {
+          fixed += child.getBoundingClientRect().width;
+        }
+      }
+      const items = Array.from(stripEl.querySelectorAll<HTMLElement>('[data-edit-item]'));
+      const count = inlineItemCount(
+        items.map((el) => el.getBoundingClientRect().width),
+        Math.floor(inner - fixed),
+        itemGap,
+      );
+      const focused = document.activeElement as HTMLElement | null;
+      const focusedItem = focused?.closest<HTMLElement>('[data-edit-item]');
+      const focusedIndex = focusedItem && stripEl.contains(focusedItem) ? items.indexOf(focusedItem) : -1;
+      const wasInline = focusedIndex !== -1 && focusedIndex < editInlineCount;
+      if (focusedIndex !== -1 && wasInline !== focusedIndex < count) {
+        refocusRef.current = focused?.getAttribute('data-testid') ?? null;
+        if (focusedIndex >= count) setShowEditActions(true);
+      }
+      setEditInlineCount((prev) => (prev === count ? prev : count));
+      if (count >= items.length) setShowEditActions(false);
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(stripEl);
+    for (const el of stripEl.querySelectorAll('[data-edit-item]')) resize.observe(el);
+    return () => resize.disconnect();
+  }, [editLayoutKey, stripEl, editInlineCount]);
   useDismissOnEscape(showEditActions, () => setShowEditActions(false));
   useEffect(() => {
     if (!showEditActions) return;
@@ -454,9 +565,406 @@ export function SecondaryToolbar({
     (tool !== 'stamp' || !!stampPreset?.symbolParts) &&
     owner.id === 'comment';
 
+  const toolTitle = tToolTitle(owner.id, owner.title);
+  const modeButton = (m: CanvasTool): React.JSX.Element => (
+    <button
+      key={m}
+      type="button"
+      data-testid={`tool-${m}`}
+      aria-pressed={tool === m}
+      className={'secondary-tool' + (tool === m ? ' active' : '')}
+      onClick={() => invokeCommand(`tools.${m}`)}
+    >
+      {tCommandTitle(`tools.${m}`, TOOL_TITLES[m])}
+    </button>
+  );
+  // Locked, the armed mode survives its own placements; unlocked, each
+  // placement returns to Select. Closing the tool disarms the mode either way.
+  const lockButton = (
+    <button
+      type="button"
+      data-testid="tool-lock"
+      aria-pressed={toolLock}
+      className={'secondary-tool secondary-tool-lock' + (toolLock ? ' active' : '')}
+      title={tChrome('canvas.toolbar.lockHint')}
+      onClick={() => onSetToolLock(!toolLock)}
+    >
+      {tChrome(toolLock ? 'canvas.toolbar.locked' : 'canvas.toolbar.unlocked')}
+    </button>
+  );
+  const actionsGroup = actions.length > 0 && (
+    <div ref={setActionsEl} className="secondary-toolbar-actions">
+      {actions.map((id) => (
+        <button
+          key={id}
+          type="button"
+          data-testid={`secondary-action-${id}`}
+          className="secondary-tool"
+          onClick={() => invokeCommand(id)}
+        >
+          {tCommandTitle(id, COMMANDS[id].title)}
+        </button>
+      ))}
+    </div>
+  );
+
+  type EditStripItem = [string, React.ReactNode];
+  // Priority order: the modes, the lock, then the selection's controls. The
+  // tail moves into the overflow menu first.
+  const editStripItems = (): EditStripItem[] => {
+    const items: EditStripItem[] = modes.map((m) => [`mode-${m}`, modeButton(m)]);
+    items.push(['lock', lockButton]);
+    if (editSelectionKind === 'text' || editSelectionKind === 'para') {
+      items.push([
+        'text',
+        <button
+          type="button"
+          data-testid="edit-action-text"
+          className="secondary-tool"
+          disabled={!editTextEditable || editBusy}
+          onClick={onEditTextOpen}
+        >
+          {tChrome(
+            editSelectionKind === 'para' ? 'canvas.edit.editParagraph' : 'canvas.edit.editText',
+          )}
+        </button>,
+      ]);
+    }
+    if (editSelectionKind !== 'image') return items;
+    // Replace, extract and crop are single-target and disable on a group;
+    // delete and rotate act on the whole selection.
+    items.push(
+      [
+        'replace',
+        <button
+          type="button"
+          data-testid="edit-action-replace"
+          className="secondary-tool"
+          disabled={editImageCount > 1 || editImagePlacementKind === 'vector' || editBusy}
+          title={
+            editImagePlacementKind === 'vector' ? tChrome('canvas.edit.vectorNoReplace') : undefined
+          }
+          onClick={() => onEditAction('replace')}
+        >
+          {tChrome('canvas.edit.replace')}
+        </button>,
+      ],
+      [
+        'extract',
+        <button
+          type="button"
+          data-testid="edit-action-extract"
+          className="secondary-tool"
+          disabled={editImageCount > 1 || editImagePlacementKind === 'vector' || editBusy}
+          title={
+            editImagePlacementKind === 'vector' ? tChrome('canvas.edit.vectorNoExtract') : undefined
+          }
+          onClick={() => onEditAction('extract')}
+        >
+          {tChrome('canvas.edit.extract')}
+        </button>,
+      ],
+      [
+        'delete',
+        <button
+          type="button"
+          data-testid="edit-action-delete"
+          className="secondary-tool"
+          disabled={editBusy}
+          onClick={() => onEditAction('delete')}
+        >
+          {tChrome('canvas.common.delete')}
+        </button>,
+      ],
+      [
+        'crop',
+        <button
+          type="button"
+          data-testid="edit-action-crop"
+          className="secondary-tool"
+          aria-pressed={imageCropArmed}
+          disabled={editImageCount > 1 || editBusy}
+          title={tChrome('canvas.edit.cropTitle')}
+          onClick={onToggleImageCrop}
+        >
+          {tChrome('canvas.edit.crop')}
+        </button>,
+      ],
+      [
+        'rotate-ccw',
+        <button
+          type="button"
+          data-testid="edit-action-rotate-ccw"
+          className="secondary-tool"
+          disabled={editBusy}
+          title={tChrome('canvas.edit.rotateCcw')}
+          onClick={() => onRotateImage(1)}
+        >
+          ↺ 90°
+        </button>,
+      ],
+      [
+        'rotate-cw',
+        <button
+          type="button"
+          data-testid="edit-action-rotate-cw"
+          className="secondary-tool"
+          disabled={editBusy}
+          title={tChrome('canvas.edit.rotateCw')}
+          onClick={() => onRotateImage(-1)}
+        >
+          ↻ 90°
+        </button>,
+      ],
+    );
+    if (editImageOpacity !== null) {
+      items.push([
+        'opacity',
+        <OpacitySlider
+          seed={editImageOpacity}
+          value={
+            opacityDraft?.seed === editImageOpacity
+              ? opacityDraft.value
+              : Math.round(editImageOpacity * 100)
+          }
+          onValue={(value) => setOpacityDraft({ seed: editImageOpacity, value })}
+          disabled={editBusy}
+          onCommit={onSetImageOpacity}
+        />,
+      ]);
+    }
+    // Blend mode commits through the same graphics-state frame as opacity.
+    if (editImageBlend !== null) {
+      items.push([
+        'blend',
+        <label className="secondary-toolbar-blend" title={tChrome('canvas.edit.blendTitle')}>
+          <span>{tChrome('canvas.edit.blend')}</span>
+          <select
+            data-testid="edit-image-blend"
+            value={editImageBlend}
+            disabled={editBusy}
+            onChange={(e) => onSetImageBlend(e.target.value)}
+          >
+            {BLEND_MODES.map((m) => (
+              <option key={m} value={m}>
+                {tChrome(`canvas.blend.${m}` as CanvasStringKey)}
+              </option>
+            ))}
+          </select>
+        </label>,
+      ]);
+    }
+    // The fade kind seeds the mask; the on-canvas dots steer its direction.
+    if (editImageMask !== null) {
+      const mask = editImageMask;
+      items.push([
+        'fade',
+        <label className="secondary-toolbar-blend" title={tChrome('canvas.edit.fadeTitle')}>
+          <span>{tChrome('canvas.edit.fade')}</span>
+          <select
+            data-testid="edit-image-mask-kind"
+            value={mask.kind}
+            disabled={editBusy}
+            onChange={(e) => {
+              const kind = e.target.value;
+              if (kind === 'none') {
+                onSetImageMask({ kind: 'none' });
+              } else if (kind === 'linear' || kind === 'radial') {
+                const cur = mask.kind !== 'none' ? mask : null;
+                onSetImageMask({
+                  kind,
+                  from: cur?.from ?? (kind === 'linear' ? [0, 0.5] : [0.5, 0.5]),
+                  to: cur?.to ?? [1, 0.5],
+                  start_alpha: cur?.startAlpha ?? 1,
+                  end_alpha: cur?.endAlpha ?? 0,
+                });
+              }
+            }}
+          >
+            <option value="none">{tChrome('canvas.edit.fadeNone')}</option>
+            <option value="linear">{tChrome('canvas.edit.fadeLinear')}</option>
+            <option value="radial">{tChrome('canvas.edit.fadeRadial')}</option>
+          </select>
+        </label>,
+      ]);
+      if (mask.kind !== 'none') {
+        const seed = `${mask.startAlpha}:${mask.endAlpha}`;
+        const draft =
+          fadeDraft?.seed === seed
+            ? fadeDraft
+            : {
+                seed,
+                a0: String(Math.round(mask.startAlpha * 100)),
+                a1: String(Math.round(mask.endAlpha * 100)),
+              };
+        const commitAlpha = (which: 'a0' | 'a1', text: string): void => {
+          const v = Math.max(0, Math.min(100, Number(text))) / 100;
+          const current = which === 'a0' ? mask.startAlpha : mask.endAlpha;
+          if (Math.abs(v - current) < 0.005) return;
+          onSetImageMask({
+            kind: mask.kind,
+            from: mask.from,
+            to: mask.to,
+            start_alpha: which === 'a0' ? v : mask.startAlpha,
+            end_alpha: which === 'a1' ? v : mask.endAlpha,
+          });
+        };
+        items.push([
+          'fade-alpha',
+          <label className="secondary-toolbar-blend" title={tChrome('canvas.edit.fadeAlphaTitle')}>
+            <input
+              type="number"
+              data-testid="edit-image-mask-a0"
+              min={0}
+              max={100}
+              step={5}
+              value={draft.a0}
+              disabled={editBusy}
+              onChange={(e) => setFadeDraft({ ...draft, a0: e.target.value })}
+              onBlur={(e) => commitAlpha('a0', e.target.value)}
+              style={{ width: 46 }}
+            />
+            <span>→</span>
+            <input
+              type="number"
+              data-testid="edit-image-mask-a1"
+              min={0}
+              max={100}
+              step={5}
+              value={draft.a1}
+              disabled={editBusy}
+              onChange={(e) => setFadeDraft({ ...draft, a1: e.target.value })}
+              onBlur={(e) => commitAlpha('a1', e.target.value)}
+              style={{ width: 46 }}
+            />
+          </label>,
+        ]);
+      }
+    }
+    // Align and distribute translate every member through one commit (one
+    // undo entry). The glyphs match the properties bar's annotation row.
+    if (editImageCount > 1) {
+      const alignModes = [
+        ['left', '⭰'],
+        ['centerh', '⇹'],
+        ['right', '⭲'],
+        ['top', '⭱'],
+        ['centerv', '⇳'],
+        ['bottom', '⭳'],
+        ...(editImageCount > 2
+          ? ([
+              ['disth', '⇢⇠'],
+              ['distv', '⇣⇡'],
+            ] as const)
+          : []),
+      ] as const;
+      items.push([
+        'align',
+        <span
+          role="group"
+          aria-label={tChrome('canvas.edit.alignGroup')}
+          className="secondary-toolbar-align"
+        >
+          {alignModes.map(([mode, glyph]) => (
+            <button
+              key={mode}
+              type="button"
+              data-testid={`edit-align-${mode}`}
+              className="secondary-tool"
+              disabled={editBusy}
+              title={tChrome(alignTitleKey(mode))}
+              onClick={() => onAlignImages(mode)}
+            >
+              {glyph}
+            </button>
+          ))}
+          <span className="secondary-toolbar-hint" data-testid="edit-group-count">
+            {tChromeCount('canvas.edit.groupCount', editImageCount)}
+          </span>
+        </span>,
+      ]);
+    }
+    return items;
+  };
+
+  if (owner.id === 'edit') {
+    const items = editStripItems();
+    const inlineCount = Math.min(editInlineCount, items.length);
+    const overflow = items.slice(inlineCount);
+    const idle = overflow.length === 0;
+    const statusText =
+      editStatus === null
+        ? ''
+        : editStatus.kind === 'busy'
+          ? tChrome('canvas.common.working')
+          : editStatus.kind === 'hint'
+            ? tChrome('canvas.edit.hint')
+            : (editStatus.text ?? '');
+    const moreLabel = tChrome('canvas.edit.moreActions');
+    const itemBox = ([key, node]: EditStripItem): React.JSX.Element => (
+      <div key={key} className="edit-strip-item" data-edit-item={key}>
+        {node}
+      </div>
+    );
+    return (
+      <div
+        ref={setStripEl}
+        className="secondary-toolbar"
+        data-testid="secondary-toolbar"
+        data-tool={owner.id}
+      >
+        <span className="secondary-toolbar-title" title={toolTitle}>{toolTitle}</span>
+        <div
+          className="edit-strip-inline"
+          role="group"
+          aria-label={tChrome('canvas.toolbar.modes', { tool: toolTitle })}
+        >
+          {items.slice(0, inlineCount).map(itemBox)}
+        </div>
+        <span
+          className={'secondary-toolbar-hint edit-strip-status' + (editStatus?.error ? ' error' : '')}
+          data-testid="edit-status"
+          data-kind={editStatus?.kind}
+          role="status"
+          aria-live="polite"
+          title={statusText || undefined}
+        >
+          {statusText}
+        </span>
+        <div className="secondary-toolbar-edit-menu" ref={editActionsRootRef}>
+          <button
+            type="button"
+            className={'secondary-tool secondary-toolbar-edit-toggle' + (idle ? ' is-idle' : '')}
+            data-testid="edit-actions-toggle"
+            aria-expanded={showEditActions && !idle}
+            aria-controls="edit-actions-popover"
+            aria-label={moreLabel}
+            title={moreLabel}
+            disabled={idle}
+            onClick={() => setShowEditActions((open) => !open)}
+          >
+            <span aria-hidden="true">⋯</span>
+          </button>
+          <div
+            id="edit-actions-popover"
+            data-testid="edit-actions-popover"
+            className={
+              'secondary-toolbar-edit-popover' + (showEditActions && !idle ? ' is-open' : '')
+            }
+            role="group"
+            aria-label={moreLabel}
+          >
+            {overflow.map(itemBox)}
+          </div>
+        </div>
+        {actionsGroup}
+      </div>
+    );
+  }
+
   return (
     <div className="secondary-toolbar" data-testid="secondary-toolbar" data-tool={owner.id}>
-      <span className="secondary-toolbar-title">{tToolTitle(owner.id, owner.title)}</span>
+      <span className="secondary-toolbar-title">{toolTitle}</span>
 
       {/* The tool's modes. One button per mode it owns — the pill's job, minus
           the seven modes belonging to tools you didn't pick. */}
@@ -464,33 +972,8 @@ export function SecondaryToolbar({
           owns only `formfields`, and its "+ Add Field" control is named
           by name — gating on >1 silently deleted it, and Redact's too. */}
       <div className="secondary-toolbar-modes" role="group" aria-label={tChrome('canvas.toolbar.modes', { tool: tToolTitle(owner.id, owner.title) })}>
-          {modes.map((m) => (
-            <button
-              key={m}
-              type="button"
-              data-testid={`tool-${m}`}
-              aria-pressed={tool === m}
-              className={'secondary-tool' + (tool === m ? ' active' : '')}
-              onClick={() => invokeCommand(`tools.${m}`)}
-            >
-              {tCommandTitle(`tools.${m}`, TOOL_TITLES[m])}
-            </button>
-          ))}
-          {/* The lock. It belongs beside the mode buttons because it is about
-              THEM: locked, the armed mode survives its own placements, so a
-              200-page scan is marked with one arming gesture; unlocked, each
-              placement returns to Select. It never overrides the tool — closing
-              this tool disarms the mode either way. */}
-          <button
-            type="button"
-            data-testid="tool-lock"
-            aria-pressed={toolLock}
-            className={'secondary-tool secondary-tool-lock' + (toolLock ? ' active' : '')}
-            title={tChrome('canvas.toolbar.lockHint')}
-            onClick={() => onSetToolLock(!toolLock)}
-          >
-            {tChrome(toolLock ? 'canvas.toolbar.locked' : 'canvas.toolbar.unlocked')}
-          </button>
+          {modes.map(modeButton)}
+          {lockButton}
       </div>
 
       {/* Mode OPTIONS — they configure the armed mode, so they belong to the
@@ -603,353 +1086,6 @@ export function SecondaryToolbar({
             <span className="selectable secondary-toolbar-hint measure-result" data-testid="measure-result" aria-live="polite">
               {measureResult}
             </span>
-          )}
-        </div>
-      )}
-      {owner.id === 'edit' && editSelectionKind !== 'vector' && (
-        <div className="secondary-toolbar-edit-menu" ref={editActionsRootRef}>
-          <button
-            type="button"
-            className="secondary-tool secondary-toolbar-edit-toggle"
-            data-testid="edit-actions-toggle"
-            aria-expanded={showEditActions}
-            aria-controls="edit-actions-popover"
-            aria-label={tToolTitle(owner.id, owner.title)}
-            title={tToolTitle(owner.id, owner.title)}
-            onClick={() => setShowEditActions((open) => !open)}
-          >
-            <span aria-hidden="true">⋯</span>
-          </button>
-          {showEditActions && (
-            <div
-              id="edit-actions-popover"
-              data-testid="edit-actions-popover"
-              className="secondary-toolbar-edit-popover secondary-toolbar-opts secondary-toolbar-edit-options"
-              role="group"
-              aria-label={tToolTitle(owner.id, owner.title)}
-            >
-          {!editHasSelection && !editBusy && !editNotice && (
-            <span className="secondary-toolbar-hint" data-testid="edit-hint">
-              {tChrome('canvas.edit.hint')}
-            </span>
-          )}
-          {editSelectionKind === 'text' && !editBusy && !editTextEditable && editTextReason && (
-            <span className="secondary-toolbar-hint error" data-testid="edit-text-reason">
-              {editTextReason}
-            </span>
-          )}
-          {(editSelectionKind === 'text' || editSelectionKind === 'para') && (
-            <button
-              type="button"
-              data-testid="edit-action-text"
-              className="secondary-tool"
-              disabled={!editTextEditable || editBusy}
-              onClick={onEditTextOpen}
-            >
-              {tChrome(
-                editSelectionKind === 'para'
-                  ? 'canvas.edit.editParagraph'
-                  : 'canvas.edit.editText',
-              )}
-            </button>
-          )}
-          {editBusy && (
-            <span className="secondary-toolbar-hint" data-testid="edit-busy" aria-live="polite">
-              {tChrome('canvas.common.working')}
-            </span>
-          )}
-          {editNotice && !editBusy && (
-            <span
-              className={'secondary-toolbar-hint' + (editNotice.error ? ' error' : '')}
-              data-testid="edit-notice"
-              aria-live="polite"
-            >
-              {editNotice.text}
-            </span>
-          )}
-          {editSelectionKind === 'image' && (
-            <>
-          {/* Inline images replace (promoted to an ordinary embedded
-              image) and extract like any other — the old disable is gone.
-              Replace/extract/crop are single-target — they disable on a
-              group; delete and rotate act on the whole selection. */}
-          <button
-            type="button"
-            data-testid="edit-action-replace"
-            className="secondary-tool"
-            disabled={
-              editSelectionKind !== 'image' ||
-              editImageCount > 1 ||
-              editImagePlacementKind === 'vector' ||
-              editBusy
-            }
-            title={
-              editImagePlacementKind === 'vector'
-                ? tChrome('canvas.edit.vectorNoReplace')
-                : undefined
-            }
-            onClick={() => onEditAction('replace')}
-          >
-            {tChrome('canvas.edit.replace')}
-          </button>
-          <button
-            type="button"
-            data-testid="edit-action-extract"
-            className="secondary-tool"
-            disabled={
-              editSelectionKind !== 'image' ||
-              editImageCount > 1 ||
-              editImagePlacementKind === 'vector' ||
-              editBusy
-            }
-            title={
-              editImagePlacementKind === 'vector'
-                ? tChrome('canvas.edit.vectorNoExtract')
-                : undefined
-            }
-            onClick={() => onEditAction('extract')}
-          >
-            {tChrome('canvas.edit.extract')}
-          </button>
-          <button
-            type="button"
-            data-testid="edit-action-delete"
-            className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
-            onClick={() => onEditAction('delete')}
-          >
-            {tChrome('canvas.common.delete')}
-          </button>
-          {/* Image adjustments — enabled only with an image selected. */}
-          <button
-            type="button"
-            data-testid="edit-action-crop"
-            className="secondary-tool"
-            aria-pressed={imageCropArmed}
-            disabled={editSelectionKind !== 'image' || editImageCount > 1 || editBusy}
-            title={tChrome('canvas.edit.cropTitle')}
-            onClick={onToggleImageCrop}
-          >
-            {tChrome('canvas.edit.crop')}
-          </button>
-          <button
-            type="button"
-            data-testid="edit-action-rotate-ccw"
-            className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
-            title={tChrome('canvas.edit.rotateCcw')}
-            onClick={() => onRotateImage(1)}
-          >
-            ↺ 90°
-          </button>
-          <button
-            type="button"
-            data-testid="edit-action-rotate-cw"
-            className="secondary-tool"
-            disabled={editSelectionKind !== 'image' || editBusy}
-            title={tChrome('canvas.edit.rotateCw')}
-            onClick={() => onRotateImage(-1)}
-          >
-            ↻ 90°
-          </button>
-          {editSelectionKind === 'image' && editImageOpacity !== null && (
-            <OpacitySlider
-              key={`${editImageOpacity}`}
-              seed={editImageOpacity}
-              disabled={editBusy}
-              onCommit={onSetImageOpacity}
-            />
-          )}
-          {/* Blend mode — seeded from the listing, committed
-              through the same gs frame as opacity (one merged frame). */}
-          {editSelectionKind === 'image' && editImageBlend !== null && (
-            <label
-              className="secondary-toolbar-blend"
-              title={tChrome('canvas.edit.blendTitle')}
-            >
-              <span>{tChrome('canvas.edit.blend')}</span>
-              <select
-                data-testid="edit-image-blend"
-                value={editImageBlend}
-                disabled={editBusy}
-                onChange={(e) => onSetImageBlend(e.target.value)}
-              >
-                {[
-                  'Normal',
-                  'Multiply',
-                  'Screen',
-                  'Overlay',
-                  'Darken',
-                  'Lighten',
-                  'ColorDodge',
-                  'ColorBurn',
-                  'HardLight',
-                  'SoftLight',
-                  'Difference',
-                  'Exclusion',
-                  'Hue',
-                  'Saturation',
-                  'Color',
-                  'Luminosity',
-                ].map((m) => (
-                  <option key={m} value={m}>
-                    {tChrome(`canvas.blend.${m}` as CanvasStringKey)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {/* Gradient mask — kind select seeds/starts the fade;
-              the on-canvas dots then steer its direction; alphas here. */}
-          {editSelectionKind === 'image' && editImageMask !== null && (
-            <label
-              className="secondary-toolbar-blend"
-              title={tChrome('canvas.edit.fadeTitle')}
-            >
-              <span>{tChrome('canvas.edit.fade')}</span>
-              <select
-                data-testid="edit-image-mask-kind"
-                value={editImageMask.kind}
-                disabled={editBusy}
-                onChange={(e) => {
-                  const kind = e.target.value;
-                  if (kind === 'none') {
-                    onSetImageMask({ kind: 'none' });
-                  } else if (kind === 'linear' || kind === 'radial') {
-                    // Keep the current geometry when switching kind; seed a
-                    // fresh default axis otherwise.
-                    const cur = editImageMask.kind !== 'none' ? editImageMask : null;
-                    onSetImageMask({
-                      kind,
-                      from: cur?.from ?? (kind === 'linear' ? [0, 0.5] : [0.5, 0.5]),
-                      to: cur?.to ?? [1, 0.5],
-                      start_alpha: cur?.startAlpha ?? 1,
-                      end_alpha: cur?.endAlpha ?? 0,
-                    });
-                  }
-                }}
-              >
-                <option value="none">{tChrome('canvas.edit.fadeNone')}</option>
-                <option value="linear">{tChrome('canvas.edit.fadeLinear')}</option>
-                <option value="radial">{tChrome('canvas.edit.fadeRadial')}</option>
-              </select>
-            </label>
-          )}
-          {editSelectionKind === 'image' &&
-            editImageMask !== null &&
-            editImageMask.kind !== 'none' && (
-              // Keyed by the seed: the inputs are uncontrolled, and without a
-              // remount another image's selection keeps showing (and on blur
-              // committing) the previous image's alphas.
-              <label
-                key={`${editImageMask.startAlpha}:${editImageMask.endAlpha}`}
-                className="secondary-toolbar-blend"
-                title={tChrome('canvas.edit.fadeAlphaTitle')}
-              >
-                <input
-                  type="number"
-                  data-testid="edit-image-mask-a0"
-                  min={0}
-                  max={100}
-                  step={5}
-                  defaultValue={Math.round(editImageMask.startAlpha * 100)}
-                  disabled={editBusy}
-                  onBlur={(e) => {
-                    const v = Math.max(0, Math.min(100, Number(e.target.value))) / 100;
-                    if (Math.abs(v - editImageMask.startAlpha) < 0.005) return;
-                    onSetImageMask({
-                      kind: editImageMask.kind,
-                      from: editImageMask.from,
-                      to: editImageMask.to,
-                      start_alpha: v,
-                      end_alpha: editImageMask.endAlpha,
-                    });
-                  }}
-                  style={{ width: 46 }}
-                />
-                <span>→</span>
-                <input
-                  type="number"
-                  data-testid="edit-image-mask-a1"
-                  min={0}
-                  max={100}
-                  step={5}
-                  defaultValue={Math.round(editImageMask.endAlpha * 100)}
-                  disabled={editBusy}
-                  onBlur={(e) => {
-                    const v = Math.max(0, Math.min(100, Number(e.target.value))) / 100;
-                    if (Math.abs(v - editImageMask.endAlpha) < 0.005) return;
-                    onSetImageMask({
-                      kind: editImageMask.kind,
-                      from: editImageMask.from,
-                      to: editImageMask.to,
-                      start_alpha: editImageMask.startAlpha,
-                      end_alpha: v,
-                    });
-                  }}
-                  style={{ width: 46 }}
-                />
-              </label>
-            )}
-          {/* Multi-select: align/distribute the group — per-member
-              translates through the ONE multi commit (one undo entry). */}
-          {editImageCount > 1 && (
-            <span
-              role="group"
-              aria-label={tChrome('canvas.edit.alignGroup')}
-              className="secondary-toolbar-align"
-            >
-              {/* Same glyph set as the PropertiesBar's annotation align row —
-                  one visual language for "align" across the product. */}
-              {(
-                [
-                  ['left', '⭰'],
-                  ['centerh', '⇹'],
-                  ['right', '⭲'],
-                  ['top', '⭱'],
-                  ['centerv', '⇳'],
-                  ['bottom', '⭳'],
-                ] as const
-              ).map(([mode, glyph]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  data-testid={`edit-align-${mode}`}
-                  className="secondary-tool"
-                  disabled={editBusy}
-                  title={tChrome(alignTitleKey(mode))}
-                  onClick={() => onAlignImages(mode)}
-                >
-                  {glyph}
-                </button>
-              ))}
-              {editImageCount > 2 &&
-                (
-                  [
-                    ['disth', '⇢⇠'],
-                    ['distv', '⇣⇡'],
-                  ] as const
-                ).map(([mode, glyph]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    data-testid={`edit-align-${mode}`}
-                    className="secondary-tool"
-                    disabled={editBusy}
-                    title={tChrome(alignTitleKey(mode))}
-                    onClick={() => onAlignImages(mode)}
-                  >
-                    {glyph}
-                  </button>
-                ))}
-              <span className="secondary-toolbar-hint" data-testid="edit-group-count">
-                {tChromeCount('canvas.edit.groupCount', editImageCount)}
-              </span>
-            </span>
-          )}
-            </>
-          )}
-            </div>
           )}
         </div>
       )}
@@ -1276,41 +1412,29 @@ export function SecondaryToolbar({
       )}
 
       {/* Last in source order so a mode option that appears or changes width
-          (a busy hint, a notice) never moves it off the far end. */}
-      {actions.length > 0 && (
-        <div ref={setActionsEl} className="secondary-toolbar-actions">
-          {actions.map((id) => (
-            <button
-              key={id}
-              type="button"
-              data-testid={`secondary-action-${id}`}
-              className="secondary-tool"
-              onClick={() => invokeCommand(id)}
-            >
-              {tCommandTitle(id, COMMANDS[id].title)}
-            </button>
-          ))}
-        </div>
-      )}
+          never moves it off the far end. */}
+      {actionsGroup}
     </div>
   );
 }
 
-/** Opacity with commit-on-release — dragging previews the number
- * locally; only releasing (pointer or keyboard) commits, so one drag is ONE
- * undoable engine op, not thirty. The parent keys this by the seed, so a
- * fresh listing remounts it holding the committed value. */
+/** Opacity with commit-on-release — dragging previews the number; only
+ * releasing (pointer or keyboard) commits, so one drag is ONE undoable engine
+ * op, not thirty. The parent holds the previewed value. */
 function OpacitySlider({
   seed,
+  value,
+  onValue,
   disabled,
   onCommit,
 }: {
   seed: number;
+  value: number;
+  onValue: (value: number) => void;
   disabled: boolean;
   onCommit: (value: number) => void;
 }): React.JSX.Element {
   useTranslation();
-  const [value, setValue] = useState(Math.round(seed * 100));
   const commit = (): void => {
     const v = value / 100;
     // Sub-percent wiggle back to the seed is a no-op, not an engine call.
@@ -1336,7 +1460,7 @@ function OpacitySlider({
         step={1}
         value={value}
         disabled={disabled}
-        onChange={(e) => setValue(Number(e.target.value))}
+        onChange={(e) => onValue(Number(e.target.value))}
         onPointerUp={commit}
         onKeyUp={(e) => {
           if (commitKeys.has(e.key)) commit();

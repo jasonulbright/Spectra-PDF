@@ -3786,7 +3786,7 @@ input:not([type]) {
      every entry into and exit from that tool — the document jumping is the
      defect, not the taller button. The floor sizes the strip for the tallest
      control it can hold, so no tool changes it. */
-  min-height: 34px;
+  min-height: 36px;
   box-sizing: border-box;
   border-bottom: 1px solid #2e2e2e;
   background: #1f1f1f;
@@ -3794,33 +3794,70 @@ input:not([type]) {
   /* The symbol palette hangs off this strip. */
   position: relative;
 }
+/* The Edit strip is one row at every width. SecondaryToolbar measures the
+   row and moves the controls that do not fit into the overflow menu, so a
+   selection never changes the strip's height or the page's position. The
+   title and the status line are the only parts that shrink. */
 .secondary-toolbar[data-tool="edit"] {
   height: 36px;
-  min-height: 36px;
-  max-height: 36px;
   flex-wrap: nowrap;
 }
 .secondary-toolbar[data-tool="edit"] .secondary-toolbar-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 0 0 auto;
 }
-.secondary-toolbar[data-tool="edit"] .secondary-toolbar-modes {
+.secondary-toolbar[data-tool="edit"] .secondary-toolbar-actions {
+  flex: 0 0 auto;
   flex-wrap: nowrap;
-  flex: 0 0 auto;
 }
+.edit-strip-inline {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+/* An item box has the same width inline and in the menu: the overflow split
+   reads widths from whichever place the item is in. */
+.edit-strip-item {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.edit-strip-status {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Static, so the menu anchors to the strip rather than to the toggle. */
 .secondary-toolbar-edit-menu {
   position: static;
   flex: 0 0 auto;
 }
-.secondary-toolbar-edit-toggle {
-  flex: 0 0 auto;
+/* An idle toggle keeps its slot so the split never depends on whether the
+   menu has content. */
+.secondary-toolbar-edit-toggle.is-idle {
+  visibility: hidden;
 }
+/* Always laid out, so the items in it keep a measurable width; hidden and
+   inert until opened. */
 .secondary-toolbar-edit-popover {
   position: absolute;
   z-index: 30;
   inset-block-start: calc(100% + 5px);
   inset-inline-end: 8px;
-  inline-size: min(640px, calc(100% - 16px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  inline-size: max-content;
+  max-inline-size: calc(100% - 16px);
   max-block-size: min(70vh, 520px);
   overflow: auto;
   box-sizing: border-box;
@@ -3829,10 +3866,12 @@ input:not([type]) {
   border-radius: 6px;
   background: #1f1f1f;
   box-shadow: 0 8px 24px #0008;
+  visibility: hidden;
+  pointer-events: none;
 }
-.secondary-toolbar-edit-popover.secondary-toolbar-edit-options {
-  max-inline-size: none;
-  flex-wrap: wrap;
+.secondary-toolbar-edit-popover.is-open {
+  visibility: visible;
+  pointer-events: auto;
 }
 [data-theme="light"] .secondary-toolbar-edit-popover {
   border-color: #d1d5db;

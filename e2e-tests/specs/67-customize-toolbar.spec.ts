@@ -46,7 +46,12 @@ describe('customize toolbar', () => {
       async () => (await $('[data-testid="tool-edit"]').getAttribute('aria-pressed')) === 'true',
       { timeout: 5_000, timeoutMsg: 'the optional Edit button did not open Edit mode' },
     );
+    expect(await editButton.getAttribute('aria-pressed')).toBe('true');
     expect(await invokeAppCommand('tools.close')).toBe(true);
+    await browser.waitUntil(
+      async () => (await editButton.getAttribute('aria-pressed')) === 'false',
+      { timeout: 5_000, timeoutMsg: 'the Edit button stayed pressed after Edit closed' },
+    );
 
     // Leave the dialog open for the reset case below.
     expect(await invokeAppCommand('view.customizeToolbar')).toBe(true);
