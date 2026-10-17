@@ -401,6 +401,81 @@ pub const FIXED_CONSTANTS: [&str; 3] = [
     "org.audiveris.omr.sheet.BookManager.useOpus=false",
 ];
 
+/// Why a launcher file cannot be a Windows program, read from its header
+/// without starting it. Windows starts a file named `.exe` that lacks a PE
+/// image as a DOS program and shows a modal system error for it.
+#[cfg(windows)]
+fn image_refusal(launcher: &Launcher) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Launcher::Exe(path) = launcher else {
+        return None;
+    };
+    let refusal = || Some(format!("{} is not a Windows program", path.display()));
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return None;
+    };
+    let mut dos = [0u8; 0x40];
+    if file.read_exact(&mut dos).is_err() || &dos[..2] != b"MZ" {
+        return refusal();
+    }
+    let offset = u32::from_le_bytes([dos[0x3C], dos[0x3D], dos[0x3E], dos[0x3F]]);
+    let mut signature = [0u8; 4];
+    if file.seek(SeekFrom::Start(u64::from(offset))).is_err()
+        || file.read_exact(&mut signature).is_err()
+        || &signature != b"PE\0\0"
+    {
+        return refusal();
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn image_refusal(_launcher: &Launcher) -> Option<String> {
+    None
+}
+
+/// Sets the calling thread's error mode to fail critical errors for its
+/// lifetime. A process creation that Windows refuses with a hard error (a
+/// file whose header is valid but whose image cannot run here) otherwise
+/// shows a modal system dialog. The thread mode leaves other threads alone.
+struct QuietHardErrors {
+    #[cfg(windows)]
+    previous: Option<u32>,
+    _thread_bound: std::marker::PhantomData<*const ()>,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn SetThreadErrorMode(new_mode: u32, old_mode: *mut u32) -> i32;
+}
+
+impl QuietHardErrors {
+    fn new() -> Self {
+        #[cfg(windows)]
+        {
+            const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+            let mut previous = 0u32;
+            // SAFETY: both arguments are valid; the call touches only this thread's mode.
+            let set = unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut previous) } != 0;
+            Self { previous: set.then_some(previous), _thread_bound: std::marker::PhantomData }
+        }
+        #[cfg(not(windows))]
+        Self { _thread_bound: std::marker::PhantomData }
+    }
+}
+
+impl Drop for QuietHardErrors {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Some(previous) = self.previous {
+            let mut ignored = 0u32;
+            // SAFETY: restores the mode this guard replaced; the guard cannot leave its thread.
+            unsafe { SetThreadErrorMode(previous, &mut ignored) };
+        }
+    }
+}
+
 fn smoke(launcher: &Launcher, budget: Duration) -> Result<(), String> {
     let dir = probe_dir(launcher).map_err(|e| format!("cannot create a probe folder: {e}"))?;
     let input = dir.path().join("probe.png");
@@ -414,7 +489,10 @@ fn smoke(launcher: &Launcher, budget: Duration) -> Result<(), String> {
         cmd.args(["-constant", constant]);
     }
     cmd.arg("--").arg(audiveris_argument(&input).unwrap_or_else(|| input.clone()));
-    let verdict = match crate::gs::output_within(cmd, budget) {
+    let quiet = QuietHardErrors::new();
+    let ran = crate::gs::output_within(cmd, budget);
+    drop(quiet);
+    let verdict = match ran {
         Err(e) => Err(e.to_string()),
         Ok(out) if !out.status.success() => Err(format!(
             "the probe recognition ended with status {}",
@@ -450,9 +528,16 @@ fn probe_with_budget(launcher: &Launcher, budget: Duration) -> AudiverisStatus {
     if let Some(hit) = cached(&key) {
         return with_languages(hit, launcher);
     }
-    let mut version = launcher.command(None);
-    version.arg("-version");
-    let status = match crate::gs::output_within(version, budget.min(VERSION_BUDGET)) {
+    let queried = match image_refusal(launcher) {
+        Some(refusal) => Err(std::io::Error::other(refusal)),
+        None => {
+            let mut version = launcher.command(None);
+            version.arg("-version");
+            let _quiet = QuietHardErrors::new();
+            crate::gs::output_within(version, budget.min(VERSION_BUDGET))
+        }
+    };
+    let status = match queried {
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
             AudiverisStatus::unavailable(launcher, PROBE_FAILED, &e.to_string())
         }
@@ -1205,7 +1290,10 @@ pub async fn audiveris_open_project(window: tauri::WebviewWindow, project_id: St
         let mut cmd = launcher.command(project.parent());
         cmd.arg("--").arg(&argument);
         cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+        let quiet = QuietHardErrors::new();
+        let spawned = cmd.spawn();
+        drop(quiet);
+        let mut child = spawned.map_err(|e| e.to_string())?;
         std::thread::spawn(move || {
             let _ = child.wait();
         });
@@ -1616,6 +1704,43 @@ mod tests {
         let full = probe_with_budget(&launcher, RESOLUTION_BUDGET);
         assert_eq!(full.kind, NOT_EXECUTABLE, "{full:?}");
         assert_eq!(cached(&key).map(|status| status.kind), Some(NOT_EXECUTABLE.to_string()));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_file_without_a_pe_image_is_not_executable_without_a_spawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut dos_only = vec![0u8; 0x80];
+        dos_only[..2].copy_from_slice(b"MZ");
+        dos_only[0x3C] = 0x40;
+        for (name, bytes) in [
+            ("Short.exe", b"not a program".to_vec()),
+            ("Empty.exe", Vec::new()),
+            ("DosOnly.exe", dos_only),
+        ] {
+            let fake = dir.path().join(name);
+            std::fs::write(&fake, &bytes).unwrap();
+            let launcher = Launcher::Exe(fake.clone());
+            let refusal = image_refusal(&launcher).expect(name);
+            let status = probe_with_budget(&launcher, Duration::from_secs(5));
+            assert_eq!(status.kind, NOT_EXECUTABLE, "{status:?}");
+            assert_eq!(status.detail.as_deref(), Some(refusal.as_str()), "{status:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_pe_image_header_is_not_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut image = vec![0u8; 0x100];
+        image[..2].copy_from_slice(b"MZ");
+        image[0x3C] = 0x80;
+        image[0x80..0x84].copy_from_slice(b"PE\0\0");
+        let fake = dir.path().join("Header.exe");
+        std::fs::write(&fake, &image).unwrap();
+        assert_eq!(image_refusal(&Launcher::Exe(fake)), None);
+        let own = std::env::current_exe().unwrap();
+        assert_eq!(image_refusal(&Launcher::Exe(own)), None);
     }
 
     /// The present axis: an Audiveris on this machine must probe ready. A
