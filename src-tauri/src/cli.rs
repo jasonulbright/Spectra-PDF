@@ -103,6 +103,16 @@ pub fn classify_launch(args: &[String]) -> LaunchMode {
     LaunchMode::Parse
 }
 
+/// Whether the caller of this launch reads its output and exit status: a
+/// subcommand, `--help`, `--version` or a usage error. A window launch and a
+/// start with no subcommand open the GUI, and nothing waits on them.
+pub fn is_command_line_run(args: &[String]) -> bool {
+    if classify_launch(args) == LaunchMode::Gui {
+        return false;
+    }
+    !matches!(Cli::try_parse_from(args), Ok(cli) if cli.command.is_none())
+}
+
 #[derive(Subcommand)]
 pub enum CliCommand {
     /// Compress a PDF using Ghostscript
@@ -7160,6 +7170,21 @@ mod tests {
     fn classify(args: &[&str]) -> LaunchMode {
         let owned: Vec<String> = args.iter().map(|a| a.to_string()).collect();
         classify_launch(&owned)
+    }
+
+    #[test]
+    fn only_a_subcommand_help_version_or_usage_error_is_a_command_line_run() {
+        let run = |args: &[&str]| {
+            is_command_line_run(&args.iter().map(|a| a.to_string()).collect::<Vec<_>>())
+        };
+        assert!(run(&["spectrapdf.exe", "compress", "in.pdf", "-o", "out.pdf"]));
+        assert!(run(&["spectrapdf.exe", "--help"]));
+        assert!(run(&["spectrapdf.exe", "--version"]));
+        assert!(run(&["spectrapdf.exe", "--no-such-flag"]));
+        assert!(!run(&["spectrapdf.exe"]));
+        assert!(!run(&["spectrapdf.exe", "--minimized"]));
+        assert!(!run(&["spectrapdf.exe", r"C:\docs\file.pdf"]));
+        assert!(!run(&["spectrapdf.exe", "--merge", "a.pdf", "b.pdf"]));
     }
 
     #[test]

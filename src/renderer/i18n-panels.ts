@@ -2782,9 +2782,13 @@ export const PANEL_STRINGS = {
   'panel.settings.fieldScriptsPolicy':
     'Turned off for this machine by policy — this setting has no effect.',
   'panel.settings.updates': 'Updates',
-  'panel.settings.checkOnLaunch': 'Check for updates on launch',
+  'panel.settings.checkOnLaunch': 'Check for updates automatically',
+  'panel.settings.applyAutomatically': 'Install updates automatically',
   'panel.settings.updatesHint':
-    'Spectra PDF never installs updates itself. When a newer release exists it shows a notice, and opening it takes you to the download page. You can always check manually with Help ▸ Check for Updates.',
+    'Spectra PDF downloads and verifies a new release in the background and installs it when you exit. With automatic install off, nothing downloads until you choose Install update. You can always check manually with Help ▸ Check for Updates.',
+  'panel.settings.updatesPolicy': 'Turned off for this machine by policy — these settings have no effect.',
+  'panel.settings.updatesNotifyOnly':
+    'This copy cannot install updates itself. When a newer release exists it shows a notice that opens the download page.',
   'panel.settings.thirdParty': 'Third-party components',
   'panel.settings.licensesP2':
     'Also bundled or embedded: Python (PSF license) with pikepdf (MPL-2.0), pdfminer.six (MIT), and pyHanko (MIT) among its packages; pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — the bundled OCR engine, also run strictly as a separate program — and its language models (Apache-2.0), with the redistribution notices for every library it links installed beside it; Ghostscript, also run strictly as a separate program; the Liberation and Libertinus fonts (SIL OFL 1.1); Tauri and the compiled Rust crates (MIT/Apache-2.0 and similar).',

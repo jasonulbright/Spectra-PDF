@@ -953,6 +953,229 @@ async fn fetch_into(
     }
 }
 
+// ── Release downloads ────────────────────────────────────────────────────
+
+/// The exact origins a release request may reach. A redirect to any other
+/// origin is refused, so the compiled-in release host and its asset CDN are
+/// the only places a release byte can come from.
+#[derive(Debug, Clone)]
+pub struct ReleaseOrigins {
+    /// `(scheme, canonical authority)` pairs, lowercased.
+    pub origins: Vec<(String, String)>,
+    /// Allows a non-global address. Only the local update test sets it.
+    pub allow_private: bool,
+}
+
+impl ReleaseOrigins {
+    fn admits(&self, scheme: &str, authority: &str) -> bool {
+        let key = canonical_authority(authority, scheme);
+        self.origins
+            .iter()
+            .any(|(s, a)| s == scheme && canonical_authority(a, s) == key)
+    }
+}
+
+/// Why a release request failed. `Network` is the transport or the server;
+/// `Disk` is the local file; `Refused` is this module's own policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseFailure {
+    Network,
+    Disk,
+    Refused,
+}
+
+pub type ReleaseResult<T> = Result<T, (ReleaseFailure, String)>;
+
+const RELEASE_IDLE_SECS: u64 = 60;
+
+/// One GET over the release origins, following redirects inside them, that
+/// hands every body chunk to `sink` as it arrives. Returns the declared length
+/// (when the server sent one) to `on_start` before the first chunk.
+async fn release_get<S>(
+    url: &str,
+    origins: &ReleaseOrigins,
+    cap: u64,
+    total_limit: Option<Duration>,
+    mut on_start: impl FnMut(Option<u64>) -> ReleaseResult<()>,
+    mut sink: S,
+) -> ReleaseResult<u64>
+where
+    S: FnMut(&[u8]) -> ReleaseResult<()>,
+{
+    let refused = |m: String| (ReleaseFailure::Refused, m);
+    let network = |m: String| (ReleaseFailure::Network, m);
+    let deadline = total_limit.map(|limit| Instant::now() + limit);
+    let mut current = url.to_string();
+    let mut hops = 0u32;
+    loop {
+        let (_, scheme, authority) = validate_http_url(&current).map_err(refused)?;
+        if !origins.admits(&scheme, &authority) {
+            return Err(refused(format!("{authority} is not a release origin")));
+        }
+        let (host, port) = split_host_port(&authority, &scheme);
+        let lookup_limit = deadline
+            .map(|d| d.saturating_duration_since(Instant::now()))
+            .unwrap_or(Duration::from_secs(CONNECT_TIMEOUT_SECS));
+        if lookup_limit.is_zero() {
+            return Err(network(format!("The request to {authority} timed out")));
+        }
+        let addrs = resolve_host(&host, port, lookup_limit).await.map_err(network)?;
+        if !origins.allow_private {
+            if let Some(addr) = addrs.iter().find(|a| !classify_ip(a.ip()).is_global()) {
+                return Err(refused(format!(
+                    "{host} resolved to a {} address ({})",
+                    classify_ip(addr.ip()).label(),
+                    addr.ip()
+                )));
+            }
+        }
+        let mut builder = reqwest::Client::builder()
+            .user_agent(user_agent())
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(&host, &addrs)
+            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .read_timeout(Duration::from_secs(RELEASE_IDLE_SECS));
+        if let Some(deadline) = deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(network(format!("The request to {authority} timed out")));
+            }
+            builder = builder.timeout(remaining);
+        }
+        let client = builder
+            .build()
+            .map_err(|e| network(format!("Cannot start the network client: {e}")))?;
+        let response = client
+            .get(&current)
+            .header(reqwest::header::ACCEPT, "application/octet-stream, application/json")
+            .send()
+            .await
+            .map_err(|e| network(format!("The request to {authority} did not complete: {e}")))?;
+        let status = response.status().as_u16();
+        if is_redirect(status) {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            current = resolve_location(&current, &location).map_err(refused)?;
+            hops += 1;
+            if hops > MAX_REDIRECTS {
+                return Err(network(format!("{authority} redirected too many times")));
+            }
+            continue;
+        }
+        if status != 200 {
+            return Err(network(format!("{authority} answered {status}")));
+        }
+        let declared = response.content_length();
+        if declared.is_some_and(|length| length > cap) {
+            return Err(refused(format!(
+                "{authority} offered {} bytes, more than the {cap} accepted",
+                declared.unwrap_or(0)
+            )));
+        }
+        on_start(declared)?;
+        let mut received = 0u64;
+        let mut source = response;
+        loop {
+            let chunk = source
+                .chunk()
+                .await
+                .map_err(|e| network(format!("The download from {authority} was cut short: {e}")))?;
+            let Some(chunk) = chunk else { break };
+            received += chunk.len() as u64;
+            if received > cap {
+                return Err(refused(format!(
+                    "{authority} sent more than the {cap} bytes accepted"
+                )));
+            }
+            sink(&chunk)?;
+        }
+        if declared.is_some_and(|length| length != received) {
+            return Err(network(format!(
+                "{authority} declared {} bytes and sent {received}",
+                declared.unwrap_or(0)
+            )));
+        }
+        return Ok(received);
+    }
+}
+
+/// A small release document (the update manifest) read into memory.
+pub async fn fetch_release_bytes(
+    url: &str,
+    origins: &ReleaseOrigins,
+    cap: u64,
+) -> ReleaseResult<Vec<u8>> {
+    let mut body = Vec::new();
+    release_get(
+        url,
+        origins,
+        cap,
+        Some(Duration::from_secs(TOTAL_TIMEOUT_SECS.min(60))),
+        |_| Ok(()),
+        |chunk| {
+            body.extend_from_slice(chunk);
+            Ok(())
+        },
+    )
+    .await?;
+    Ok(body)
+}
+
+/// A release asset streamed to `path`, which must not exist. Memory holds one
+/// transport chunk at a time. `admit` sees the declared length before the
+/// first byte is written and may refuse it; `progress` receives
+/// `(received, declared)`. The file is removed on every failure.
+pub async fn fetch_release_file(
+    url: &str,
+    origins: &ReleaseOrigins,
+    path: &Path,
+    cap: u64,
+    admit: impl FnOnce(Option<u64>) -> Result<(), String>,
+    mut progress: impl FnMut(u64, Option<u64>),
+) -> ReleaseResult<u64> {
+    let disk = |e: std::io::Error| (ReleaseFailure::Disk, format!("Cannot write {}: {e}", path.display()));
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(disk)?;
+    let mut writer = std::io::BufWriter::with_capacity(1024 * 1024, file);
+    let declared = std::cell::Cell::new(None);
+    let mut admit = Some(admit);
+    let mut received = 0u64;
+    let outcome = release_get(
+        url,
+        origins,
+        cap,
+        None,
+        |length| {
+            declared.set(length);
+            admit.take().map_or(Ok(()), |admit| admit(length)).map_err(|m| (ReleaseFailure::Disk, m))
+        },
+        |chunk| {
+            writer.write_all(chunk).map_err(disk)?;
+            received += chunk.len() as u64;
+            progress(received, declared.get());
+            Ok(())
+        },
+    )
+    .await;
+    let finished = outcome.and_then(|count| {
+        let file = writer.into_inner().map_err(|e| disk(e.into_error()))?;
+        file.sync_all().map_err(disk)?;
+        Ok(count)
+    });
+    if finished.is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    finished
+}
+
 /// The renderer's single door to the network.
 ///
 /// One command, both callers: the form-submission transmit posts a built

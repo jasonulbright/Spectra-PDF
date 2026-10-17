@@ -44,6 +44,12 @@ webdriver = ["tauri-plugin-webdriver"]
 # e2e-tests/wdio.conf.ts and the CI e2e job); nothing else does.
 e2e-net-private = []
 
+# The local update test: the release base URL and the signing public key come
+# from SPECTRA_UPDATE_TEST_BASE and SPECTRA_UPDATE_TEST_PUBKEY. Without the
+# feature both are compiled-in constants and no code path reads either
+# variable. Never enabled in a release build.
+update-test-source = []
+
 [dependencies]
 base64 = "0.22"
 sha2 = "0.10"
@@ -53,11 +59,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zeroize = "1.8"
-tokio = { version = "1", features = ["sync", "io-util", "fs", "net", "time"] }
+tokio = { version = "1", features = ["sync", "io-util", "fs", "net", "time", "rt"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 # Windows-safe fs::canonicalize (strips the \\?\ verbatim prefix): file
@@ -72,12 +77,10 @@ dunce = "1"
 # rejected: more unsafe code to get wrong than this zero-frills crate.
 same-file = "1"
 # Inflates the compressed MusicXML the Audiveris capability probe produces.
-# Already in the graph through the updater.
 flate2 = "1"
 clap = { version = "4", features = ["derive"] }
-# The app's one outbound HTTP client (`src/net.rs`). Already in the graph
-# because the updater plugin uses it; named directly so there is exactly one
-# client and one place the network posture is set. The `cookies` feature is
+# The app's one outbound HTTP client (`src/net.rs`), named directly so there
+# is exactly one client and one place the network posture is set. The `cookies` feature is
 # deliberately NOT enabled: with no jar in the build there is no ambient
 # credential for a request to pick up.
 #
@@ -91,12 +94,17 @@ tokio-util = { version = "0.7", features = ["io"] }
 # Already in the graph under reqwest; named directly because net.rs resolves a
 # `Location` with `Url::join` rather than by hand.
 url = "2"
+# Streaming verification of signed release artifacts (pre-hashed minisign).
+minisign-verify = "0.3"
+# Extraction of the portable release archive. Stored and deflate are the only
+# methods the release archive writer uses.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 window-vibrancy = "0.8"
 windows-version = "0.1"
-windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_TaskScheduler", "Win32_Devices_ImageAcquisition", "Win32_UI_Shell", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_System_Shutdown", "Win32_Storage_Packaging_Appx", "Management_Deployment", "ApplicationModel", "Foundation", "Foundation_Collections"] }
+windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Registry", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_TaskScheduler", "Win32_Devices_ImageAcquisition", "Win32_UI_Shell", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_System_Shutdown", "Win32_Storage_Packaging_Appx", "Management_Deployment", "ApplicationModel", "Foundation", "Foundation_Collections"] }
 # The async and collection types the `windows` package-deployment bindings
 # return, at the versions `windows` 0.62 itself resolves: `join()` and the
 # `IIterable` parameter type are named from these crates, not re-exported.

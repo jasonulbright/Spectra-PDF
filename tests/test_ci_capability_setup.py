@@ -231,6 +231,14 @@ TOKEN_CACHE_STEP = "Cache a signing-service token"
 #: resource, not this one, so a token for it is minted explicitly.
 SIGNING_TOKEN_SCOPE = "https://codesigning.azure.net/.default"
 SIGNING_ENVIRONMENT = "release"
+#: The portable zip's updater signature: signed after the zip is final,
+#: verified at once, carried into latest.json, and verified again from the
+#: draft's bytes by the draft verifier.
+PORTABLE_UPDATER_SIGN_STEP = "Sign the portable zip for the updater"
+PORTABLE_UPDATER_VERIFY_STEP = "Verify the portable zip's updater signature"
+PORTABLE_UPDATER_ENTRY_STEP = "Upload latest.json with the portable updater entry"
+PORTABLE_UPDATER_ENTRY_SCRIPT = "scripts/add-portable-updater-entry.ps1"
+MINISIGN_VERIFIER = "scripts/verify_minisign.py"
 
 #: Every gate that runs against the built and uploaded assets, in the order
 #: the job runs them. All of them precede the publish step. The redo carries
@@ -240,6 +248,7 @@ RELEASE_VERIFICATION_STEPS = {
         "Verify the portable tree against the installer's staging",
         "Portable payload notice map covers every declared resource",
         SIGNATURE_GATE_STEP,
+        PORTABLE_UPDATER_VERIFY_STEP,
         "Engine payload manifest is current",
         "Engine payload matches its manifest",
         "Shipped renderer carries no test harness",
@@ -249,6 +258,7 @@ RELEASE_VERIFICATION_STEPS = {
         "Verify the portable tree against the installer's staging",
         "Portable payload notice map covers every declared resource",
         SIGNATURE_GATE_STEP,
+        PORTABLE_UPDATER_VERIFY_STEP,
         "Engine payload manifest is current",
         "Engine payload matches its manifest",
         REDO_LEGACY_ENGINE_STEP,
@@ -355,6 +365,43 @@ def test_the_publish_step_is_last_and_every_verification_precedes_it(
     assert DRAFT_VERIFIER in text and "-ReleaseId $env:RELEASE_ID" in text
 
 
+@pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
+def test_every_publisher_signs_and_carries_the_portable_updater_entry(
+    workflow: str, job: str
+) -> None:
+    """The portable zip is signed after its Authenticode gate, its signature
+    is checked against the shipped key before any upload, the entry is added
+    after the Linux entry, and the draft verifier expects it."""
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    text = dict(steps)
+    prefix = "verifier/" if workflow == "release-redo.yml" else ""
+    sign = names.index(PORTABLE_UPDATER_SIGN_STEP)
+    verify = names.index(PORTABLE_UPDATER_VERIFY_STEP)
+    entry = names.index(PORTABLE_UPDATER_ENTRY_STEP)
+    assert names.index(SIGNATURE_GATE_STEP) < sign < verify
+    assert verify < names.index("Upload the portable zip to the draft")
+    assert names.index("Upload latest.json with the Linux updater entry") < entry
+    assert entry < names.index(RELEASE_VERIFY_DRAFT_STEP)
+    assert "secrets.TAURI_SIGNING_PRIVATE_KEY" in text[PORTABLE_UPDATER_SIGN_STEP]
+    assert "npx tauri signer sign --password= " in text[PORTABLE_UPDATER_SIGN_STEP]
+    assert "TAURI_SIGNING_PRIVATE_KEY_PASSWORD" not in text[PORTABLE_UPDATER_SIGN_STEP]
+    assert f"python -I {prefix}{MINISIGN_VERIFIER} --public-key-from-conf src-tauri/tauri.conf.json" in text[PORTABLE_UPDATER_VERIFY_STEP]
+    assert "--expect-file $zips[0].Name" in text[PORTABLE_UPDATER_VERIFY_STEP]
+    assert f"-File {prefix}{PORTABLE_UPDATER_ENTRY_SCRIPT} " in text[PORTABLE_UPDATER_ENTRY_STEP]
+    assert "if:" not in text[PORTABLE_UPDATER_ENTRY_STEP]
+    assert " -ExpectPortableEntry " in text[RELEASE_VERIFY_DRAFT_STEP]
+    # The .sig never becomes a release asset.
+    for name, body in steps:
+        if name.startswith("Upload ") and name != PORTABLE_UPDATER_ENTRY_STEP:
+            assert ".zip.sig" not in body, (workflow, name)
+
+
+def test_the_updater_key_gate_is_mirrored_locally() -> None:
+    text = (ROOT / "scripts" / "ci-parity-gates.sh").read_text(encoding="utf-8")
+    assert f"{MINISIGN_VERIFIER} --public-key-from-conf src-tauri/tauri.conf.json --key-only" in text
+
+
 def test_the_draft_verifier_hashes_the_bytes_github_holds() -> None:
     text = (ROOT / DRAFT_VERIFIER).read_text(encoding="utf-8")
     assert "is already public before verification" in text
@@ -386,11 +433,12 @@ VERIFIER_TEST_IGNORE = f"src-tauri/tests/{VERIFIER_TEST_PREFIX}*"
 
 
 def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer() -> None:
-    """The manifest's final reader is the pinned plugin's `RemoteRelease`.
+    """The manifest's final reader applies the rules of the updater plugin
+    that every copy released before automatic updates reads it with.
 
-    The script's own checks are re-implementations and can only ever agree
-    with the plugin by accident; the parse that decides whether every
-    installed copy can read the release is the plugin's, so the gate runs it.
+    The verifier stages this source into the package of whichever tag it
+    verifies, including tags whose graph holds no updater plugin, so the
+    source names no crate beyond the standard library and `serde_json`.
     """
     text = (ROOT / DRAFT_VERIFIER).read_text(encoding="utf-8")
     assert '"test", "--manifest-path", $packageManifest, "--test", $verifierTest' in text
@@ -399,8 +447,11 @@ def test_the_draft_verifier_parses_the_manifest_with_the_updaters_deserializer()
     assert '$verifierFunction = "verifies_the_manifest_named_by_the_environment"' in text
     assert '"--test", $verifierTest, "--",\n        "--exact", $verifierFunction, "--test-threads=1"' in text
     rust = (ROOT / UPDATER_MANIFEST_TEST).read_text(encoding="utf-8")
-    assert "use tauri_plugin_updater::{RemoteRelease, RemoteReleaseInner};" in rust
+    assert "tauri_plugin_updater" not in rust
+    uses = re.findall(r"^use ([A-Za-z_][A-Za-z0-9_]*)::", rust, re.M)
+    assert uses and set(uses) <= {"std", "serde_json"}, uses
     assert "serde_json::from_str(manifest)" in rust
+    assert "the updater's deserializer refuses latest.json" in rust
     for env_var in (
         "SPECTRAPDF_UPDATER_MANIFEST", "SPECTRAPDF_UPDATER_VERSION",
         "SPECTRAPDF_UPDATER_NOTES_FILE", "SPECTRAPDF_UPDATER_PLATFORMS",
@@ -3183,6 +3234,7 @@ RETRY_ROUTED_PS = (
     "install-signing-tools.ps1",
     "verify-release-draft.ps1",
     "add-linux-updater-entry.ps1",
+    "add-portable-updater-entry.ps1",
     "bundle-ghostscript.ps1",
 )
 RETRY_ROUTED_PY = (

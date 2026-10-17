@@ -1,7 +1,7 @@
 // app-settings persistence, with the update preference as the case that
 // matters. Uses a localStorage stub since vitest runs in node.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clampViewZoomPercent, commitViewZoomPercentDraft, loadSettings, saveSettings, DEFAULTS } from '../src/renderer/lib/app-settings';
+import { clampViewZoomPercent, commitViewZoomPercentDraft, loadSettings, saveSettings, updatePrefsOf, DEFAULTS } from '../src/renderer/lib/app-settings';
 
 const store = new Map<string, string>();
 beforeEach(() => {
@@ -15,11 +15,17 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('app settings', () => {
-  it('checks for updates on launch by default', () => {
-    // Notify-only, so ON is the safe default: it can surface a release but
-    // can never install one.
+  it('checks for and applies updates automatically by default', () => {
     expect(DEFAULTS.checkUpdatesOnLaunch).toBe(true);
+    expect(DEFAULTS.applyUpdatesAutomatically).toBe(true);
     expect(loadSettings().checkUpdatesOnLaunch).toBe(true);
+    expect(loadSettings().applyUpdatesAutomatically).toBe(true);
+    expect(updatePrefsOf(loadSettings())).toEqual({ checkOnLaunch: true, applyAutomatically: true });
+  });
+
+  it('turns an update preference off only for a stored false', () => {
+    store.set('spectra-settings', JSON.stringify({ checkUpdatesOnLaunch: 'false', applyUpdatesAutomatically: false }));
+    expect(updatePrefsOf(loadSettings())).toEqual({ checkOnLaunch: true, applyAutomatically: false });
   });
 
   it('gives an EXISTING install the default rather than a silent off', () => {
@@ -34,12 +40,14 @@ describe('app settings', () => {
     );
     const s = loadSettings();
     expect(s.checkUpdatesOnLaunch).toBe(true);
+    expect(s.applyUpdatesAutomatically).toBe(true);
     expect(s.theme).toBe('dark'); // ...without discarding what they HAD set
   });
 
   it('round-trips an explicit opt-out', () => {
-    saveSettings({ ...DEFAULTS, checkUpdatesOnLaunch: false });
+    saveSettings({ ...DEFAULTS, checkUpdatesOnLaunch: false, applyUpdatesAutomatically: false });
     expect(loadSettings().checkUpdatesOnLaunch).toBe(false);
+    expect(loadSettings().applyUpdatesAutomatically).toBe(false);
   });
 
   it('does not reopen the last session unless asked', () => {
