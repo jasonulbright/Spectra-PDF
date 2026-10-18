@@ -387,6 +387,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Patró no vàlid",
   "canvas.find.makeSearchable": "Fes-ho cercable",
+  "canvas.find.moveBar": "Mou la barra de cerca",
+  "canvas.find.moveBarHint": "Arrossegueu per moure la barra de cerca. Les tecles de fletxa també la mouen. Feu doble clic o premeu Inici per tornar-la al seu lloc.",
   "canvas.find.saveAfterOcrTitle": "Desa el document amb el text reconegut",
   "canvas.find.saveAll": "Desa-ho tot",
   "canvas.find.saveAllAfterOcrTitle": "Desa tots els documents que han rebut text reconegut",

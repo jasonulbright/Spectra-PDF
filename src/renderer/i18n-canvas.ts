@@ -297,6 +297,9 @@ export const CANVAS_STRINGS = {
   'canvas.find.textCopied': 'Text copied',
   'canvas.find.copyTextFailed': 'The text could not be copied: {{message}}',
   'canvas.find.close': 'Close (Esc)',
+  'canvas.find.moveBar': 'Move the find bar',
+  'canvas.find.moveBarHint':
+    'Drag to move the find bar. The arrow keys also move it. Double-click or press Home to put it back.',
 
   // ── Read Out Loud ────────────────────────────────────────────────────
   // The transport bar. `×` in the speed values is notation — the same

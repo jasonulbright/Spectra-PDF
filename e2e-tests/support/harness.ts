@@ -227,6 +227,19 @@ export async function focusTab(tab: FocusedTab): Promise<void> {
   );
 }
 
+/** Give the session's window system focus and wait until its document has
+ * it. A pixel check of a focused state reads the window, not the field: with
+ * another application in front, `:focus` does not match. */
+export async function focusThisWindow(): Promise<void> {
+  await browser.waitUntil(async () => {
+    if (await browser.execute(() => document.hasFocus())) return true;
+    await browser.executeAsync<null, []>(function (done) {
+      (window as any).__SPECTRA_TEST__.focusThisWindow().then(() => done(null), () => done(null));
+    });
+    return await browser.execute(() => document.hasFocus());
+  }, { timeout: 10_000, interval: 500, timeoutMsg: 'the window never took system focus' });
+}
+
 /** Invoke a registered command via the harness (the menus/toolbar entry
  * point). Returns the enablement verdict. */
 export async function invokeAppCommand(id: string): Promise<boolean> {

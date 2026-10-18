@@ -164,6 +164,7 @@ import { useFind } from '../../search/useFind';
 import { normalizeQuery, highlightWords } from '../../search/normalize';
 import type { SearchOptions } from '../../search/normalize';
 import { FindBar } from './FindBar';
+import type { FloatOffset } from '../../lib/float-offset';
 import { DocumentView } from './DocumentView';
 import { applyOcrPayloads, buildOcrApplyPayload } from '../../lib/ocr-apply';
 import type { OcrApplyPage } from '../../lib/ocr-apply';
@@ -1538,6 +1539,9 @@ export function WorkspaceCanvasView({
     [activeCanvasHandle, dispatch],
   );
   const find = useFind(searchIndex.search, searchIndex.version, docs, jumpToPage);
+  // Where the user moved the find bar; it outlives a close and reopen of the
+  // bar for as long as this workspace view lives.
+  const [findBarOffset, setFindBarOffset] = useState<FloatOffset | null>(null);
   const [applyingOcr, setApplyingOcr] = useState(false);
   const [ocrApplyError, setOcrApplyError] = useState<string | null>(null);
   // The files the last clean "Make searchable" wrote a text layer into; the
@@ -8027,6 +8031,8 @@ export function WorkspaceCanvasView({
             setOcrTextState('idle');
             find.closeFind();
           }}
+          offset={findBarOffset}
+          onOffset={setFindBarOffset}
         />
       )}
       {reader.open && <ReadAloudBar reader={reader} />}

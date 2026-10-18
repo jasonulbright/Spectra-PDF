@@ -355,6 +355,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Invalid pattern",
   "canvas.find.makeSearchable": "Make searchable",
+  "canvas.find.moveBar": "Move the find bar",
+  "canvas.find.moveBarHint": "Drag to move the find bar. The arrow keys also move it. Double-click or press Home to put it back.",
   "canvas.find.next": "Next match page (Enter)",
   "canvas.find.noResults": "No results",
   "canvas.find.ocrLanguage": "OCR language for scanned pages",

@@ -390,6 +390,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Neveljaven vzorec",
   "canvas.find.makeSearchable": "Naredi iskljivo",
+  "canvas.find.moveBar": "Premakni vrstico za iskanje",
+  "canvas.find.moveBarHint": "Povlecite, da premaknete vrstico za iskanje. Premikajo jo tudi puščične tipke. Dvokliknite ali pritisnite Home, da jo vrnete na mesto.",
   "canvas.find.saveAfterOcrTitle": "Shrani dokument s prepoznanim besedilom",
   "canvas.find.saveAll": "Shrani vse",
   "canvas.find.saveAllAfterOcrTitle": "Shrani vsak dokument, ki je prejel prepoznano besedilo",
