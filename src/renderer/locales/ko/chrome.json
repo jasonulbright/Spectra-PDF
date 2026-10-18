@@ -381,6 +381,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "잘못된 패턴",
   "canvas.find.makeSearchable": "검색 가능하게 만들기",
+  "canvas.find.moveBar": "찾기 표시줄 이동",
+  "canvas.find.moveBarHint": "끌어서 찾기 표시줄을 이동합니다. 화살표 키로도 이동할 수 있습니다. 두 번 클릭하거나 Home 키를 누르면 원래 위치로 돌아갑니다.",
   "canvas.find.saveAfterOcrTitle": "인식된 텍스트와 함께 문서 저장",
   "canvas.find.saveAll": "모두 저장",
   "canvas.find.saveAllAfterOcrTitle": "인식된 텍스트가 추가된 모든 문서 저장",

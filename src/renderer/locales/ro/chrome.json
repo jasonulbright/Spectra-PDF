@@ -387,6 +387,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Model nevalid",
   "canvas.find.makeSearchable": "Disponibilizare pentru căutare",
+  "canvas.find.moveBar": "Mutarea barei de căutare",
+  "canvas.find.moveBarHint": "Trageți pentru a muta bara de căutare. Tastele săgeți o mută și ele. Faceți dublu clic sau apăsați Home pentru a o readuce la locul ei.",
   "canvas.find.saveAfterOcrTitle": "Salvați documentul cu textul recunoscut",
   "canvas.find.saveAll": "Salvare totală",
   "canvas.find.saveAllAfterOcrTitle": "Salvați fiecare document care a primit text recunoscut",

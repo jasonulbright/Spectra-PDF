@@ -387,6 +387,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Patrón no válido",
   "canvas.find.makeSearchable": "Hacer que se pueda buscar",
+  "canvas.find.moveBar": "Mover la barra de búsqueda",
+  "canvas.find.moveBarHint": "Arrastre para mover la barra de búsqueda. Las teclas de flecha también la mueven. Haga doble clic o pulse Inicio para devolverla a su sitio.",
   "canvas.find.saveAfterOcrTitle": "Guardar el documento con el texto reconocido",
   "canvas.find.saveAll": "Guardar todo",
   "canvas.find.saveAllAfterOcrTitle": "Guardar cada documento que recibió texto reconocido",

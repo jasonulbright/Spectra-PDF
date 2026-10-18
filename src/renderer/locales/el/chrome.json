@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Μη έγκυρο μοτίβο",
   "canvas.find.makeSearchable": "Μετατροπή σε αναζητήσιμο",
+  "canvas.find.moveBar": "Μετακίνηση της γραμμής εύρεσης",
+  "canvas.find.moveBarHint": "Σύρετε για να μετακινήσετε τη γραμμή εύρεσης. Τη μετακινούν και τα πλήκτρα βέλους. Κάντε διπλό κλικ ή πατήστε Home για να την επαναφέρετε στη θέση της.",
   "canvas.find.saveAfterOcrTitle": "Αποθήκευση του εγγράφου με το αναγνωρισμένο κείμενο",
   "canvas.find.saveAll": "Αποθήκευση όλων",
   "canvas.find.saveAllAfterOcrTitle": "Αποθήκευση κάθε εγγράφου που έλαβε αναγνωρισμένο κείμενο",

@@ -381,6 +381,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "模式无效",
   "canvas.find.makeSearchable": "使其可搜索",
+  "canvas.find.moveBar": "移动查找栏",
+  "canvas.find.moveBarHint": "拖动以移动查找栏。也可以使用箭头键移动。双击或按 Home 键可将其放回原处。",
   "canvas.find.saveAfterOcrTitle": "保存包含已识别文本的文档",
   "canvas.find.saveAll": "全部保存",
   "canvas.find.saveAllAfterOcrTitle": "保存每个已添加识别文本的文档",

@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Ogiltigt mönster",
   "canvas.find.makeSearchable": "Gör sökbar",
+  "canvas.find.moveBar": "Flytta sökfältet",
+  "canvas.find.moveBarHint": "Dra för att flytta sökfältet. Piltangenterna flyttar det också. Dubbelklicka eller tryck på Home för att flytta tillbaka det.",
   "canvas.find.saveAfterOcrTitle": "Spara dokumentet med den igenkända texten",
   "canvas.find.saveAll": "Spara alla",
   "canvas.find.saveAllAfterOcrTitle": "Spara varje dokument som har fått igenkänd text",

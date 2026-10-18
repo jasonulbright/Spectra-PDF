@@ -390,6 +390,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Неверный шаблон",
   "canvas.find.makeSearchable": "Сделать доступным для поиска",
+  "canvas.find.moveBar": "Переместить панель поиска",
+  "canvas.find.moveBarHint": "Перетащите, чтобы переместить панель поиска. Её также перемещают клавиши со стрелками. Дважды щёлкните или нажмите Home, чтобы вернуть её на место.",
   "canvas.find.saveAfterOcrTitle": "Сохранить документ с распознанным текстом",
   "canvas.find.saveAll": "Сохранить все",
   "canvas.find.saveAllAfterOcrTitle": "Сохранить каждый документ, получивший распознанный текст",

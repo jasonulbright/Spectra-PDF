@@ -42,7 +42,8 @@ export type ChromeIconId =
   | 'pause'
   | 'previous'
   | 'next'
-  | 'stop';
+  | 'stop'
+  | 'grip';
 
 const base = {
   fill: 'none',
@@ -229,6 +230,8 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
     </>
   ),
   stop: <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />,
+  // Two columns of three dots.
+  grip: <path d="M9 5.5h.01M15 5.5h.01M9 12h.01M15 12h.01M9 18.5h.01M15 18.5h.01" strokeWidth={3.5} />,
 };
 
 interface ChromeIconProps {

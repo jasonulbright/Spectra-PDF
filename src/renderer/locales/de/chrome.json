@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Ungültiges Muster",
   "canvas.find.makeSearchable": "Durchsuchbar machen",
+  "canvas.find.moveBar": "Suchleiste verschieben",
+  "canvas.find.moveBarHint": "Zum Verschieben der Suchleiste ziehen. Die Pfeiltasten verschieben sie ebenfalls. Doppelklicken oder Pos1 drücken, um sie an ihren Platz zurückzusetzen.",
   "canvas.find.saveAfterOcrTitle": "Dokument mit dem erkannten Text speichern",
   "canvas.find.saveAll": "Alle speichern",
   "canvas.find.saveAllAfterOcrTitle": "Jedes Dokument speichern, das erkannten Text erhalten hat",

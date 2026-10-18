@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Ongeldig patroon",
   "canvas.find.makeSearchable": "Doorzoekbaar maken",
+  "canvas.find.moveBar": "De zoekbalk verplaatsen",
+  "canvas.find.moveBarHint": "Sleep om de zoekbalk te verplaatsen. De pijltoetsen verplaatsen hem ook. Dubbelklik of druk op Home om hem terug te zetten.",
   "canvas.find.saveAfterOcrTitle": "Het document opslaan met de herkende tekst",
   "canvas.find.saveAll": "Alles opslaan",
   "canvas.find.saveAllAfterOcrTitle": "Elk document opslaan dat herkende tekst heeft gekregen",

@@ -387,6 +387,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Motif non valide",
   "canvas.find.makeSearchable": "Rendre interrogeable",
+  "canvas.find.moveBar": "Déplacer la barre de recherche",
+  "canvas.find.moveBarHint": "Faites glisser pour déplacer la barre de recherche. Les touches fléchées la déplacent aussi. Double-cliquez ou appuyez sur Origine pour la remettre à sa place.",
   "canvas.find.saveAfterOcrTitle": "Enregistrer le document avec le texte reconnu",
   "canvas.find.saveAll": "Tout enregistrer",
   "canvas.find.saveAllAfterOcrTitle": "Enregistrer chaque document qui a reçu du texte reconnu",

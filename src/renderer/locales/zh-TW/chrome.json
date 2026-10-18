@@ -381,6 +381,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "無效的樣式",
   "canvas.find.makeSearchable": "使其可搜尋",
+  "canvas.find.moveBar": "移動尋找列",
+  "canvas.find.moveBarHint": "拖曳以移動尋找列。也可以使用方向鍵移動。按兩下或按 Home 鍵可將其放回原處。",
   "canvas.find.saveAfterOcrTitle": "儲存包含已辨識文字的文件",
   "canvas.find.saveAll": "全部儲存",
   "canvas.find.saveAllAfterOcrTitle": "儲存每個已加入辨識文字的文件",

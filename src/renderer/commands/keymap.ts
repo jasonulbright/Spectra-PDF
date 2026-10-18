@@ -18,6 +18,7 @@ import { isDocTab, type CanvasTool } from '../state/types';
 import { getSettings } from '../lib/app-settings';
 import type { CommandContext } from './types';
 import { tChrome, type UiKey } from '../i18n';
+import { holdsNoText } from '../lib/text-controls';
 
 /** The single inline-edit guard (formerly duplicated in App.tsx and
  * WorkspaceCanvasView.tsx): keystrokes belong to a focused field. */
@@ -261,11 +262,20 @@ function suppressBrowserDefault(e: KeyLike & { preventDefault(): void }): void {
 export function dispatchKeyEvent(e: KeyboardEvent): void {
   const ctx = getCommandContext();
   if (!ctx) return;
+  // A control with no text (a checkbox, a select) takes Select All the way a
+  // button does. Where the command declines, the key still never reaches the
+  // browser: its select-all from such a control selects the whole document,
+  // every page's text and every text field around it.
+  const textlessSelectAll = holdsNoText(e.target) && resolveBinding(e)?.command === 'edit.selectAll';
+  const decline = (): void => {
+    suppressBrowserDefault(e);
+    if (textlessSelectAll) e.preventDefault();
+  };
   if (radixMenuOpen()) {
     // Radix owns navigation/typeahead/Escape — but the webview's own
     // accelerators are still OURS to refuse: F5 over an open File menu
     // reloaded the entire app (regression).
-    suppressBrowserDefault(e);
+    decline();
     return;
   }
   if (appModalCount() > 0) {
@@ -275,11 +285,11 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
     }
     const suppressed = resolveBinding(e);
     if (suppressed?.preventDefault === 'always') e.preventDefault();
-    suppressBrowserDefault(e);
+    decline();
     return;
   }
   if (radixDialogOpen()) {
-    suppressBrowserDefault(e);
+    decline();
     return;
   }
   // Space temporary hand: hold to pan, release to get your mode back. Guarded
@@ -322,7 +332,7 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   }
   const binding = resolveBinding(e);
   if (!binding) {
-    suppressBrowserDefault(e);
+    decline();
     return;
   }
   // Pref-gated bindings (the single-key accelerators) are dead until
@@ -337,10 +347,10 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   if (binding.scope === 'canvas' && !isDocTab(ctx.state.ui.focusedTab)) {
     // The key stays ours even where the binding declined it: a canvas-scoped
     // Ctrl+= on the Home tab must not zoom the WEBVIEW.
-    suppressBrowserDefault(e);
+    decline();
     return;
   }
-  if (binding.editableGuard && isEditable(e.target)) {
+  if (binding.editableGuard && isEditable(e.target) && !textlessSelectAll) {
     // The guard hands the key to the FIELD — but only field semantics:
     // Ctrl+Z/A stay native editing (not in the suppress list), while a
     // browser accelerator like Ctrl+= must not zoom the webview just
@@ -351,7 +361,7 @@ export function dispatchKeyEvent(e: KeyboardEvent): void {
   if (!commandAvailable(binding.command)) {
     // The command is absent on this platform, but the key must not fall
     // through to the webview's own accelerator (Ctrl+P prints the page).
-    suppressBrowserDefault(e);
+    decline();
     return;
   }
   const cmd = COMMANDS[binding.command];

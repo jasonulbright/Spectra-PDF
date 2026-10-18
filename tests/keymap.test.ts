@@ -12,6 +12,7 @@ import {
   type DeleteKeyInput,
 } from '../src/renderer/commands/keymap';
 import { COMMANDS } from '../src/renderer/commands/registry';
+import { editsText, holdsNoText } from '../src/renderer/lib/text-controls';
 import { registerOmniSearchFocus } from '../src/renderer/commands/omnisearch-focus';
 import {
   pushEscapeFallback,
@@ -227,6 +228,32 @@ describe('isEditable', () => {
     expect(isEditable(DIV)).toBe(false);
     expect(isEditable(null)).toBe(false);
   });
+
+  it('editsText names what a user types into', () => {
+    for (const type of ['text', 'number', 'search', 'password', '']) {
+      expect(editsText({ tagName: 'INPUT', type } as unknown as EventTarget), type).toBe(true);
+    }
+    expect(editsText({ tagName: 'TEXTAREA' } as unknown as EventTarget)).toBe(true);
+    expect(editsText({ tagName: 'DIV', isContentEditable: true } as unknown as EventTarget)).toBe(true);
+    expect(editsText({ tagName: 'INPUT', type: 'checkbox' } as unknown as EventTarget)).toBe(false);
+    expect(editsText({ tagName: 'SELECT' } as unknown as EventTarget)).toBe(false);
+    expect(editsText(DIV)).toBe(false);
+    expect(editsText(null)).toBe(false);
+  });
+
+  it('holdsNoText names the controls a select-all cannot stay inside', () => {
+    expect(holdsNoText({ tagName: 'SELECT' } as unknown as EventTarget)).toBe(true);
+    for (const type of ['checkbox', 'radio', 'range', 'color', 'file', 'button', 'submit', 'reset', 'image', 'CHECKBOX']) {
+      expect(holdsNoText({ tagName: 'INPUT', type } as unknown as EventTarget), type).toBe(true);
+    }
+    for (const type of ['text', 'number', 'search', 'email', 'password', 'url', 'tel', '']) {
+      expect(holdsNoText({ tagName: 'INPUT', type } as unknown as EventTarget), type).toBe(false);
+    }
+    expect(holdsNoText(INPUT)).toBe(false);
+    expect(holdsNoText({ tagName: 'TEXTAREA' } as unknown as EventTarget)).toBe(false);
+    expect(holdsNoText(DIV)).toBe(false);
+    expect(holdsNoText(null)).toBe(false);
+  });
 });
 
 // --- dispatcher ------------------------------------------------------------
@@ -323,6 +350,56 @@ describe('dispatchKeyEvent', () => {
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(false);
     expect(dispatched).toEqual([]);
+  });
+
+  const TEXTLESS = [
+    { tagName: 'SELECT' },
+    { tagName: 'INPUT', type: 'checkbox' },
+    { tagName: 'INPUT', type: 'radio' },
+    { tagName: 'INPUT', type: 'range' },
+    { tagName: 'INPUT', type: 'button' },
+  ];
+
+  it('Ctrl+A on a control with no text selects all pages, as on a button', () => {
+    for (const target of [...TEXTLESS, { tagName: 'BUTTON' }]) {
+      const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
+      const e = fakeEvent({ key: 'a', ctrl: true, target });
+      dispatchKeyEvent(e);
+      expect(e.defaultPrevented, `${target.tagName} ${'type' in target ? target.type : ''}`).toBe(true);
+      expect(dispatched).toEqual([{ type: 'UI_SELECT_ALL_PAGES' }]);
+    }
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
+    const cyrillic = fakeEvent({ key: 'ф', code: 'KeyA', ctrl: true, target: { tagName: 'SELECT' } });
+    dispatchKeyEvent(cyrillic);
+    expect(cyrillic.defaultPrevented).toBe(true);
+    expect(dispatched).toEqual([{ type: 'UI_SELECT_ALL_PAGES' }]);
+  });
+
+  it('where Select All declines, Ctrl+A on a control with no text does nothing at all', () => {
+    for (const target of TEXTLESS) {
+      const { dispatched } = wire(uiState({ focusedTab: 'home' }));
+      const e = fakeEvent({ key: 'a', ctrl: true, target });
+      dispatchKeyEvent(e);
+      expect(e.defaultPrevented, `${target.tagName} ${'type' in target ? target.type : ''}`).toBe(true);
+      expect(dispatched).toEqual([]);
+    }
+  });
+
+  it('a text entry keeps its own select-all, in a document tab and on Home', () => {
+    for (const focusedTab of [{ doc: 'x.pdf' }, 'home'] as const) {
+      for (const type of ['text', 'number', 'search', 'password']) {
+        const { dispatched } = wire(uiState({ focusedTab }));
+        const e = fakeEvent({ key: 'a', ctrl: true, target: { tagName: 'INPUT', type } });
+        dispatchKeyEvent(e);
+        expect(e.defaultPrevented, type).toBe(false);
+        expect(dispatched).toEqual([]);
+      }
+      const { dispatched } = wire(uiState({ focusedTab }));
+      const editor = fakeEvent({ key: 'a', ctrl: true, target: { tagName: 'DIV', isContentEditable: true } });
+      dispatchKeyEvent(editor);
+      expect(editor.defaultPrevented).toBe(false);
+      expect(dispatched).toEqual([]);
+    }
   });
 
   it('Ctrl+F always wins — even from inside a field', () => {

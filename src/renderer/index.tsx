@@ -7,6 +7,7 @@ import { loadPlatformCapabilities } from './lib/platform-capabilities';
 import { watchWindowCompose } from './lib/compose-settle';
 import { signalFirstPaint } from './lib/first-paint';
 import { stampInitialTheme } from './lib/theme-boot';
+import { installEditingMarker } from './lib/editing-marker';
 import './i18n'; // Initializes i18next before anything renders a string
 import './styles.css';
 
@@ -50,6 +51,8 @@ function ComposeSettle(): null {
 window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled promise rejection:', event.reason);
 });
+
+installEditingMarker(document, window);
 
 adoptStyleNonce();
 stampInitialTheme();
