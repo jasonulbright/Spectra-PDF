@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { EDITING_ATTRIBUTE } from '../src/renderer/lib/editing-marker';
 
 // The pointing hand appears only on what follows a link in a PDF's content:
 // link regions and form pushbuttons. Every other button, tab and tile uses the
@@ -128,6 +129,55 @@ function specificity(selector: string): Specificity {
   return total;
 }
 
+const TEXTLESS_INPUTS = ['checkbox', 'radio', 'range', 'color', 'file', 'button', 'submit', 'reset', 'image'];
+
+// Each opts a reader's text in: a comparison's changed text, a link's target,
+// a measurement, a signature's failure, an operation's failure.
+const SELECTABLE_REGIONS = [
+  'components/canvas/SecondaryToolbar.tsx',
+  'components/navpane/SignaturesNavPanel.tsx',
+  'components/OperationQueue.tsx',
+  'panels/ComparePanel.tsx',
+  'panels/LinksPanel.tsx',
+];
+
+interface CssRule {
+  at: number;
+  selector: string;
+  body: string;
+}
+
+function selectionPolicy(): { rules: CssRule[]; optIn: CssRule; optOut: CssRule } {
+  const css = stripBlockComments(readFileSync(join(ROOT, 'styles.css'), 'utf8').replace(/\r\n/g, '\n'));
+  const rules = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].map((m) => ({
+    at: m.index ?? 0,
+    selector: m[1].trim().replace(/\s+/g, ' ').replace(/\( /g, '(').replace(/ \)/g, ')'),
+    body: m[2],
+  }));
+  const optIn = rules.find((r) => r.selector.startsWith(':root :is(') && /user-select:\s*text/.test(r.body));
+  const optOut = rules.find((r) => r.selector.startsWith(':root :is(') && /user-select:\s*none/.test(r.body));
+  expect(optIn).toBeDefined();
+  expect(optOut).toBeDefined();
+  return { rules, optIn: optIn!, optOut: optOut! };
+}
+
+/** A rule body's declarations, property to value. */
+function declarations(body: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const decl of body.split(';')) {
+    const colon = decl.indexOf(':');
+    if (colon < 0) continue;
+    out.set(decl.slice(0, colon).trim(), decl.slice(colon + 1).trim());
+  }
+  return out;
+}
+
+/** The top-level arguments of the one `:is()` a policy selector holds. */
+function isArguments(selector: string): string[] {
+  const open = selector.indexOf(':is(');
+  return splitTopLevel(selector.slice(open + 4, selector.lastIndexOf(')')));
+}
+
 describe('cursor policy', () => {
   it('only PDF link regions and form pushbuttons take the pointing hand', () => {
     const offenders: string[] = [];
@@ -172,21 +222,94 @@ describe('cursor policy', () => {
   });
 
   it('select-none inside an opted-in region outranks the opt-in, and comes after it', () => {
-    const css = stripBlockComments(readFileSync(join(ROOT, 'styles.css'), 'utf8').replace(/\r\n/g, '\n'));
-    const rules = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)].map((m) => ({
-      at: m.index ?? 0,
-      selector: m[1].trim().replace(/\s+/g, ' '),
-      body: m[2],
-    }));
-    const optIn = rules.find((r) => r.selector.startsWith('.app-shell :is(') && /user-select:\s*text/.test(r.body));
-    const optOut = rules.find((r) => r.selector.startsWith('.app-shell :is(') && /user-select:\s*none/.test(r.body));
-    expect(optIn).toBeDefined();
-    expect(optOut).toBeDefined();
-    expect(optOut!.selector).toContain('.select-none');
-    expect(optOut!.at).toBeGreaterThan(optIn!.at);
-    expect(compareSpecificity(specificity(optOut!.selector), specificity(optIn!.selector))).toBeGreaterThanOrEqual(0);
-    // A Tailwind select-none (0,1,0) under the shell is what the opt-in beat.
-    expect(compareSpecificity(specificity(optIn!.selector), specificity('.app-shell .select-none'))).toBeGreaterThan(0);
+    const { optIn, optOut } = selectionPolicy();
+    expect(optOut.selector).toContain('.select-none');
+    expect(optOut.at).toBeGreaterThan(optIn.at);
+    expect(compareSpecificity(specificity(optOut.selector), specificity(optIn.selector))).toBeGreaterThanOrEqual(0);
+    // The opt-in outranks a Tailwind select-none (0,1,0) under the root,
+    // which is why the opt-out exists.
+    expect(compareSpecificity(specificity(optIn.selector), specificity(':root .select-none'))).toBeGreaterThan(0);
+  });
+
+  it('the policy starts at the root, so menus and dialogs outside the shell follow it', () => {
+    const { rules, optIn, optOut } = selectionPolicy();
+    const base = rules.find((r) => r.selector === ':root' && /user-select:\s*none/.test(r.body));
+    expect(base).toBeDefined();
+    expect(base!.at).toBeLessThan(optIn.at);
+    expect(optIn.selector.startsWith(':root :is(')).toBe(true);
+    expect(optOut.selector.startsWith(':root :is(')).toBe(true);
+    // Nothing else turns text back on for a whole region outside the opt-in.
+    const others = rules.filter((r) => /user-select:\s*(text|auto|all)/.test(r.body) && r !== optIn);
+    expect(others.map((r) => r.selector)).toEqual(['.textLayer :is(span, br)']);
+  });
+
+  it('a control with no text to copy never opts in, inside any region', () => {
+    const { optIn, optOut } = selectionPolicy();
+    const optInArgs = isArguments(optIn.selector);
+    expect(optInArgs).not.toContain('select');
+    const input = optInArgs.find((a) => a.startsWith('input'));
+    expect(input, 'the opt-in names text entries only').toBeDefined();
+    for (const type of TEXTLESS_INPUTS) expect(input).toContain(`[type='${type}']`);
+    const optOutArgs = isArguments(optOut.selector);
+    for (const control of ['button', "[role='button']", 'select', 'select *']) {
+      expect(optOutArgs).toContain(control);
+    }
+    const textless = optOutArgs.find((a) => a.startsWith('input:is('));
+    expect(textless).toBeDefined();
+    for (const type of TEXTLESS_INPUTS) expect(textless).toContain(`[type='${type}']`);
+  });
+
+  it('a text field that is not being edited paints no selection, over every other highlight rule', () => {
+    const { rules } = selectionPolicy();
+    const editing = `[${EDITING_ATTRIBUTE}]`;
+    const quiet = rules.find((r) => r.selector.includes(`:root :is(input, textarea):not(:focus, ${editing})::selection`));
+    expect(quiet).toBeDefined();
+    const selectors = splitTopLevel(quiet!.selector);
+    expect(selectors).toEqual([
+      `:root :is(input, textarea):not(:focus, ${editing})::selection`,
+      `:root [contenteditable]:not([contenteditable='false']):not(:focus-within, ${editing})::selection`,
+      `:root [contenteditable]:not([contenteditable='false']):not(:focus-within, ${editing}) *::selection`,
+    ]);
+    const others = rules.filter((r) => r !== quiet && /::selection/.test(r.selector));
+    // It changes nothing: the highlight is transparent and the text keeps its
+    // own colour.
+    const declared = declarations(quiet!.body);
+    expect(declared.get('background-color')).toBe('transparent');
+    expect(declared.get('color')).toBe('currentColor');
+    // It sets every property any other highlight rule sets, or that rule's
+    // value shows through on the field (the high-contrast text colour).
+    // The `background` shorthand sets only the colour in a highlight.
+    const longhand = (p: string): string => (p === 'background' ? 'background-color' : p);
+    const setHere = new Set([...declared.keys()].map(longhand));
+    const setElsewhere = new Set(others.flatMap((r) => [...declarations(r.body).keys()].map(longhand)));
+    expect([...setElsewhere].sort()).toEqual(expect.arrayContaining(['background-color', 'color']));
+    expect([...setElsewhere].filter((p) => !setHere.has(p))).toEqual([]);
+    // Every other highlight rule that can reach a field: a universal
+    // `::selection`, under a theme or not. The field rule must outrank each.
+    const universal = others
+      .flatMap((r) => splitTopLevel(r.selector))
+      .filter((s) => /(^|\s)(\*)?::selection$/.test(s));
+    expect(universal.length).toBeGreaterThan(0);
+    for (const other of universal) {
+      expect(compareSpecificity(specificity(selectors[0]), specificity(other)), other).toBeGreaterThan(0);
+    }
+  });
+
+  it('the property check reads every declaration of a rule', () => {
+    expect([...declarations(' background: red;\n  color: #000000 ').entries()])
+      .toEqual([['background', 'red'], ['color', '#000000']]);
+  });
+
+  it('every `.selectable` region is content a reader copies', () => {
+    const uses: string[] = [];
+    for (const file of walk(ROOT)) {
+      if (!file.endsWith('.tsx')) continue;
+      const text = stripBlockComments(readFileSync(file, 'utf8').replace(/\r\n/g, '\n'));
+      text.split('\n').forEach((line, i) => {
+        if (/className=[^\n]*['"`{ ]selectable[ '"`}]/.test(line)) uses.push(`${file.slice(ROOT.length + 1).replace(/\\/g, '/')}:${i + 1}`);
+      });
+    }
+    expect([...new Set(uses.map((u) => u.replace(/:\d+$/, '')))].sort()).toEqual([...SELECTABLE_REGIONS].sort());
   });
 
   it('error text opts in by its own class token, never by a hover variant', () => {
@@ -200,6 +323,33 @@ describe('cursor policy', () => {
     expect(specificity('.a :is(b, .c, [d]:not([e]))')).toEqual([0, 3, 0]);
     expect(specificity('#x div::before')).toEqual([1, 0, 2]);
     expect(specificity(':where(.a, #b) *')).toEqual([0, 0, 0]);
+  });
+
+  it('the find bar is the open hand where it moves, and its controls are not', () => {
+    const { rules } = selectionPolicy();
+    const rule = (selector: string) => rules.find((r) => splitTopLevel(r.selector).includes(selector));
+    const grab = rule('.find-bar .find-bar-grip');
+    expect(grab?.body).toMatch(/cursor:\s*grab;/);
+    expect(grab?.body).toMatch(/touch-action:\s*none;/);
+    expect(splitTopLevel(grab!.selector)).toContain('.find-bar');
+    const controls = rule('.find-bar :is(button:not(.find-bar-grip), select)');
+    expect(controls?.body).toMatch(/cursor:\s*default;/);
+    // A field and copyable error text take the text cursor: a press there
+    // edits or selects, never moves the bar.
+    expect(rule(".find-bar :is(input, .selectable, [class^='text-red-'], [class*=' text-red-'])")?.body)
+      .toMatch(/cursor:\s*auto;/);
+    const carried = rule(':root .find-bar.moving *');
+    expect(carried?.body).toMatch(/cursor:\s*grabbing;/);
+    expect(compareSpecificity(specificity(':root .find-bar.moving *'), specificity(controls!.selector))).toBeGreaterThan(0);
+    const bar = readFileSync(join(ROOT, 'components', 'canvas', 'FindBar.tsx'), 'utf8');
+    // A press on text the policy makes copyable starts no move.
+    const copyable = isArguments(selectionPolicy().optIn.selector)
+      .filter((a) => a.startsWith('.selectable') || a.includes('text-red-'))
+      .filter((a) => !a.endsWith(' *'));
+    expect(copyable).toEqual(['[class^=\'text-red-\']', '[class*=\' text-red-\']', '.selectable']);
+    expect(bar).toContain(`const COPYABLE = "${['.selectable', ...copyable.slice(0, 2)].join(', ')}";`);
+    expect(bar).toMatch(/moving \? ' moving' : ''/);
+    expect(bar).toMatch(/className="find-bar-grip /);
   });
 
   it('a reading-view page takes the pane cursor, so it is not the hand under Select', () => {

@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Érvénytelen minta",
   "canvas.find.makeSearchable": "Kereshetővé tétel",
+  "canvas.find.moveBar": "A keresősáv áthelyezése",
+  "canvas.find.moveBarHint": "Húzza a keresősáv áthelyezéséhez. A nyílbillentyűk is mozgatják. Kattintson duplán, vagy nyomja meg a Home billentyűt, hogy visszakerüljön a helyére.",
   "canvas.find.saveAfterOcrTitle": "A dokumentum mentése a felismert szöveggel",
   "canvas.find.saveAll": "Összes mentése",
   "canvas.find.saveAllAfterOcrTitle": "Minden dokumentum mentése, amely felismert szöveget kapott",

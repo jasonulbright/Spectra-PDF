@@ -5860,6 +5860,25 @@ input:not([type]) {
   inset-block-start: calc(var(--canvas-inset-block-start, 0px) + 1rem);
 }
 
+/* The find bar (components/canvas/FindBar.tsx) moves by its grip and by its
+   own background, so both take the open hand and no touch gesture of their
+   own. `cursor` inherits: its controls set their own back. */
+.find-bar,
+.find-bar .find-bar-grip {
+  cursor: grab;
+  touch-action: none;
+}
+.find-bar :is(button:not(.find-bar-grip), select) {
+  cursor: default;
+}
+.find-bar :is(input, .selectable, [class^='text-red-'], [class*=' text-red-']) {
+  cursor: auto;
+}
+:root .find-bar.moving,
+:root .find-bar.moving * {
+  cursor: grabbing;
+}
+
 /* The signature list (panels/SignaturesPanel.tsx) keeps a usable height when
    the panel is short of room, but never more than its own cards: a fixed
    minimum taller than one card leaves a blank band under it. Without
@@ -5899,16 +5918,19 @@ input:not([type]) {
    open hand, and the closed hand while it is carried.
 
    App chrome is not selectable text: otherwise a selection that starts in a
-   page's text layer (drag, or Shift+Arrow) runs on into the panels, tabs and
-   toolbars around it. Text a reader copies opts back in: fields, code, the
-   text layer, every dialog (inline dialogs render inside `.app-shell`), alerts
-   and error text, and anything marked `.selectable`. */
-.app-shell {
+   page's text layer (drag, Shift+Arrow, or a select-all) runs on into the
+   panels, tabs and toolbars around it. The policy is set on the root, because
+   menus and dialogs render outside `.app-shell`. Text a reader copies opts
+   back in: text fields, code, the text layer, every dialog, alerts and error
+   text, and anything marked `.selectable`. */
+:root {
   user-select: none;
   -webkit-user-select: none;
 }
-.app-shell :is(
-  input, textarea, select, [contenteditable]:not([contenteditable='false']), pre, code,
+:root :is(
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'],
+    [type='button'], [type='submit'], [type='reset'], [type='image']),
+  textarea, [contenteditable]:not([contenteditable='false']), pre, code,
   .textLayer, .textLayer *,
   [role='dialog'], [role='dialog'] *, [role='alertdialog'], [role='alertdialog'] *,
   [role='alert'], [role='alert'] *, .canvas-toast, .canvas-toast *,
@@ -5919,13 +5941,31 @@ input:not([type]) {
   -webkit-user-select: text;
 }
 /* `select-none` inside an opted-in region (a dialog's row grip, a summary, the
-   presentation counter) stays unselectable. The opt-in above is (0,3,0) through
-   its most specific `:is()` argument, so this rule must be at least as
-   specific and come after it. Editable fields inside keep their own text. */
-.app-shell :is(
+   presentation counter) stays unselectable, and so does a control that holds
+   no text to copy (a button, a select, a checkbox). The opt-in above is
+   (0,3,0) through its most specific `:is()` argument, so this rule must be at
+   least as specific and come after it. Text fields inside keep their own text. */
+:root :is(
   .select-none,
-  .select-none :not(input, textarea, select, [contenteditable]:not([contenteditable='false']))
+  .select-none :not(input, textarea, [contenteditable]:not([contenteditable='false'])),
+  button, [role='button'], select, select *,
+  input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'],
+    [type='button'], [type='submit'], [type='reset'], [type='image'])
 ) {
   user-select: none;
   -webkit-user-select: none;
+}
+/* A text field paints a selection only while the user edits it. A document
+   selection that crosses an unfocused field still holds the field's value and
+   placeholder (they sit in the field's own shadow tree), and `user-select:
+   none` does not stop an editable value from painting; a highlight that
+   changes nothing does. It sets every property another `::selection` rule
+   sets (the high-contrast theme sets the text colour too). The field being
+   edited carries `[data-editing]` (lib/editing-marker.ts), because `:focus`
+   stops matching while the window is inactive. */
+:root :is(input, textarea):not(:focus, [data-editing])::selection,
+:root [contenteditable]:not([contenteditable='false']):not(:focus-within, [data-editing])::selection,
+:root [contenteditable]:not([contenteditable='false']):not(:focus-within, [data-editing]) *::selection {
+  background-color: transparent;
+  color: currentColor;
 }

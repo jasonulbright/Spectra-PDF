@@ -390,6 +390,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Neplatný vzor",
   "canvas.find.makeSearchable": "Sprístupniť vyhľadávaniu",
+  "canvas.find.moveBar": "Presunúť panel hľadania",
+  "canvas.find.moveBarHint": "Presunutím premiestnite panel hľadania. Premiestniť ho možno aj klávesmi so šípkami. Dvojitým kliknutím alebo klávesom Home ho vrátite na miesto.",
   "canvas.find.saveAfterOcrTitle": "Uložiť dokument s rozpoznaným textom",
   "canvas.find.saveAll": "Uložiť všetko",
   "canvas.find.saveAllAfterOcrTitle": "Uložiť každý dokument, ktorý získal rozpoznaný text",

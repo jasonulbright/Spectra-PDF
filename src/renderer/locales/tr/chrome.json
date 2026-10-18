@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Geçersiz desen",
   "canvas.find.makeSearchable": "Aranabilir yap",
+  "canvas.find.moveBar": "Bulma çubuğunu taşı",
+  "canvas.find.moveBarHint": "Bulma çubuğunu taşımak için sürükleyin. Ok tuşları da onu taşır. Yerine geri koymak için çift tıklayın veya Home tuşuna basın.",
   "canvas.find.saveAfterOcrTitle": "Belgeyi tanınan metinle birlikte kaydet",
   "canvas.find.saveAll": "Tümünü kaydet",
   "canvas.find.saveAllAfterOcrTitle": "Tanınan metin eklenen her belgeyi kaydet",

@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Virheellinen kuvio",
   "canvas.find.makeSearchable": "Tee haettavaksi",
+  "canvas.find.moveBar": "Siirrä hakupalkkia",
+  "canvas.find.moveBarHint": "Siirrä hakupalkkia vetämällä. Myös nuolinäppäimet siirtävät sitä. Palauta se paikalleen kaksoisnapsauttamalla tai painamalla Home.",
   "canvas.find.saveAfterOcrTitle": "Tallenna asiakirja tunnistetun tekstin kanssa",
   "canvas.find.saveAll": "Tallenna kaikki",
   "canvas.find.saveAllAfterOcrTitle": "Tallenna jokainen asiakirja, johon lisättiin tunnistettua tekstiä",

@@ -1666,6 +1666,9 @@ export interface TestHarness {
   waitForEngine: (timeoutMs?: number) => Promise<void>;
   /** This window's label — 'main' for the one the app opened by itself. */
   windowLabel: () => string;
+  /** Raise THIS window and give it system focus, through the same command
+   * that raises a window holding a document. */
+  focusThisWindow: () => Promise<void>;
   /** Dispatch the same app-wide tray event that the native tray uses. */
   emitTrayAction: (action: 'merge' | 'quit') => Promise<void>;
   /** Close THIS window through the same command the × handler ends on, so a
@@ -2737,6 +2740,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     waitForEngine,
     windowLabel: () => windowLabel(),
+    focusThisWindow: () => app.focusWindow(windowLabel()),
     emitTrayAction: async (action) => { await emit('app:trayAction', action); },
     closeThisWindow: async () => { await app.closeWindow(false); },
     engineRequestWithId: requestWithId,

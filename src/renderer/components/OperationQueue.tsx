@@ -32,6 +32,11 @@ interface OperationQueueProps {
   onClear: () => void;
 }
 
+/** A row's status text is copyable only when it is the engine's failure text. */
+function statusTextSelectable(status: QueueItem['status']): boolean {
+  return status === 'error';
+}
+
 function formatTime(ts: number): string {
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -94,8 +99,13 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
                 {formatTime(item.startTime)} {formatQueueLabel(item.label)}
               </span>
               {/* Wraps rather than truncating: a failure's text is the only
-                  account of what went wrong, and an ellipsis hid its end. */}
-              <span className="selectable min-w-0 flex-1 text-neutral-500 [overflow-wrap:anywhere]">
+                  account of what went wrong, and an ellipsis hid its end.
+                  Only that text is copyable; the queue's own wording is
+                  chrome. */}
+              <span
+                className={`${statusTextSelectable(item.status) ? 'selectable ' : ''}min-w-0 flex-1 text-neutral-500 [overflow-wrap:anywhere]`}
+                data-testid="opqueue-status"
+              >
                 {/* Completion is the queue's OWN wording, keyed off the state
                     discriminant rather than off any text the hook wrote —
                     a failure's text belongs to the engine and passes through. */}

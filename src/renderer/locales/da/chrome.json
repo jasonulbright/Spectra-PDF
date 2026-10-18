@@ -384,6 +384,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Ugyldigt mønster",
   "canvas.find.makeSearchable": "Gør søgbar",
+  "canvas.find.moveBar": "Flyt søgelinjen",
+  "canvas.find.moveBarHint": "Træk for at flytte søgelinjen. Piletasterne flytter den også. Dobbeltklik, eller tryk på Home for at sætte den tilbage.",
   "canvas.find.saveAfterOcrTitle": "Gem dokumentet med den genkendte tekst",
   "canvas.find.saveAll": "Gem alle",
   "canvas.find.saveAllAfterOcrTitle": "Gem hvert dokument, der har fået genkendt tekst",

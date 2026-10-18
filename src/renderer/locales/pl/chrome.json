@@ -390,6 +390,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Nieprawidłowy wzorzec",
   "canvas.find.makeSearchable": "Udostępnij do wyszukiwania",
+  "canvas.find.moveBar": "Przenieś pasek wyszukiwania",
+  "canvas.find.moveBarHint": "Przeciągnij, aby przenieść pasek wyszukiwania. Klawisze strzałek również go przesuwają. Kliknij dwukrotnie lub naciśnij Home, aby przywrócić go na miejsce.",
   "canvas.find.saveAfterOcrTitle": "Zapisz dokument z rozpoznanym tekstem",
   "canvas.find.saveAll": "Zapisz wszystko",
   "canvas.find.saveAllAfterOcrTitle": "Zapisz każdy dokument, który otrzymał rozpoznany tekst",

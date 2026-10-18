@@ -381,6 +381,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "パターンが不正です",
   "canvas.find.makeSearchable": "検索可能にする",
+  "canvas.find.moveBar": "検索バーを移動",
+  "canvas.find.moveBarHint": "ドラッグして検索バーを移動します。矢印キーでも移動できます。ダブルクリックするか Home キーを押すと元の位置に戻ります。",
   "canvas.find.saveAfterOcrTitle": "認識したテキストを含めて文書を保存",
   "canvas.find.saveAll": "すべて保存",
   "canvas.find.saveAllAfterOcrTitle": "認識したテキストを追加したすべての文書を保存",

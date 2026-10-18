@@ -387,6 +387,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "Padrão inválido",
   "canvas.find.makeSearchable": "Tornar pesquisável",
+  "canvas.find.moveBar": "Mover a barra de localização",
+  "canvas.find.moveBarHint": "Arraste para mover a barra de localização. As teclas de seta também a movem. Clique duas vezes ou pressione Home para colocá-la de volta no lugar.",
   "canvas.find.saveAfterOcrTitle": "Salvar o documento com o texto reconhecido",
   "canvas.find.saveAll": "Salvar tudo",
   "canvas.find.saveAllAfterOcrTitle": "Salvar cada documento que recebeu texto reconhecido",

@@ -396,6 +396,8 @@
   "canvas.find.cursorTotal": "{{total}}",
   "canvas.find.invalidPattern": "نمط غير صالح",
   "canvas.find.makeSearchable": "جعله قابلًا للبحث",
+  "canvas.find.moveBar": "نقل شريط البحث",
+  "canvas.find.moveBarHint": "اسحب لنقل شريط البحث. تنقله مفاتيح الأسهم أيضًا. انقر نقرًا مزدوجًا أو اضغط Home لإعادته إلى مكانه.",
   "canvas.find.saveAfterOcrTitle": "احفظ المستند مع النص المتعرَّف عليه",
   "canvas.find.saveAll": "حفظ الكل",
   "canvas.find.saveAllAfterOcrTitle": "احفظ كل مستند تلقّى نصًا متعرَّفًا عليه",
