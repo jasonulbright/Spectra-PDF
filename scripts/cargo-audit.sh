@@ -11,6 +11,8 @@
 # GIT_CONFIG_VALUE_n), never as an argument, which the process list shows. A
 # credential helper is not enough: git asks a helper only after a 401, and a
 # public repository never answers 401.
+# cargo fetch --locked populates the crates.io index and locked packages before
+# cargo-audit performs its yanked check; a fetch failure fails this audit.
 #
 # SPECTRA_ADVISORY_DB moves the database (default: the one cargo-audit reads,
 # under CARGO_HOME).
@@ -47,4 +49,6 @@ echo "advisory database at $(git -C "$DB" log -1 --format='%h %cI')"
 cd "$REPO_ROOT/src-tauri"
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 github_token_unexport
+echo "fetching locked registry packages and index entries for cargo-audit's yanked check"
+cargo fetch --locked || die "Cargo.lock dependency/index fetch failed; cargo audit was not run"
 exec cargo audit --no-fetch --db "$DB"

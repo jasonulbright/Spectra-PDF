@@ -89,11 +89,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-audit.exe
-          key: ${{ runner.os }}-cargo-audit-${{ hashFiles('src-tauri/Cargo.lock', '.github/workflows/ci.yml') }}
+          key: ${{ runner.os }}-cargo-audit-0.22.2-${{ hashFiles('src-tauri/Cargo.lock', '.github/workflows/ci.yml', 'scripts/cargo-audit.sh') }}
 
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: cargo audit
         shell: bash
