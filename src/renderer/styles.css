@@ -4081,6 +4081,7 @@ input:not([type]) {
   border-inline-start: 1px solid #2e2e2e;
   background: #191919;
   min-width: 0;
+  min-height: 0;
 }
 .tool-dock-resize {
   position: absolute;
