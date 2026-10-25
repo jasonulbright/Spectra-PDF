@@ -295,10 +295,11 @@ pub struct DocumentHandling {
     pub duplex: bool,
     pub advanced_duplex: bool,
     pub duplex_mode: DuplexMode,
-    /// The exact `WIA_IPS_DOCUMENT_HANDLING_SELECT` value each offered source
-    /// writes. Reported rather than reconstructed by the caller: a second
-    /// declaration of these bit values somewhere else is a second thing to
-    /// keep right, and the one that is wrong scans the wrong side of a sheet.
+    /// The exact `WIA_IPS_DOCUMENT_HANDLING_SELECT` mode each offered source
+    /// writes to its selected item. Reported rather than reconstructed by the
+    /// caller: a second declaration of these bit values somewhere else is a
+    /// second thing to keep right, and the one that is wrong scans the wrong
+    /// side of a sheet.
     pub flatbed_select: i32,
     pub feeder_select: i32,
     pub duplex_select: i32,
@@ -336,8 +337,8 @@ pub enum SourceOptionId {
 pub struct ScanSourceOption {
     pub id: SourceOptionId,
     pub item_name: String,
-    /// The `WIA_IPS_DOCUMENT_HANDLING_SELECT` value this row writes, absent
-    /// where the device reports no such property to write.
+    /// The `WIA_IPS_DOCUMENT_HANDLING_SELECT` mode written to this row's item,
+    /// absent where the selected item has no writable property.
     pub document_handling: Option<i32>,
     /// Can this row produce more than one page in one run? Only a feeder can,
     /// which is what makes a page count meaningful.
@@ -384,11 +385,15 @@ pub fn source_options(
     } else {
         None
     };
-    let writes = |value: i32| -> Option<i32> {
-        sources
-            .iter()
-            .any(|s| !matches!(s.document_handling_select, ControlModel::Absent))
-            .then_some(value)
+    let writes = |source: &ScanSourceReport, value: i32| -> Option<i32> {
+        // WIA_IPS_DOCUMENT_HANDLING_SELECT belongs to the selected scan item.
+        // A capability on the feeder must not make us write a legacy source
+        // flag to a flatbed item that does not expose the property.
+        matches!(
+            &source.document_handling_select,
+            ControlModel::Flags { .. }
+        )
+        .then_some(value)
     };
     let flatbed = item(&[SourceCategory::Flatbed]).or(only);
     let feeder = item(&[SourceCategory::Feeder, SourceCategory::FeederFront]).or(only);
@@ -398,7 +403,7 @@ pub fn source_options(
         options.push(ScanSourceOption {
             id: SourceOptionId::Flatbed,
             item_name: source.item_name.clone(),
-            document_handling: writes(handling.flatbed_select),
+            document_handling: writes(source, handling.flatbed_select),
             feeds: false,
         });
     }
@@ -406,7 +411,7 @@ pub fn source_options(
         options.push(ScanSourceOption {
             id: SourceOptionId::Feeder,
             item_name: source.item_name.clone(),
-            document_handling: writes(handling.feeder_select),
+            document_handling: writes(source, handling.feeder_select),
             feeds: true,
         });
     }
@@ -414,7 +419,7 @@ pub fn source_options(
         options.push(ScanSourceOption {
             id: SourceOptionId::Duplex,
             item_name: source.item_name.clone(),
-            document_handling: writes(handling.duplex_select),
+            document_handling: writes(source, handling.duplex_select),
             feeds: true,
         });
     }

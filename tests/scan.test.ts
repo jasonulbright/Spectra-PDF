@@ -51,7 +51,7 @@ function source(
     brightness: { kind: 'absent' },
     contrast: { kind: 'absent' },
     pages: { kind: 'absent' },
-    document_handling_select: { kind: 'flags', valid: 7, current: 1 },
+    document_handling_select: { kind: 'flags', valid: 1068, current: 32 },
     ...over,
   };
 }
@@ -74,9 +74,9 @@ function device(
       duplex: false,
       advanced_duplex: false,
       duplex_mode: 'none',
-      flatbed_select: 2,
-      feeder_select: 1,
-      duplex_select: 5,
+      flatbed_select: 32,
+      feeder_select: 32,
+      duplex_select: 12,
       ...handling,
     },
   };
@@ -177,19 +177,19 @@ describe('the source picker is read from the report, not re-derived', () => {
   const flatbedRow: ScanSourceOption = {
     id: 'flatbed',
     item_name: 'Root\\flatbed',
-    document_handling: 2,
+    document_handling: 32,
     feeds: false,
   };
   const feederRow: ScanSourceOption = {
     id: 'feeder',
     item_name: 'Root\\feeder',
-    document_handling: 1,
+    document_handling: 32,
     feeds: true,
   };
   const duplexRow: ScanSourceOption = {
     id: 'duplex',
     item_name: 'Root\\feeder',
-    document_handling: 5,
+    document_handling: 12,
     feeds: true,
   };
 
@@ -219,8 +219,8 @@ describe('the source picker is read from the report, not re-derived', () => {
 });
 
 describe('the page count', () => {
-  const feederRow = { id: 'feeder' as const, item_name: 'f', document_handling: 1, feeds: true };
-  const flatbedRow = { id: 'flatbed' as const, item_name: 'g', document_handling: 2, feeds: false };
+  const feederRow = { id: 'feeder' as const, item_name: 'f', document_handling: 32, feeds: true };
+  const flatbedRow = { id: 'flatbed' as const, item_name: 'g', document_handling: 32, feeds: false };
 
   it('offers "all pages" only where the device takes zero for it', () => {
     expect(offersAllPages(feederRow, { kind: 'span', min: 0, max: 99, step: 1, current: 0 })).toBe(
@@ -251,7 +251,7 @@ describe('the page count', () => {
 
 describe('the settings sent to the device', () => {
   const form = {
-    option: { id: 'feeder' as const, item_name: 'Root\\feeder', document_handling: 1, feeds: true },
+    option: { id: 'feeder' as const, item_name: 'Root\\feeder', document_handling: 32, feeds: true },
     dpi: 300,
     colorMode: 'color' as const,
     paper: 'letter' as const,
@@ -264,7 +264,7 @@ describe('the settings sent to the device', () => {
   it('carry only what a rendered control actually chose', () => {
     expect(toScanSettings(form)).toEqual({
       item_name: 'Root\\feeder',
-      document_handling: 1,
+      document_handling: 32,
       pages: 0,
       dpi: 300,
       color_mode: 'color',

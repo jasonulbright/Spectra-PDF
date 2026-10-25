@@ -500,9 +500,9 @@ pub struct ScanArgs {
 
 #[derive(Args)]
 pub struct ScanTestArgs {
-    /// Device id from `spectrapdf scanners`. With exactly one scanner
-    /// attached it may be omitted; with several the runner asks which one is
-    /// on the desk, because the tester is standing at it.
+    /// Device ID from `spectrapdf scanners`, or the 1-based number shown by
+    /// the interactive picker. With exactly one scanner attached it may be
+    /// omitted; with several the runner asks which one is on the desk.
     #[arg(long, value_name = "DEVICE_ID")]
     pub device: Option<String>,
     /// Run only these checklist rows, e.g. "4,5,6". Every applicable row
@@ -7471,8 +7471,8 @@ mod tests {
                 current: Some(0),
             },
             document_handling_select: ControlModel::Flags {
-                valid: 7,
-                current: Some(1),
+                valid: 1068,
+                current: Some(32),
             },
         };
         ScannerCapabilities {
@@ -7485,21 +7485,21 @@ mod tests {
                 duplex: true,
                 advanced_duplex: false,
                 duplex_mode: DuplexMode::DuplexBit,
-                flatbed_select: 2,
-                feeder_select: 1,
-                duplex_select: 5,
+                flatbed_select: 32,
+                feeder_select: 32,
+                duplex_select: 12,
             },
             source_options: vec![
                 ScanSourceOption {
                     id: SourceOptionId::Feeder,
                     item_name: "Root\\feeder".into(),
-                    document_handling: Some(1),
+                    document_handling: Some(32),
                     feeds: true,
                 },
                 ScanSourceOption {
                     id: SourceOptionId::Duplex,
                     item_name: "Root\\feeder".into(),
-                    document_handling: Some(5),
+                    document_handling: Some(12),
                     feeds: true,
                 },
             ],
@@ -7544,11 +7544,11 @@ mod tests {
         let settings = scan_settings(&caps, &scan_args(&["--source", "duplex", "--pages", "3"]))
             .expect("duplex is offered");
         assert_eq!(settings.item_name.as_deref(), Some("Root\\feeder"));
-        assert_eq!(settings.document_handling, Some(5));
+        assert_eq!(settings.document_handling, Some(12));
         assert_eq!(settings.pages, Some(3));
         // No --source takes the first row the device reported, never a guess.
         let settings = scan_settings(&caps, &scan_args(&[])).expect("a first row exists");
-        assert_eq!(settings.document_handling, Some(1));
+        assert_eq!(settings.document_handling, Some(32));
     }
 
     #[cfg(windows)]

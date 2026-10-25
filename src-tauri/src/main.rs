@@ -49,9 +49,9 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Attach to parent console BEFORE clap parses args, so that
-    // --help and --version output is visible when invoked from a terminal.
-    // (windows_subsystem = "windows" starts with no console attached.)
+    // Attach to parent console BEFORE clap parses args, so help and other CLI
+    // output are visible and interactive commands can read input. A GUI
+    // subsystem executable starts without its own console attached.
     attach_parent_console();
 
     if let Some(refusal) = spectrapdf_lib::cli::launch_refusal(&argv) {
@@ -116,8 +116,11 @@ fn attach_parent_console() {
 
     const ATTACH_PARENT_PROCESS: u32 = 0xFFFFFFFF;
     const GENERIC_WRITE: u32 = 0x40000000;
+    const GENERIC_READ: u32 = 0x80000000;
+    const FILE_SHARE_READ: u32 = 0x00000001;
     const FILE_SHARE_WRITE: u32 = 0x00000002;
     const OPEN_EXISTING: u32 = 3;
+    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32; // -10 as u32
     const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32; // -11 as u32
     const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4u32; // -12 as u32
     const INVALID_HANDLE_VALUE: isize = -1;
@@ -127,8 +130,9 @@ fn attach_parent_console() {
 
     unsafe {
         // A release GUI-subsystem executable can still inherit redirected
-        // stdout/stderr from a CLI caller. Keep those handles: replacing them
-        // with CONOUT$ makes `spectrapdf check ... > report.json` lose output.
+        // standard handles from a CLI caller. Keep them: replacing redirected
+        // output or input with a console handle would break pipelines.
+        let stdin = GetStdHandle(STD_INPUT_HANDLE);
         let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
         let stderr = GetStdHandle(STD_ERROR_HANDLE);
         let is_redirected = |handle| {
@@ -146,9 +150,10 @@ fn attach_parent_console() {
                 _ => false,
             }
         };
+        let stdin_redirected = is_redirected(stdin);
         let stdout_redirected = is_redirected(stdout);
         let stderr_redirected = is_redirected(stderr);
-        if stdout_redirected && stderr_redirected {
+        if stdin_redirected && stdout_redirected && stderr_redirected {
             return;
         }
         if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
@@ -171,8 +176,30 @@ fn attach_parent_console() {
             ptr::null(),
         );
 
+        // GUI-subsystem processes do not get a usable console input handle
+        // just by calling AttachConsole. Open CONIN$ explicitly so interactive
+        // commands such as `scan-test` can read keyboard input in PowerShell.
+        let conin: Vec<u16> = OsStr::new("CONIN$")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let input = CreateFileW(
+            conin.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ptr::null(),
+            OPEN_EXISTING,
+            0,
+            ptr::null(),
+        );
+
         // AttachConsole may replace standard handles. Restore each caller's
         // redirect independently even if opening the console device fails.
+        if stdin_redirected {
+            SetStdHandle(STD_INPUT_HANDLE, stdin);
+        } else if input != INVALID_HANDLE_VALUE {
+            SetStdHandle(STD_INPUT_HANDLE, input);
+        }
         if stdout_redirected {
             SetStdHandle(STD_OUTPUT_HANDLE, stdout);
         } else if handle != INVALID_HANDLE_VALUE {

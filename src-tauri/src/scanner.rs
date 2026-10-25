@@ -79,8 +79,8 @@ use windows::core::{implement, Interface, BSTR, GUID, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Devices::ImageAcquisition::{
     IEnumWiaItem2, IWiaDevMgr2, IWiaItem2, IWiaPropertyStorage, IWiaTransfer,
     IWiaTransferCallback, IWiaTransferCallback_Impl, WiaDevMgr2, WiaImgFmt_BMP, WiaImgFmt_PNG,
-    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX,
-    DUPLEX, FEEDER, FLATBED, WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
+    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX, DUPLEX, FEEDER, FLATBED, FRONT_FIRST,
+    FRONT_ONLY, WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
     WIA_CATEGORY_FEEDER_FRONT, WIA_CATEGORY_FLATBED, WIA_CATEGORY_FILM, WIA_DATA_AUTO,
     WIA_DATA_COLOR, WIA_DATA_GRAYSCALE, WIA_DATA_THRESHOLD, WIA_DEVINFO_ENUM_LOCAL,
     WIA_DIP_DEV_ID, WIA_DIP_DEV_NAME, WIA_DIP_DEV_TYPE,
@@ -292,13 +292,20 @@ pub fn document_handling(capabilities: i32, categories: &[SourceCategory]) -> Do
         duplex,
         advanced_duplex,
         duplex_mode,
-        flatbed_select: FLATBED as i32,
-        feeder_select: FEEDER as i32,
-        // A duplex run selects the feeder AND the duplex bit. On a device
-        // whose front and back arrive as separate child items the driver
-        // still honours this pair; the separate items exist so per-side
-        // settings are possible, not because the bit stops working.
-        duplex_select: (FEEDER | DUPLEX) as i32,
+        // WIA 2.0 selects the source by transferring from its feeder or
+        // flatbed item. WIA_IPS_DOCUMENT_HANDLING_SELECT carries the page
+        // mode only: FEEDER and FLATBED are obsolete source bits on this
+        // property for Vista and later.
+        flatbed_select: FRONT_ONLY as i32,
+        feeder_select: FRONT_ONLY as i32,
+        // ADVANCED_DUPLEX is mutually exclusive with DUPLEX and selects the
+        // feeder's front/back child items. Simple duplex uses one feeder
+        // stream; explicitly request front-first when the driver supports it.
+        duplex_select: if duplex_mode == DuplexMode::FrontBackItems {
+            ADVANCED_DUPLEX as i32
+        } else {
+            (DUPLEX | FRONT_FIRST) as i32
+        },
     }
 }
 
@@ -2565,12 +2572,11 @@ mod tests {
             (FLATBED | FEEDER | DUPLEX) as i32,
             &[SourceCategory::Flatbed, SourceCategory::Feeder],
         );
-        assert_eq!(handling.flatbed_select, FLATBED as i32);
-        assert_eq!(handling.feeder_select, FEEDER as i32);
-        // A duplex run selects the feeder as well as the duplex bit; the bit
-        // alone names no source to take the sheet from.
-        assert_eq!(handling.duplex_select, (FEEDER | DUPLEX) as i32);
-        assert_ne!(handling.duplex_select & FEEDER as i32, 0);
+        // WIA 2.0 selects the source by its feeder item; the property writes
+        // the duplex mode and the requested page order.
+        assert_eq!(handling.duplex_select, (DUPLEX | FRONT_FIRST) as i32);
+        assert_eq!(handling.flatbed_select, FRONT_ONLY as i32);
+        assert_eq!(handling.feeder_select, FRONT_ONLY as i32);
     }
 
     #[test]
@@ -2601,8 +2607,8 @@ mod tests {
             pages: ControlModel::Absent,
             document_handling_select: if selectable {
                 ControlModel::Flags {
-                    valid: 7,
-                    current: Some(2),
+                    valid: (FRONT_ONLY | DUPLEX | FRONT_FIRST | ADVANCED_DUPLEX) as i32,
+                    current: Some(FRONT_ONLY as i32),
                 }
             } else {
                 ControlModel::Absent
@@ -2647,9 +2653,9 @@ mod tests {
                 .map(|o| o.document_handling)
                 .collect::<Vec<_>>(),
             vec![
-                Some(FLATBED as i32),
-                Some(FEEDER as i32),
-                Some((FEEDER | DUPLEX) as i32)
+                Some(FRONT_ONLY as i32),
+                Some(FRONT_ONLY as i32),
+                Some((DUPLEX | FRONT_FIRST) as i32)
             ]
         );
         // Only a feeder can produce more than one page in one run.
@@ -2657,8 +2663,8 @@ mod tests {
             options.iter().map(|o| o.feeds).collect::<Vec<_>>(),
             vec![false, true, true]
         );
-        // The duplex row transfers from the FEEDER item; the duplex bit names
-        // no source to take the sheet from.
+        // The duplex row transfers from the FEEDER item; its property value
+        // only selects the duplex mode.
         assert_eq!(options[2].item_name, options[1].item_name);
     }
 

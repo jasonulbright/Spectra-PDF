@@ -1531,10 +1531,30 @@ pub fn run(options: &Options, console: &dyn Console) -> Result<Report, String> {
 /// the tester is standing at the machine, so several scanners is a question
 /// to ask rather than a refusal.
 fn resolve_device(requested: Option<&str>, console: &dyn Console) -> Result<String, String> {
-    if let Some(id) = requested {
-        return Ok(id.to_string());
-    }
     let list = crate::scanner::enumerate(None).map_err(|e| e.to_string())?;
+    if let Some(id) = requested {
+        if let Some(device) = list.scanners.iter().find(|device| device.id == id) {
+            return Ok(device.id.clone());
+        }
+        if let Ok(index) = id.parse::<usize>() {
+            if (1..=list.scanners.len()).contains(&index) {
+                return Ok(list.scanners[index - 1].id.clone());
+            }
+        }
+        if list.scanners.is_empty() {
+            return Err("No scanners found. Check that the scanner is switched on and connected, then run this again.".to_string());
+        }
+        let available = list
+            .scanners
+            .iter()
+            .enumerate()
+            .map(|(index, device)| format!("{} ({})", index + 1, device.id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "Scanner '{id}' was not found. Available scanner IDs by number: {available}. Use an exact ID or its 1-based number."
+        ));
+    }
     match list.scanners.len() {
         0 => Err("No scanners found. Check that the scanner is switched on and connected, then run this again.".to_string()),
         1 => Ok(list.scanners[0].id.clone()),
@@ -2573,9 +2593,9 @@ mod tests {
                 duplex: options.contains(&SourceOptionId::Duplex),
                 advanced_duplex: false,
                 duplex_mode: DuplexMode::None,
-                flatbed_select: 2,
-                feeder_select: 1,
-                duplex_select: 5,
+                flatbed_select: 32,
+                feeder_select: 32,
+                duplex_select: 12,
             },
             source_options: options
                 .iter()
