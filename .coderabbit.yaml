@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+early_access: false
+enable_free_tier: true
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  finishing_touches:
+    autofix:
+      enabled: false
+    docstrings:
+      enabled: false
+    simplify:
+      enabled: false
+    unit_tests:
+      enabled: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/target/**"
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/*.lock"
+    - "!**/*.local.log"
+  path_instructions:
+    - path: "**/{tests,test,spec,__tests__}/**"
+      instructions: |
+        Tests live in the repository and ship nowhere. Deleting an existing test needs the same evidence as deleting code: the PR must say why the test existed and why it no longer applies. Flag any deleted or skipped test without that reasoning. Regression tests born from real incidents are load-bearing; flag their removal as a blocking issue.
+    - path: ".github/workflows/**"
+      instructions: |
+        Every third-party action must be pinned to a full commit SHA with a version comment. Flag mutable tags. Flag persist-credentials left at its default on checkout. Flag permissions blocks broader than the job needs.
+    - path: "**/*.cs"
+      instructions: |
+        Flag async void outside event handlers. Flag .Result or .Wait() on a Task. Flag string concatenation into a path where Path.Combine applies. Flag catch blocks that swallow an exception without logging or rethrowing.
+    - path: "**/*.rs"
+      instructions: |
+        Flag unwrap or expect on values that come from user input, the network, the filesystem, or a Windows API. Flag unsafe blocks without a stated invariant comment that names the specific condition the block relies on.
+  tools:
+    actionlint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    yamllint:
+      enabled: true
+    zizmor:
+      enabled: true
+    psscriptanalyzer:
+      enabled: true
+    clippy:
+      enabled: true
+    shellcheck:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: global
