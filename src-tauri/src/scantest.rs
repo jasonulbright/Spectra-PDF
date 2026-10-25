@@ -22,6 +22,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::scan_model::DeviceId;
 use crate::scanner::{
     ColorMode, PaperSize, ScanEvent, ScanRefusal, ScanResult, ScanSettings, ScanSourceOption,
     ScannerCapabilities, ScannerSessions, SourceOptionId,
@@ -1534,6 +1535,10 @@ fn resolve_device(requested: Option<&str>, console: &dyn Console) -> Result<Stri
     let list = crate::scanner::enumerate(None).map_err(|e| e.to_string())?;
     if let Some(id) = requested {
         if let Some(device) = list.scanners.iter().find(|device| device.id == id) {
+            return Ok(device.id.clone());
+        }
+        let normalized_id = DeviceId::parse(id).qualified();
+        if let Some(device) = list.scanners.iter().find(|device| device.id == normalized_id) {
             return Ok(device.id.clone());
         }
         if let Ok(index) = id.parse::<usize>() {
