@@ -87,7 +87,7 @@ function reportedSource(category: string, over: Record<string, unknown> = {}) {
     brightness: { kind: 'absent' },
     contrast: { kind: 'absent' },
     pages: { kind: 'span', min: 0, max: 99, step: 1, current: 0 },
-    document_handling_select: { kind: 'flags', valid: 1068, current: 32 },
+    document_handling_select: { kind: 'flags', valid: 1060, current: 32 },
     ...over,
   };
 }
@@ -112,7 +112,7 @@ const FLATBED_ONLY = {
     duplex_mode: 'none',
     flatbed_select: 32,
     feeder_select: 32,
-    duplex_select: 12,
+    duplex_select: 4,
   },
 };
 
@@ -134,7 +134,7 @@ const FEEDER_DUPLEX = {
     { id: 'feeder', item_name: 'Root\\feeder', document_handling: 32, feeds: true },
     // The duplex row transfers from the FEEDER item; its property value only
     // selects the duplex mode.
-    { id: 'duplex', item_name: 'Root\\feeder', document_handling: 12, feeds: true },
+    { id: 'duplex', item_name: 'Root\\feeder', document_handling: 4, feeds: true },
   ],
   document_handling: {
     capabilities: 7,
@@ -145,7 +145,7 @@ const FEEDER_DUPLEX = {
     duplex_mode: 'duplex_bit',
     flatbed_select: 32,
     feeder_select: 32,
-    duplex_select: 12,
+    duplex_select: 4,
   },
 };
 

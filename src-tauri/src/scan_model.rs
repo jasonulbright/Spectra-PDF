@@ -387,13 +387,12 @@ pub fn source_options(
     };
     let writes = |source: &ScanSourceReport, value: i32| -> Option<i32> {
         // WIA_IPS_DOCUMENT_HANDLING_SELECT belongs to the selected scan item.
-        // A capability on the feeder must not make us write a legacy source
-        // flag to a flatbed item that does not expose the property.
-        matches!(
-            &source.document_handling_select,
-            ControlModel::Flags { .. }
-        )
-        .then_some(value)
+        // A capability on one item must not make us write a flag that the
+        // selected item does not expose as valid.
+        match &source.document_handling_select {
+            ControlModel::Flags { valid, .. } if *valid & value == value => Some(value),
+            _ => None,
+        }
     };
     let flatbed = item(&[SourceCategory::Flatbed]).or(only);
     let feeder = item(&[SourceCategory::Feeder, SourceCategory::FeederFront]).or(only);
@@ -416,12 +415,17 @@ pub fn source_options(
         });
     }
     if let Some(source) = feeder.filter(|_| handling.duplex_mode != DuplexMode::None) {
-        options.push(ScanSourceOption {
-            id: SourceOptionId::Duplex,
-            item_name: source.item_name.clone(),
-            document_handling: writes(source, handling.duplex_select),
-            feeds: true,
-        });
+        // The device-wide capability word can advertise duplex while the
+        // selected feeder item rejects its mode. Do not offer a row that can
+        // only fall back to simplex when its property write fails.
+        if let Some(document_handling) = writes(source, handling.duplex_select) {
+            options.push(ScanSourceOption {
+                id: SourceOptionId::Duplex,
+                item_name: source.item_name.clone(),
+                document_handling: Some(document_handling),
+                feeds: true,
+            });
+        }
     }
     // A device that reported neither capability still has items; offering the
     // first of them beats an empty picker on a working scanner.

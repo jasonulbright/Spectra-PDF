@@ -7471,7 +7471,7 @@ mod tests {
                 current: Some(0),
             },
             document_handling_select: ControlModel::Flags {
-                valid: 1068,
+                valid: 1060,
                 current: Some(32),
             },
         };
@@ -7487,7 +7487,7 @@ mod tests {
                 duplex_mode: DuplexMode::DuplexBit,
                 flatbed_select: 32,
                 feeder_select: 32,
-                duplex_select: 12,
+                duplex_select: 4,
             },
             source_options: vec![
                 ScanSourceOption {
@@ -7499,7 +7499,7 @@ mod tests {
                 ScanSourceOption {
                     id: SourceOptionId::Duplex,
                     item_name: "Root\\feeder".into(),
-                    document_handling: Some(12),
+                    document_handling: Some(4),
                     feeds: true,
                 },
             ],
@@ -7544,7 +7544,7 @@ mod tests {
         let settings = scan_settings(&caps, &scan_args(&["--source", "duplex", "--pages", "3"]))
             .expect("duplex is offered");
         assert_eq!(settings.item_name.as_deref(), Some("Root\\feeder"));
-        assert_eq!(settings.document_handling, Some(12));
+        assert_eq!(settings.document_handling, Some(4));
         assert_eq!(settings.pages, Some(3));
         // No --source takes the first row the device reported, never a guess.
         let settings = scan_settings(&caps, &scan_args(&[])).expect("a first row exists");

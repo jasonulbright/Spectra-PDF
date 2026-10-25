@@ -79,8 +79,8 @@ use windows::core::{implement, Interface, BSTR, GUID, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Devices::ImageAcquisition::{
     IEnumWiaItem2, IWiaDevMgr2, IWiaItem2, IWiaPropertyStorage, IWiaTransfer,
     IWiaTransferCallback, IWiaTransferCallback_Impl, WiaDevMgr2, WiaImgFmt_BMP, WiaImgFmt_PNG,
-    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX, DUPLEX, FEEDER, FLATBED, FRONT_FIRST,
-    FRONT_ONLY, WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
+    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX, DUPLEX, FEEDER, FLATBED, FRONT_ONLY,
+    WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
     WIA_CATEGORY_FEEDER_FRONT, WIA_CATEGORY_FLATBED, WIA_CATEGORY_FILM, WIA_DATA_AUTO,
     WIA_DATA_COLOR, WIA_DATA_GRAYSCALE, WIA_DATA_THRESHOLD, WIA_DEVINFO_ENUM_LOCAL,
     WIA_DIP_DEV_ID, WIA_DIP_DEV_NAME, WIA_DIP_DEV_TYPE,
@@ -300,11 +300,12 @@ pub fn document_handling(capabilities: i32, categories: &[SourceCategory]) -> Do
         feeder_select: FRONT_ONLY as i32,
         // ADVANCED_DUPLEX is mutually exclusive with DUPLEX and selects the
         // feeder's front/back child items. Simple duplex uses one feeder
-        // stream; explicitly request front-first when the driver supports it.
+        // stream; FRONT_FIRST is an optional ordering flag and is not needed
+        // to enable duplex, so leave it to the device's default.
         duplex_select: if duplex_mode == DuplexMode::FrontBackItems {
             ADVANCED_DUPLEX as i32
         } else {
-            (DUPLEX | FRONT_FIRST) as i32
+            DUPLEX as i32
         },
     }
 }
@@ -1367,7 +1368,30 @@ unsafe fn acquire(
         // Document handling first: it decides which source is being read, and
         // a device can report different extents for its feeder and its glass.
         if let Some(bits) = settings.document_handling {
-            apply_setting(&store, WIA_IPS_DOCUMENT_HANDLING_SELECT, bits, &mut adjusted);
+            let duplex_mask = (DUPLEX | ADVANCED_DUPLEX) as i32;
+            let requested_duplex = bits & duplex_mask;
+            let valid_duplex_mode = requested_duplex == DUPLEX as i32
+                || requested_duplex == ADVANCED_DUPLEX as i32;
+            if requested_duplex != 0 && !valid_duplex_mode {
+                return Err(ScanRefusal::named(
+                    "scan.failed",
+                    "The requested duplex mode combines incompatible scanner flags.",
+                ));
+            }
+            let actual = apply_setting(
+                &store,
+                WIA_IPS_DOCUMENT_HANDLING_SELECT,
+                bits,
+                &mut adjusted,
+            );
+            if requested_duplex != 0
+                && !actual.is_some_and(|value| value & duplex_mask == requested_duplex)
+            {
+                return Err(ScanRefusal::named(
+                    "scan.failed",
+                    "Could not verify that the scanner enabled the selected duplex mode. Duplex scanning was stopped to avoid one-sided output.",
+                ));
+            }
         }
         if let Some(mode) = settings.color_mode {
             apply_setting(&store, WIA_IPA_DATATYPE, mode.data_type(), &mut adjusted);
@@ -2573,8 +2597,8 @@ mod tests {
             &[SourceCategory::Flatbed, SourceCategory::Feeder],
         );
         // WIA 2.0 selects the source by its feeder item; the property writes
-        // the duplex mode and the requested page order.
-        assert_eq!(handling.duplex_select, (DUPLEX | FRONT_FIRST) as i32);
+        // the duplex mode. Front-first is optional and not requested.
+        assert_eq!(handling.duplex_select, DUPLEX as i32);
         assert_eq!(handling.flatbed_select, FRONT_ONLY as i32);
         assert_eq!(handling.feeder_select, FRONT_ONLY as i32);
     }
@@ -2607,7 +2631,7 @@ mod tests {
             pages: ControlModel::Absent,
             document_handling_select: if selectable {
                 ControlModel::Flags {
-                    valid: (FRONT_ONLY | DUPLEX | FRONT_FIRST | ADVANCED_DUPLEX) as i32,
+                    valid: (FRONT_ONLY | DUPLEX | ADVANCED_DUPLEX) as i32,
                     current: Some(FRONT_ONLY as i32),
                 }
             } else {
@@ -2655,7 +2679,7 @@ mod tests {
             vec![
                 Some(FRONT_ONLY as i32),
                 Some(FRONT_ONLY as i32),
-                Some((DUPLEX | FRONT_FIRST) as i32)
+                Some(DUPLEX as i32)
             ]
         );
         // Only a feeder can produce more than one page in one run.

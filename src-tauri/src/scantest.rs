@@ -2595,7 +2595,7 @@ mod tests {
                 duplex_mode: DuplexMode::None,
                 flatbed_select: 32,
                 feeder_select: 32,
-                duplex_select: 12,
+                duplex_select: 4,
             },
             source_options: options
                 .iter()

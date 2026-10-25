@@ -51,7 +51,7 @@ function source(
     brightness: { kind: 'absent' },
     contrast: { kind: 'absent' },
     pages: { kind: 'absent' },
-    document_handling_select: { kind: 'flags', valid: 1068, current: 32 },
+    document_handling_select: { kind: 'flags', valid: 1060, current: 32 },
     ...over,
   };
 }
@@ -76,7 +76,7 @@ function device(
       duplex_mode: 'none',
       flatbed_select: 32,
       feeder_select: 32,
-      duplex_select: 12,
+      duplex_select: 4,
       ...handling,
     },
   };
@@ -189,7 +189,7 @@ describe('the source picker is read from the report, not re-derived', () => {
   const duplexRow: ScanSourceOption = {
     id: 'duplex',
     item_name: 'Root\\feeder',
-    document_handling: 12,
+    document_handling: 4,
     feeds: true,
   };
 
