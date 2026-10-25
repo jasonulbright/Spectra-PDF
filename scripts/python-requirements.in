@@ -30,6 +30,8 @@ uharfbuzz==0.56.0
 # exists for. BSD-3-Clause; a cp314 win_amd64 wheel exists, so nothing
 # compiles at packaging time.
 numpy==2.5.2
+# The engine imports Pillow directly for image decoding and processing.
+pillow==13.0.0
 # HEIC/HEIF decoding is NOT resolved here. The decode-only distribution is
 # vendored into the repository instead — scripts/vendored-wheels.tsv and
 # vendor/wheels/ — because its upstream is discontinued and an index cannot be
@@ -54,6 +56,8 @@ spylls==0.1.7
 # else's requirements can disappear under a bump that has nothing to do with
 # this feature. Apache-2.0.
 requests==2.34.2
+# Requests uses certifi's CA bundle for TLS verification.
+certifi==2026.10.19
 # Presentation export: the deck writer for the pptx target. MIT, `none-any`.
 # Its binary transitive dependencies (lxml, Pillow) already resolve here at the
 # same versions, so nothing is duplicated or upgraded.
