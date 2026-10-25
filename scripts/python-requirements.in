@@ -30,7 +30,7 @@ uharfbuzz==0.56.0
 # exists for. BSD-3-Clause; a cp314 win_amd64 wheel exists, so nothing
 # compiles at packaging time.
 numpy==2.5.2
-# The engine imports Pillow directly for image decoding and processing.
+# Without this pin, lock generation can omit Pillow despite direct engine imports.
 pillow==13.0.0
 # HEIC/HEIF decoding is NOT resolved here. The decode-only distribution is
 # vendored into the repository instead — scripts/vendored-wheels.tsv and
