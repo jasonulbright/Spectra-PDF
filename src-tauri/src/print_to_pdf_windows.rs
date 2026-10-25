@@ -1173,7 +1173,52 @@ Set-SpPrivate $p[0] $spectraSid
 Set-SpHeld $name $spectraComment
 foreach ($j in @(Get-PrintJob -PrinterObject $p[0])) { $null = Remove-PrintJob -InputObject $j }
 $p = @(Get-SpPrinter $name)
-if ($p.Count -ne 1 -or -not (Test-SpMine $p[0] $spectraSid) -or -not (Test-SpPrivate (Get-SpSddl $p[0]) $spectraSid)) { throw 'The installed Spectra PDF printer could not be verified.' }
+$verification = @{
+queueCount = $p.Count
+driver = 'not evaluated (queue count was not 1)'
+port = 'not evaluated (queue count was not 1)'
+heldAttributes = 'not evaluated (queue count was not 1)'
+accountPrintGrant = 'not evaluated (queue count was not 1)'
+privateAcl = 'not evaluated (queue count was not 1)'
+}
+$verified = $false
+if ($p.Count -eq 1) {
+$printer = $p[0]
+$driverName = ([string]$printer.DriverName -replace '[^\x20-\x7E]', '?')
+if ($driverName.Length -gt 80) { $driverName = $driverName.Substring(0, 80) }
+$portName = ([string]$printer.PortName -replace '[^\x20-\x7E]', '?')
+if ($portName.Length -gt 80) { $portName = $portName.Substring(0, 80) }
+$driverMatches = Test-SpName $printer.DriverName '__DRIVER__'
+$portMatches = Test-SpName $printer.PortName '__HOLD_PORT__'
+$verification.driver = "actual='$driverName', expected='__DRIVER__', match=$driverMatches"
+$verification.port = "actual='$portName', expected='__HOLD_PORT__', match=$portMatches"
+$w = @(Get-CimInstance Win32_Printer | ? { Test-SpName $_.Name $printer.Name })
+if ($w.Count -eq 1) {
+$attributes = [int64]$w[0].Attributes
+$heldAttributesMatch = ($attributes -band __HELD_ATTRIBUTES__) -eq __HELD_ATTRIBUTES__
+$verification.heldAttributes = ('actual=0x{0:X}, required=0x{1:X}, match={2}' -f $attributes, [int64]__HELD_ATTRIBUTES__, $heldAttributesMatch)
+} else {
+$heldAttributesMatch = $false
+$verification.heldAttributes = "matching Win32_Printer rows=$($w.Count), expected=1, match=False"
+}
+$accountPrintGrant = $null
+$privateAcl = $null
+try {
+$sddl = Get-SpSddl $printer
+$grantees = @(Get-SpGrantees $sddl)
+$accountPrintGrant = $grantees -contains $spectraSid
+$privateAcl = Test-SpPrivate $sddl $spectraSid
+$verification.accountPrintGrant = [string]$accountPrintGrant
+$verification.privateAcl = [string]$privateAcl
+} catch {
+$verification.accountPrintGrant = 'unavailable (printer permissions could not be read)'
+$verification.privateAcl = 'unavailable (printer permissions could not be read)'
+}
+$verified = $driverMatches -and $portMatches -and $heldAttributesMatch -and $accountPrintGrant -eq $true -and $privateAcl -eq $true
+}
+if (-not $verified) {
+throw "The installed Spectra PDF printer could not be verified (queueCount=$($verification.queueCount), expected=1; driver=$($verification.driver); port=$($verification.port); heldAttributes=$($verification.heldAttributes); accountPrintGrant=$($verification.accountPrintGrant); privateAcl=$($verification.privateAcl))."
+}
 } catch {
 $failure = $_
 $rollback = @()
