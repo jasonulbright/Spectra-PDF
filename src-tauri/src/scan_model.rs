@@ -390,7 +390,10 @@ pub fn source_options(
         // A capability on one item must not make us write a flag that the
         // selected item does not expose as valid.
         match &source.document_handling_select {
-            ControlModel::Flags { valid, .. } if *valid & value == value => Some(value),
+            ControlModel::Flags {
+                valid,
+                current: Some(_),
+            } if *valid & value == value => Some(value),
             _ => None,
         }
     };
