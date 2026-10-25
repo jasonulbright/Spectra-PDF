@@ -22,6 +22,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::scan_model::{DeviceId, ScannerDevice};
 use crate::scanner::{
     ColorMode, PaperSize, ScanEvent, ScanRefusal, ScanResult, ScanSettings, ScanSourceOption,
     ScannerCapabilities, ScannerSessions, SourceOptionId,
@@ -1530,13 +1531,43 @@ pub fn run(options: &Options, console: &dyn Console) -> Result<Report, String> {
 /// The headless rule (`cli.rs`'s `choose_scan_device`) does not apply here:
 /// the tester is standing at the machine, so several scanners is a question
 /// to ask rather than a refusal.
-fn resolve_device(requested: Option<&str>, console: &dyn Console) -> Result<String, String> {
-    if let Some(id) = requested {
-        return Ok(id.to_string());
+const NO_SCANNERS_FOUND: &str =
+    "No scanners found. Check that the scanner is switched on and connected, then run this again.";
+
+fn resolve_requested_device(scanners: &[ScannerDevice], id: &str) -> Result<String, String> {
+    if let Some(device) = scanners.iter().find(|device| device.id == id) {
+        return Ok(device.id.clone());
     }
+    let normalized_id = DeviceId::parse(id).qualified();
+    if let Some(device) = scanners.iter().find(|device| device.id == normalized_id) {
+        return Ok(device.id.clone());
+    }
+    if let Ok(index) = id.parse::<usize>() {
+        if (1..=scanners.len()).contains(&index) {
+            return Ok(scanners[index - 1].id.clone());
+        }
+    }
+    if scanners.is_empty() {
+        return Err(NO_SCANNERS_FOUND.to_string());
+    }
+    let available = scanners
+        .iter()
+        .enumerate()
+        .map(|(index, device)| format!("{} ({})", index + 1, device.id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "Scanner '{id}' was not found. Available scanner IDs by number: {available}. Use an exact ID or its 1-based number."
+    ))
+}
+
+fn resolve_device(requested: Option<&str>, console: &dyn Console) -> Result<String, String> {
     let list = crate::scanner::enumerate(None).map_err(|e| e.to_string())?;
+    if let Some(id) = requested {
+        return resolve_requested_device(&list.scanners, id);
+    }
     match list.scanners.len() {
-        0 => Err("No scanners found. Check that the scanner is switched on and connected, then run this again.".to_string()),
+        0 => Err(NO_SCANNERS_FOUND.to_string()),
         1 => Ok(list.scanners[0].id.clone()),
         _ => {
             console.say("Several scanners are attached:");
@@ -2526,6 +2557,55 @@ mod tests {
         ControlModel, DocumentHandling, DuplexMode, ScanSourceReport, SourceCategory,
     };
 
+    fn scanner_device(id: &str) -> ScannerDevice {
+        ScannerDevice {
+            id: id.to_string(),
+            name: format!("Scanner {id}"),
+        }
+    }
+
+    #[test]
+    fn requested_exact_id_precedes_numeric_ordinal() {
+        let scanners = vec![scanner_device("2"), scanner_device("second")];
+
+        assert_eq!(resolve_requested_device(&scanners, "2"), Ok("2".to_string()));
+    }
+
+    #[test]
+    fn requested_legacy_id_is_normalized_before_numeric_ordinal() {
+        let normalized = DeviceId::parse("2").qualified();
+        let scanners = vec![scanner_device(&normalized), scanner_device("second")];
+
+        assert_eq!(
+            resolve_requested_device(&scanners, "2"),
+            Ok(normalized)
+        );
+    }
+
+    #[test]
+    fn requested_one_based_ordinal_selects_its_scanner() {
+        let scanners = vec![scanner_device("first"), scanner_device("second")];
+
+        assert_eq!(
+            resolve_requested_device(&scanners, "2"),
+            Ok("second".to_string())
+        );
+    }
+
+    #[test]
+    fn requested_missing_id_preserves_unmatched_and_empty_errors() {
+        let scanners = vec![scanner_device("first")];
+
+        assert_eq!(
+            resolve_requested_device(&scanners, "missing"),
+            Err("Scanner 'missing' was not found. Available scanner IDs by number: 1 (first). Use an exact ID or its 1-based number.".to_string())
+        );
+        assert_eq!(
+            resolve_requested_device(&[], "missing"),
+            Err(NO_SCANNERS_FOUND.to_string())
+        );
+    }
+
     fn evidence(width: u32, height: u32, dpi: f64, bits: u16, content: ContentVerdict) -> PageEvidence {
         PageEvidence {
             file: "page-0000.bmp".to_string(),
@@ -2573,9 +2653,9 @@ mod tests {
                 duplex: options.contains(&SourceOptionId::Duplex),
                 advanced_duplex: false,
                 duplex_mode: DuplexMode::None,
-                flatbed_select: 2,
-                feeder_select: 1,
-                duplex_select: 5,
+                flatbed_select: 32,
+                feeder_select: 32,
+                duplex_select: 4,
             },
             source_options: options
                 .iter()

@@ -15,6 +15,10 @@ helps too.
    & "$env:ProgramFiles\Spectra PDF\spectrapdf.exe" scan-test
    ```
 
+   If several scanners are attached, the checklist shows a numbered picker.
+   You can also pass `--device 1` (or another number from that list); an exact
+   device ID from `spectrapdf.exe scanners` works too.
+
 3. Answer the prompts. It tells you when to load the feeder, when to press
    things, and when a step is safe to skip.
 4. When it finishes, attach the two files it names (`scan-test-report.json`

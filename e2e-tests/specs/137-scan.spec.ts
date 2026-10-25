@@ -87,7 +87,7 @@ function reportedSource(category: string, over: Record<string, unknown> = {}) {
     brightness: { kind: 'absent' },
     contrast: { kind: 'absent' },
     pages: { kind: 'span', min: 0, max: 99, step: 1, current: 0 },
-    document_handling_select: { kind: 'flags', valid: 7, current: 2 },
+    document_handling_select: { kind: 'flags', valid: 1060, current: 32 },
     ...over,
   };
 }
@@ -101,7 +101,7 @@ const FLATBED_ONLY = {
   // The picker rows are reported, not re-derived: a flatbed device offers one
   // row and no duplex anywhere.
   source_options: [
-    { id: 'flatbed', item_name: 'Root\\flatbed', document_handling: 2, feeds: false },
+    { id: 'flatbed', item_name: 'Root\\flatbed', document_handling: 32, feeds: false },
   ],
   document_handling: {
     capabilities: 2,
@@ -110,9 +110,9 @@ const FLATBED_ONLY = {
     duplex: false,
     advanced_duplex: false,
     duplex_mode: 'none',
-    flatbed_select: 2,
-    feeder_select: 1,
-    duplex_select: 5,
+    flatbed_select: 32,
+    feeder_select: 32,
+    duplex_select: 4,
   },
 };
 
@@ -130,11 +130,11 @@ const FEEDER_DUPLEX = {
     }),
   ],
   source_options: [
-    { id: 'flatbed', item_name: 'Root\\flatbed', document_handling: 2, feeds: false },
-    { id: 'feeder', item_name: 'Root\\feeder', document_handling: 1, feeds: true },
-    // The duplex row transfers from the FEEDER item; the duplex bit names no
-    // source to take the sheet from.
-    { id: 'duplex', item_name: 'Root\\feeder', document_handling: 5, feeds: true },
+    { id: 'flatbed', item_name: 'Root\\flatbed', document_handling: 32, feeds: false },
+    { id: 'feeder', item_name: 'Root\\feeder', document_handling: 32, feeds: true },
+    // The duplex row transfers from the FEEDER item; its property value only
+    // selects the duplex mode.
+    { id: 'duplex', item_name: 'Root\\feeder', document_handling: 4, feeds: true },
   ],
   document_handling: {
     capabilities: 7,
@@ -143,9 +143,9 @@ const FEEDER_DUPLEX = {
     duplex: true,
     advanced_duplex: false,
     duplex_mode: 'duplex_bit',
-    flatbed_select: 2,
-    feeder_select: 1,
-    duplex_select: 5,
+    flatbed_select: 32,
+    feeder_select: 32,
+    duplex_select: 4,
   },
 };
 

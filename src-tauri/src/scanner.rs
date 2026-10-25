@@ -79,8 +79,8 @@ use windows::core::{implement, Interface, BSTR, GUID, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Devices::ImageAcquisition::{
     IEnumWiaItem2, IWiaDevMgr2, IWiaItem2, IWiaPropertyStorage, IWiaTransfer,
     IWiaTransferCallback, IWiaTransferCallback_Impl, WiaDevMgr2, WiaImgFmt_BMP, WiaImgFmt_PNG,
-    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX,
-    DUPLEX, FEEDER, FLATBED, WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
+    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX, DUPLEX, FEEDER, FLATBED, FRONT_ONLY,
+    WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
     WIA_CATEGORY_FEEDER_FRONT, WIA_CATEGORY_FLATBED, WIA_CATEGORY_FILM, WIA_DATA_AUTO,
     WIA_DATA_COLOR, WIA_DATA_GRAYSCALE, WIA_DATA_THRESHOLD, WIA_DEVINFO_ENUM_LOCAL,
     WIA_DIP_DEV_ID, WIA_DIP_DEV_NAME, WIA_DIP_DEV_TYPE,
@@ -292,13 +292,21 @@ pub fn document_handling(capabilities: i32, categories: &[SourceCategory]) -> Do
         duplex,
         advanced_duplex,
         duplex_mode,
-        flatbed_select: FLATBED as i32,
-        feeder_select: FEEDER as i32,
-        // A duplex run selects the feeder AND the duplex bit. On a device
-        // whose front and back arrive as separate child items the driver
-        // still honours this pair; the separate items exist so per-side
-        // settings are possible, not because the bit stops working.
-        duplex_select: (FEEDER | DUPLEX) as i32,
+        // WIA 2.0 selects the source by transferring from its feeder or
+        // flatbed item. WIA_IPS_DOCUMENT_HANDLING_SELECT carries the page
+        // mode only: FEEDER and FLATBED are obsolete source bits on this
+        // property for Vista and later.
+        flatbed_select: FRONT_ONLY as i32,
+        feeder_select: FRONT_ONLY as i32,
+        // ADVANCED_DUPLEX is mutually exclusive with DUPLEX and selects the
+        // feeder's front/back child items. Simple duplex uses one feeder
+        // stream; FRONT_FIRST is an optional ordering flag and is not needed
+        // to enable duplex, so leave it to the device's default.
+        duplex_select: if duplex_mode == DuplexMode::FrontBackItems {
+            ADVANCED_DUPLEX as i32
+        } else {
+            DUPLEX as i32
+        },
     }
 }
 
@@ -1360,7 +1368,30 @@ unsafe fn acquire(
         // Document handling first: it decides which source is being read, and
         // a device can report different extents for its feeder and its glass.
         if let Some(bits) = settings.document_handling {
-            apply_setting(&store, WIA_IPS_DOCUMENT_HANDLING_SELECT, bits, &mut adjusted);
+            let duplex_mask = (DUPLEX | ADVANCED_DUPLEX) as i32;
+            let requested_duplex = bits & duplex_mask;
+            let valid_duplex_mode = requested_duplex == DUPLEX as i32
+                || requested_duplex == ADVANCED_DUPLEX as i32;
+            if requested_duplex != 0 && !valid_duplex_mode {
+                return Err(ScanRefusal::named(
+                    "scan.failed",
+                    "The requested duplex mode combines incompatible scanner flags.",
+                ));
+            }
+            let actual = apply_setting(
+                &store,
+                WIA_IPS_DOCUMENT_HANDLING_SELECT,
+                bits,
+                &mut adjusted,
+            );
+            if requested_duplex != 0
+                && !actual.is_some_and(|value| value & duplex_mask == requested_duplex)
+            {
+                return Err(ScanRefusal::named(
+                    "scan.failed",
+                    "Could not verify that the scanner enabled the selected duplex mode. Duplex scanning was stopped to avoid one-sided output.",
+                ));
+            }
         }
         if let Some(mode) = settings.color_mode {
             apply_setting(&store, WIA_IPA_DATATYPE, mode.data_type(), &mut adjusted);
@@ -2565,12 +2596,11 @@ mod tests {
             (FLATBED | FEEDER | DUPLEX) as i32,
             &[SourceCategory::Flatbed, SourceCategory::Feeder],
         );
-        assert_eq!(handling.flatbed_select, FLATBED as i32);
-        assert_eq!(handling.feeder_select, FEEDER as i32);
-        // A duplex run selects the feeder as well as the duplex bit; the bit
-        // alone names no source to take the sheet from.
-        assert_eq!(handling.duplex_select, (FEEDER | DUPLEX) as i32);
-        assert_ne!(handling.duplex_select & FEEDER as i32, 0);
+        // WIA 2.0 selects the source by its feeder item; the property writes
+        // the duplex mode. Front-first is optional and not requested.
+        assert_eq!(handling.duplex_select, DUPLEX as i32);
+        assert_eq!(handling.flatbed_select, FRONT_ONLY as i32);
+        assert_eq!(handling.feeder_select, FRONT_ONLY as i32);
     }
 
     #[test]
@@ -2601,8 +2631,8 @@ mod tests {
             pages: ControlModel::Absent,
             document_handling_select: if selectable {
                 ControlModel::Flags {
-                    valid: 7,
-                    current: Some(2),
+                    valid: (FRONT_ONLY | DUPLEX | ADVANCED_DUPLEX) as i32,
+                    current: Some(FRONT_ONLY as i32),
                 }
             } else {
                 ControlModel::Absent
@@ -2647,9 +2677,9 @@ mod tests {
                 .map(|o| o.document_handling)
                 .collect::<Vec<_>>(),
             vec![
-                Some(FLATBED as i32),
-                Some(FEEDER as i32),
-                Some((FEEDER | DUPLEX) as i32)
+                Some(FRONT_ONLY as i32),
+                Some(FRONT_ONLY as i32),
+                Some(DUPLEX as i32)
             ]
         );
         // Only a feeder can produce more than one page in one run.
@@ -2657,8 +2687,8 @@ mod tests {
             options.iter().map(|o| o.feeds).collect::<Vec<_>>(),
             vec![false, true, true]
         );
-        // The duplex row transfers from the FEEDER item; the duplex bit names
-        // no source to take the sheet from.
+        // The duplex row transfers from the FEEDER item; its property value
+        // only selects the duplex mode.
         assert_eq!(options[2].item_name, options[1].item_name);
     }
 
