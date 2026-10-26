@@ -121,7 +121,7 @@ export function ScanDialog({
   const [dpi, setDpi] = useState<number | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode | null>(null);
   const [paper, setPaper] = useState<PaperSize>('auto');
-  const [allPages, setAllPages] = useState(true);
+  const [allPages, setAllPages] = useState<boolean | null>(null);
   const [pageCount, setPageCount] = useState(1);
   const [brightness, setBrightness] = useState<number | null>(null);
   const [contrast, setContrast] = useState<number | null>(null);
@@ -161,6 +161,10 @@ export function ScanDialog({
     [report],
   );
   const canAskForAllPages = offersAllPages(option, report?.pages ?? { kind: 'absent' });
+  // A feeder that supports the until-empty sentinel starts in "all pages".
+  // Keep an explicit user choice across source changes; when the selected
+  // source cannot do that, its effective setting is necessarily page-limited.
+  const scanAllPages = canAskForAllPages && (allPages ?? true);
   const pageLimit = maxPages(report?.pages ?? { kind: 'absent' });
 
   const busy = phase === 'scanning' || phase === 'finishing';
@@ -226,13 +230,6 @@ export function ScanDialog({
     setContrast(initialValue(numericControl(report.contrast)));
   }, [report, options]);
 
-  // "Every page in the feeder" cannot be the standing default on a source
-  // that cannot be asked for it — a flatbed asked for zero pages scans
-  // nothing.
-  useEffect(() => {
-    if (!canAskForAllPages) setAllPages(false);
-  }, [canAskForAllPages]);
-
   // ── The run ──────────────────────────────────────────────────────────
   const runScan = useCallback(async () => {
     if (!deviceId || !capabilities) return;
@@ -249,7 +246,7 @@ export function ScanDialog({
         dpi,
         colorMode,
         paper,
-        allPages,
+        allPages: scanAllPages,
         pageCount,
         brightness,
         contrast,
@@ -301,7 +298,7 @@ export function ScanDialog({
     dpi,
     colorMode,
     paper,
-    allPages,
+    scanAllPages,
     pageCount,
     brightness,
     contrast,
@@ -765,7 +762,7 @@ export function ScanDialog({
                             type="radio"
                             name="scan-pages"
                             data-testid="scan-pages-all"
-                            checked={allPages}
+                            checked={scanAllPages}
                             disabled={busy}
                             onChange={() => setAllPages(true)}
                           />
@@ -777,7 +774,7 @@ export function ScanDialog({
                           type="radio"
                           name="scan-pages"
                           data-testid="scan-pages-limit"
-                          checked={!allPages}
+                          checked={!scanAllPages}
                           disabled={busy}
                           onChange={() => setAllPages(false)}
                         />
@@ -790,7 +787,7 @@ export function ScanDialog({
                         {...(pageLimit && pageLimit > 0 ? { max: pageLimit } : {})}
                         className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
                         value={pageCount}
-                        disabled={busy || allPages}
+                        disabled={busy || scanAllPages}
                         onChange={(e) => setPageCount(Math.max(1, Number(e.target.value) || 1))}
                       />
                     </div>
