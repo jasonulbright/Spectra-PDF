@@ -3,7 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use spectrapdf_lib::cli::{classify_launch, Cli, LaunchMode};
+use spectrapdf_lib::cli::{classify_launch, Cli, CliCommand, LaunchMode};
 
 fn main() {
     // Before any thread exists: every later temp path, the webview's file
@@ -54,8 +54,14 @@ fn main() {
     // checklist, so attach to the caller's console and prefer CONIN$ for its
     // answers. Other CLI commands preserve redirected stdio as before.
     let scan_test_interactive = classify_launch(&argv) == LaunchMode::Parse
-        && argv.iter().any(|arg| arg == "scan-test")
-        && !argv.iter().any(|arg| arg == "--list");
+        && matches!(
+            Cli::try_parse_from(&argv),
+            Ok(cli)
+                if matches!(
+                    cli.command,
+                    Some(CliCommand::ScanTest(args)) if !args.list
+                )
+        );
     attach_parent_console_with_keyboard_input(scan_test_interactive);
 
     if let Some(refusal) = spectrapdf_lib::cli::launch_refusal(&argv) {
@@ -137,6 +143,10 @@ fn attach_parent_console_with_keyboard_input(force_console_stdin: bool) {
     const FILE_TYPE_CHAR: u32 = 2;
     const FILE_TYPE_PIPE: u32 = 3;
 
+    // SAFETY: Pointers passed to Win32 calls below refer to live local values
+    // or NUL-terminated buffers, with null used only for optional parameters.
+    // Handles passed to GetFileType are checked first, and handles installed
+    // by SetStdHandle are validated inherited handles or just opened devices.
     unsafe {
         // A release GUI-subsystem executable can still inherit redirected
         // standard handles from a CLI caller. Keep them: replacing redirected
@@ -231,7 +241,6 @@ fn attach_parent_console() {
 
 #[cfg(not(windows))]
 fn attach_parent_console_with_keyboard_input(_force_console_stdin: bool) {
-    // No-op on non-Windows platforms
 }
 
 /// Names why the app did not start: on stderr for every run, and in a message
