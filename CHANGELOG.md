@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.1026.159
+
+**More reliable scanning and redaction search**
+
+### Fixed
+- Keep Search & Redact controls reachable while browsing results.
+- Default document feeder scans to all pages when available.
+- Read scan-test answers from PowerShell's attached console.
+- Recognize and enhance full-page bilevel scanner images.
+
+### Security
+- Update the bundled Python runtime to 3.14.10.
+
 ## 2026.1025.158
 
 **Safer scanning, clearer printer diagnostics, and security updates**

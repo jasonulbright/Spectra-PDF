@@ -422,7 +422,7 @@ class TestClassification:
 
         monkeypatch.setattr(enhance_scan_engine, "_to_samples", record_mode)
         report = analyze_scan(
-            src, deskew=False, despeckle=False, background=False, orientation=False
+            src, deskew=True, despeckle=False, background=False, orientation=False
         )
 
         assert report["pages_scanned"] == 1
@@ -433,7 +433,7 @@ class TestClassification:
         report = enhance_scan(
             src,
             os.path.join(tmp_dir, "bitonal-out.pdf"),
-            deskew=False,
+            deskew=True,
             despeckle=False,
             background=False,
             orientation=False,
