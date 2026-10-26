@@ -3,7 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use spectrapdf_lib::cli::{classify_launch, Cli, LaunchMode};
+use spectrapdf_lib::cli::{classify_launch, Cli, CliCommand, LaunchMode};
 
 fn main() {
     // Before any thread exists: every later temp path, the webview's file
@@ -49,10 +49,20 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Attach to parent console BEFORE clap parses args, so help and other CLI
-    // output are visible and interactive commands can read input. A GUI
-    // subsystem executable starts without its own console attached.
-    attach_parent_console();
+    // PowerShell can give a GUI-subsystem native command pipe handles even
+    // while the user is at an interactive prompt. `scan-test` is a hardware
+    // checklist, so attach to the caller's console and prefer CONIN$ for its
+    // answers. Other CLI commands preserve redirected stdio as before.
+    let scan_test_interactive = classify_launch(&argv) == LaunchMode::Parse
+        && matches!(
+            Cli::try_parse_from(&argv),
+            Ok(cli)
+                if matches!(
+                    cli.command,
+                    Some(CliCommand::ScanTest(args)) if !args.list
+                )
+        );
+    attach_parent_console_with_keyboard_input(scan_test_interactive);
 
     if let Some(refusal) = spectrapdf_lib::cli::launch_refusal(&argv) {
         eprintln!("error: {refusal}");
@@ -93,6 +103,11 @@ fn main() {
 /// `windows_subsystem = "windows"` which starts with no console.
 #[cfg(windows)]
 fn attach_parent_console() {
+    attach_parent_console_with_keyboard_input(false);
+}
+
+#[cfg(windows)]
+fn attach_parent_console_with_keyboard_input(force_console_stdin: bool) {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;
@@ -128,6 +143,10 @@ fn attach_parent_console() {
     const FILE_TYPE_CHAR: u32 = 2;
     const FILE_TYPE_PIPE: u32 = 3;
 
+    // SAFETY: Pointers passed to Win32 calls below refer to live local values
+    // or NUL-terminated buffers, with null used only for optional parameters.
+    // Handles passed to GetFileType are checked first, and handles installed
+    // by SetStdHandle are validated inherited handles or just opened devices.
     unsafe {
         // A release GUI-subsystem executable can still inherit redirected
         // standard handles from a CLI caller. Keep them: replacing redirected
@@ -153,7 +172,7 @@ fn attach_parent_console() {
         let stdin_redirected = is_redirected(stdin);
         let stdout_redirected = is_redirected(stdout);
         let stderr_redirected = is_redirected(stderr);
-        if stdin_redirected && stdout_redirected && stderr_redirected {
+        if !force_console_stdin && stdin_redirected && stdout_redirected && stderr_redirected {
             return;
         }
         if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
@@ -195,7 +214,9 @@ fn attach_parent_console() {
 
         // AttachConsole may replace standard handles. Restore each caller's
         // redirect independently even if opening the console device fails.
-        if stdin_redirected {
+        if force_console_stdin && input != INVALID_HANDLE_VALUE {
+            SetStdHandle(STD_INPUT_HANDLE, input);
+        } else if stdin_redirected {
             SetStdHandle(STD_INPUT_HANDLE, stdin);
         } else if input != INVALID_HANDLE_VALUE {
             SetStdHandle(STD_INPUT_HANDLE, input);
@@ -216,6 +237,10 @@ fn attach_parent_console() {
 #[cfg(not(windows))]
 fn attach_parent_console() {
     // No-op on non-Windows platforms
+}
+
+#[cfg(not(windows))]
+fn attach_parent_console_with_keyboard_input(_force_console_stdin: bool) {
 }
 
 /// Names why the app did not start: on stderr for every run, and in a message
