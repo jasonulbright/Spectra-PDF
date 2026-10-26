@@ -205,7 +205,7 @@ UNSUPPORTED = "the page image is not grayscale or RGB"
 
 
 def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:
-    """`(image, source filter)` — the scan's OWN samples, mode preserved.
+    """`(image, source filter)` — the scan's OWN samples; mode `1` becomes `L`.
 
     Returns `(None, filter)` rather than raising when this runtime cannot
     decode the codestream (a JPX scan on a build without openjpeg is the live
