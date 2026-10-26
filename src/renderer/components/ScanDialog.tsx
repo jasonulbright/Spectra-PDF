@@ -161,9 +161,8 @@ export function ScanDialog({
     [report],
   );
   const canAskForAllPages = offersAllPages(option, report?.pages ?? { kind: 'absent' });
-  // A feeder that supports the until-empty sentinel starts in "all pages".
-  // Keep an explicit user choice across source changes; when the selected
-  // source cannot do that, its effective setting is necessarily page-limited.
+  // An unset choice defaults to all pages when the source supports the until-empty sentinel.
+  // Explicit choices persist across source changes; unsupported sources stay page-limited.
   const scanAllPages = canAskForAllPages && (allPages ?? true);
   const pageLimit = maxPages(report?.pages ?? { kind: 'absent' });
 
@@ -788,7 +787,10 @@ export function ScanDialog({
                         className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
                         value={pageCount}
                         disabled={busy || scanAllPages}
-                        onChange={(e) => setPageCount(Math.max(1, Number(e.target.value) || 1))}
+                        onChange={(e) => {
+                          setAllPages(false);
+                          setPageCount(Math.max(1, Number(e.target.value) || 1));
+                        }}
                       />
                     </div>
                   </fieldset>
