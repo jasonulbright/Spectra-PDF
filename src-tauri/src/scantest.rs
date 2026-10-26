@@ -18,6 +18,8 @@
 //! apartment rule cannot be broken from here.
 
 use std::collections::HashSet;
+#[cfg(windows)]
+use std::io::BufRead;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -1321,7 +1323,32 @@ pub const NO_CONSOLE: &str = "no interactive console";
 /// stdin can supply an endless stream of answers that are neither y nor n.
 const MAX_INVALID: u32 = 3;
 
-pub struct StdioConsole;
+pub struct StdioConsole {
+    #[cfg(windows)]
+    console_input: Option<std::sync::Mutex<std::io::BufReader<std::fs::File>>>,
+}
+
+impl StdioConsole {
+    pub fn new() -> Self {
+        #[cfg(windows)]
+        {
+            // PowerShell may wrap a native command's stdin even when the user
+            // launched it interactively. Read keyboard answers from the
+            // attached console directly; without a console, keep the ordinary
+            // stdin fallback for scripted invocations.
+            let console_input = std::fs::OpenOptions::new()
+                .read(true)
+                .open("CONIN$")
+                .ok()
+                .map(|input| std::sync::Mutex::new(std::io::BufReader::new(input)));
+            Self { console_input }
+        }
+        #[cfg(not(windows))]
+        {
+            Self {}
+        }
+    }
+}
 
 impl Console for StdioConsole {
     fn say(&self, line: &str) {
@@ -1331,9 +1358,17 @@ impl Console for StdioConsole {
         print!("{prompt}");
         let _ = std::io::stdout().flush();
         let mut answer = String::new();
-        match std::io::stdin().read_line(&mut answer) {
-            Ok(0) | Err(_) => None,
-            Ok(_) => Some(answer.trim().to_string()),
+        #[cfg(windows)]
+        let read = match &self.console_input {
+            Some(input) => input.lock().ok()?.read_line(&mut answer).ok()?,
+            None => std::io::stdin().read_line(&mut answer).ok()?,
+        };
+        #[cfg(not(windows))]
+        let read = std::io::stdin().read_line(&mut answer).ok()?;
+        if read == 0 {
+            None
+        } else {
+            Some(answer.trim().to_string())
         }
     }
 }
