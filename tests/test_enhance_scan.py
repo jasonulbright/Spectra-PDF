@@ -35,6 +35,7 @@ import pikepdf
 import pytest
 from PIL import Image, ImageFilter
 
+import engine.enhance_scan as enhance_scan_engine
 from engine.batch_ocr import ocr_file
 from engine.enhance_scan import (
     BACKGROUND_TRIGGER,
@@ -79,6 +80,25 @@ def _copy(name: str, tmp_dir) -> str:
     dest = os.path.join(tmp_dir, name)
     shutil.copy2(src, dest)
     return dest
+
+
+def _bitonal_scan_pdf(tmp_dir: str) -> str:
+    width, height = 600, 800
+    bitmap = Image.new("1", (width, height), 1)
+    samples = np.packbits(np.asarray(bitmap, dtype=bool), axis=1).tobytes()
+    pdf = pikepdf.Pdf.new()
+    image = pikepdf.Stream(pdf, samples)
+    image.Type = pikepdf.Name.XObject
+    image.Subtype = pikepdf.Name.Image
+    image.Width, image.Height = width, height
+    image.ColorSpace = pikepdf.Name.DeviceGray
+    image.BitsPerComponent = 1
+    page = pdf.add_blank_page(page_size=(288, 384))
+    page.obj.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image))
+    page.Contents = pdf.make_stream(b"q 288 0 0 384 0 0 cm /Im0 Do Q")
+    src = os.path.join(tmp_dir, "bitonal.pdf")
+    pdf.save(src)
+    return src
 
 
 @pytest.fixture
@@ -391,6 +411,37 @@ class TestOrientation:
 # Classification and survival
 # --------------------------------------------------------------------------
 class TestClassification:
+    def test_bilevel_scan_reaches_measurement_as_grayscale(self, tmp_dir, monkeypatch):
+        src = _bitonal_scan_pdf(tmp_dir)
+        modes = []
+        to_samples = enhance_scan_engine._to_samples
+
+        def record_mode(image: Image.Image) -> np.ndarray:
+            modes.append(image.mode)
+            return to_samples(image)
+
+        monkeypatch.setattr(enhance_scan_engine, "_to_samples", record_mode)
+        report = analyze_scan(
+            src, deskew=False, despeckle=False, background=False, orientation=False
+        )
+
+        assert report["pages_scanned"] == 1
+        assert modes == ["L"]
+
+    def test_enhancement_accepts_a_bilevel_scan(self, tmp_dir):
+        src = _bitonal_scan_pdf(tmp_dir)
+        report = enhance_scan(
+            src,
+            os.path.join(tmp_dir, "bitonal-out.pdf"),
+            deskew=False,
+            despeckle=False,
+            background=False,
+            orientation=False,
+        )
+
+        assert report["pages"][0]["decision"] == "unchanged"
+        assert report["pages_unchanged"] == 1
+
     def test_a_born_digital_document_refuses_by_name(self, sample_pdf, tmp_dir):
         dest = os.path.join(tmp_dir, "born.pdf")
         shutil.copy2(sample_pdf, dest)
