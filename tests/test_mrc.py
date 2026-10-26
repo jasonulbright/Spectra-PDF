@@ -49,6 +49,7 @@ from engine.mrc import (
     DEFAULT_PRESET,
     PRESETS,
     _classify_page,
+    _image_refusal,
     _lift_image,
     components,
     estimate_text_height,
@@ -424,6 +425,32 @@ class TestClassification:
         decision, reason = _decision(path)
         assert decision == "untouched"
         assert "already 1-bit" in reason
+
+    def test_bilevel_classification_is_opt_in_and_excludes_masks_and_subbyte_images(
+        self, tmp_dir
+    ):
+        bitmap = Image.new("1", (1200, 1600), 1)
+        path = _image_page_pdf(
+            os.path.join(tmp_dir, "bitonal-opt-in.pdf"), bitmap, fmt="1bit"
+        )
+        with pikepdf.open(path) as pdf:
+            page = pdf.pages[0]
+            candidate, reason = _classify_page(pdf, page, 1)
+            assert candidate is None
+            assert reason == "the page image is already 1-bit"
+
+            candidate, reason = _classify_page(pdf, page, 1, allow_bilevel=True)
+            assert candidate is not None
+            assert reason == "mrc"
+
+        image_mask = pikepdf.Dictionary(BitsPerComponent=1, ImageMask=True)
+        subbyte = pikepdf.Dictionary(BitsPerComponent=2)
+        assert _image_refusal(image_mask, allow_bilevel=True) == (
+            "the page image is already 1-bit"
+        )
+        assert _image_refusal(subbyte, allow_bilevel=True) == (
+            "the page image is already 1-bit"
+        )
 
     def test_a_soft_masked_image_is_refused_by_name(self, tmp_dir):
         photo = Image.new("RGB", (600, 800), (200, 200, 200))

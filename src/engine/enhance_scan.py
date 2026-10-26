@@ -205,7 +205,7 @@ UNSUPPORTED = "the page image is not grayscale or RGB"
 
 
 def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:
-    """`(image, source filter)` — the scan's OWN samples, mode preserved.
+    """`(image, source filter)` — the scan's OWN samples; mode `1` becomes `L`.
 
     Returns `(None, filter)` rather than raising when this runtime cannot
     decode the codestream (a JPX scan on a build without openjpeg is the live
@@ -226,6 +226,11 @@ def _lift(pdf, page, candidate: _Candidate) -> tuple[Image.Image | None, str]:
         im = pikepdf.PdfImage(xobj).as_pil_image()
     except Exception:
         return None, filt
+    if im.mode == "1":
+        # Scanner drivers often emit a bilevel page. Its two samples are
+        # already exactly the grayscale endpoints; lifting to L preserves
+        # them and gives deskew's resampler room to antialias the rotation.
+        im = im.convert("L")
     if im.mode not in ("L", "RGB"):
         # Paper is the high end of an L or RGB sample and the low end of a
         # CMYK one, and the raster is written back in the samples' own space:
@@ -746,7 +751,7 @@ def analyze_scan(
         for number, page in enumerate(pdf.pages, start=1):
             if number not in wanted:
                 continue
-            candidate, reason = _classify_page(pdf, page, number)
+            candidate, reason = _classify_page(pdf, page, number, allow_bilevel=True)
             if candidate is None:
                 rows.append({"page": number, "decision": DECISION_UNTOUCHED, "reason": reason})
                 continue
@@ -837,7 +842,7 @@ def enhance_scan(
         for number, page in enumerate(pdf.pages, start=1):
             if number not in wanted:
                 continue
-            candidate, reason = _classify_page(pdf, page, number)
+            candidate, reason = _classify_page(pdf, page, number, allow_bilevel=True)
             if candidate is None:
                 rows.append({"page": number, "decision": DECISION_UNTOUCHED, "reason": reason})
             else:

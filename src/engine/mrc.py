@@ -282,8 +282,13 @@ def _has_other_visible_content(pdf, instructions, resources, fallback, depth=0,
     return False
 
 
-def _image_refusal(xobj) -> str | None:
-    """Why this image XObject cannot be separated, or None."""
+def _image_refusal(xobj, *, allow_bilevel: bool = False) -> str | None:
+    """Why this image XObject cannot be separated, or None.
+
+    Scan enhancement can also use a one-bit gray scan: it lifts it to gray
+    samples before deskewing or cleaning. MRC separation still refuses a
+    bilevel image because it has no background layer to separate.
+    """
     if xobj.get("/SMask") is not None:
         return "the page image carries a soft mask"
     if xobj.get("/Mask") is not None:
@@ -292,9 +297,11 @@ def _image_refusal(xobj) -> str | None:
         bpc = int(xobj.get("/BitsPerComponent", 8))
     except (TypeError, ValueError):
         bpc = 8
-    if bool(xobj.get("/ImageMask", False)) or bpc < 8:
+    image_mask = bool(xobj.get("/ImageMask", False))
+    if image_mask or bpc < 8:
         # Not a failure: a 1-bit page has no background to separate.
-        return "the page image is already 1-bit"
+        if not (allow_bilevel and not image_mask and bpc == 1):
+            return "the page image is already 1-bit"
     cs = xobj.get("/ColorSpace")
     if cs is not None and isinstance(cs, pikepdf.Array) and len(cs) and token_text(cs[0]) == "/Indexed":
         return "the page image uses an indexed color space"
@@ -312,7 +319,9 @@ def _placement_is_upright(matrix) -> bool:
     )
 
 
-def _classify_page(pdf, page, page_number: int) -> tuple[_Candidate | None, str]:
+def _classify_page(
+    pdf, page, page_number: int, *, allow_bilevel: bool = False
+) -> tuple[_Candidate | None, str]:
     """`(candidate, reason)` — a candidate, or None with the reason why not."""
     resources = _resolve_resources(page)
     try:
@@ -338,7 +347,7 @@ def _classify_page(pdf, page, page_number: int) -> tuple[_Candidate | None, str]
     xobj = _lookup_xobject(placement["name"], resources, None)
     if xobj is None:
         return None, "this page is not a scanned image"
-    refusal = _image_refusal(xobj)
+    refusal = _image_refusal(xobj, allow_bilevel=allow_bilevel)
     if refusal is not None:
         return None, refusal
     if _has_other_visible_content(pdf, instructions, resources, None):
