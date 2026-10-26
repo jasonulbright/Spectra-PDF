@@ -59,7 +59,7 @@ fn main() {
             Ok(cli)
                 if matches!(
                     cli.command,
-                    Some(CliCommand::ScanTest(args)) if !args.list
+                    Some(CliCommand::ScanTest(ref args)) if !args.list
                 )
         );
     attach_parent_console_with_keyboard_input(scan_test_interactive);

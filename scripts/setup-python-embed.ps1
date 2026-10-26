@@ -13,7 +13,7 @@ if ($PythonVersion -notmatch '^\d+\.\d+\.\d+$') {
 }
 # The SHA-256 python.org publishes for the embeddable package of that pin. A
 # pin changed without this value refuses at the download, never ships.
-$ExpectedSha256 = "3c01d7cfc666f746a6f064f60fb2156ab0ec464d3d738ab796371a46a9bb24a2"
+$ExpectedSha256 = "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159"
 $Url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
 $ZipPath = "$env:TEMP\python-embed.zip"
 $DestDir = "$PSScriptRoot\..\resources\python"

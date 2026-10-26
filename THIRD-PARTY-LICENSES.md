@@ -151,7 +151,7 @@ written source offer below.
 
 ## Embedded Python runtime
 
-- **CPython 3.14.9** — Python Software Foundation License (PSF) — <https://www.python.org/>
+- **CPython 3.14.10** — Python Software Foundation License (PSF) — <https://www.python.org/>
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
 hash-pinned in `scripts/python-requirements.txt`, or in
@@ -655,7 +655,7 @@ resolves to a row in the manifest named in its section.
 
 ### Python runtime
 
-- CPython 3.14.9 from python-build-standalone release 20261021
+- CPython 3.14.10 from python-build-standalone release 20261026
   (`scripts/setup-python-embed.sh`). The build links OpenSSL, SQLite, libffi,
   XZ, bzip2, zlib, zlib-ng, expat, mpdecimal, libedit, ncurses, libuuid, Tcl/Tk,
   libX11, libXau, libxcb and Zstandard. Their licence texts, and `PYTHON.json`
