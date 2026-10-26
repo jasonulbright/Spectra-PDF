@@ -26,3 +26,4 @@ libvoikko	4.3.3-3	mingw-w64-libvoikko-4.3.3-3.src.tar.zst	f1519b0d522e12c5023e95
 libiconv	1.17	libiconv-1.17.tar.gz	8f74213b56238c85a50a5329f77e06198771e70dd9a739779f4c02f65d971313	https://ftp.gnu.org/gnu/libiconv/libiconv-1.17.tar.gz
 dictionaries	f2ff99058268502bdcf4cad25c1ca2935ad8aa7d	LibreOffice-dictionaries-f2ff99058268502bdcf4cad25c1ca2935ad8aa7d.tar.gz	3d26e5607b01d2564094a0539328dadf7f0b4e0a7bdc3d836fca372f5c7fe2fc	https://codeload.github.com/LibreOffice/dictionaries/tar.gz/f2ff99058268502bdcf4cad25c1ca2935ad8aa7d
 ghostscript	10.08.0	ghostscript-10.08.0.tar.gz	caf199e3f233f1290b27d0972d636f66c303355f2353309b7bfddf1edda06b3d	https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10080/ghostscript-10.08.0.tar.gz
+ghostxps	10.08.0	ghostpdl-10.08.0.tar.gz	605821a16ddbc159d8f6ccd961e0b96e6fee5af28048ea3b3ceaa1927237bdd6	https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10080/ghostpdl-10.08.0.tar.gz

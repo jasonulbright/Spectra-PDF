@@ -4,9 +4,9 @@
 //!
 //! Windows: a per-account queue on the IN-BOX "Microsoft PS Class Driver" that
 //! holds every job (`print_to_pdf_windows.rs`). The receiver reads each job's
-//! PostScript from the spooler and hands it to the configured Ghostscript
-//! through the CLI `distill` arm, and the finished PDF opens through the normal
-//! open funnel (the second-instance `app:openFile` event). No driver is
+//! spool data and routes XPS packages through bundled GhostXPS or PostScript
+//! through the configured Ghostscript `distill` arm. The finished PDF opens
+//! through the normal open funnel (the second-instance `app:openFile` event). No driver is
 //! shipped and no service is installed; the receiver lives only while the app
 //! runs (tray-residency counts). A job printed while the app is closed waits
 //! in the Windows queue.
@@ -138,7 +138,7 @@ fn part_path(pdf_path: &Path) -> PathBuf {
 }
 
 /// Whether `name`, holding `len` bytes, is what a job leaves before it
-/// finishes: its staged PostScript, the distiller's output before the rename,
+/// finishes: its staged print job, the converter's output before the rename,
 /// or the name reservation before the rename fills it. A finished print is
 /// never empty.
 fn is_job_intermediate(name: &str, len: u64) -> bool {
@@ -265,7 +265,7 @@ fn reserve_pdf(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
     ))
 }
 
-/// Distil one staged PostScript job into the printed folder and return the
+/// Convert one staged print job into the printed folder and return the
 /// finished PDF.
 ///
 /// The PDF is written under a `.part` name and renamed over a zero-byte
@@ -279,6 +279,10 @@ fn convert_staged(
     stem: &str,
     before_rename: &dyn Fn(&Path) -> Result<(), String>,
 ) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    if is_xps_spool(staged) {
+        return convert_xps_staged(staged, stem, before_rename);
+    }
     convert_with_cli(stem, before_rename, &|part| {
         vec![
             "distill".into(),
@@ -289,6 +293,33 @@ fn convert_staged(
             "printer".into(),
         ]
     })
+}
+
+#[cfg(windows)]
+fn is_xps_spool(staged: &Path) -> bool {
+    let mut signature = [0u8; 4];
+    std::fs::File::open(staged)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut signature))
+        .is_ok()
+        && signature == *b"PK\x03\x04"
+}
+
+#[cfg(windows)]
+fn convert_xps_staged(
+    staged: &Path,
+    stem: &str,
+    before_rename: &dyn Fn(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    run_print_conversion(stem, before_rename, |part| {
+        crate::gxps::convert_bundled(staged, part)
+            .map(|()| Vec::new())
+            .map_err(|message| CliFailure {
+                refused: true,
+                message: format!("the XPS print job could not be converted: {message}"),
+            })
+    })
+    .map(|(pdf, _)| pdf)
+    .map_err(|failure| failure.message)
 }
 
 /// Run this executable's CLI with the arguments `args` builds for the `.part`
@@ -322,6 +353,37 @@ fn run_cli_conversion(
     before_rename: &dyn Fn(&Path) -> Result<(), String>,
     args: &dyn Fn(&Path) -> Vec<std::ffi::OsString>,
 ) -> Result<(PathBuf, Vec<u8>), CliFailure> {
+    run_print_conversion(stem, before_rename, |part_path| {
+        let machine = |message: String| CliFailure { refused: false, message };
+        let exe = std::env::current_exe()
+            .map_err(|_| machine("cannot resolve the app path".to_string()))?;
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(args(part_path));
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        match crate::gs::output_within(cmd, Duration::from_secs(2 * 60 * 60)) {
+            Ok(out) if out.status.success() && part_path.is_file() => Ok(out.stdout),
+            Ok(out) => Err(CliFailure {
+                refused: out.status.code() == Some(crate::cli::EXIT_INPUT_REFUSED),
+                message: format!(
+                    "the print job could not be converted: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
+            }),
+            Err(e) => Err(machine(format!("the converter could not finish: {e}"))),
+        }
+    })
+}
+
+fn run_print_conversion(
+    stem: &str,
+    before_rename: &dyn Fn(&Path) -> Result<(), String>,
+    convert: impl FnOnce(&Path) -> Result<Vec<u8>, CliFailure>,
+) -> Result<(PathBuf, Vec<u8>), CliFailure> {
     let machine = |message: String| CliFailure { refused: false, message };
     let dir = printed_dir();
     std::fs::create_dir_all(&dir)
@@ -330,29 +392,7 @@ fn run_cli_conversion(
         .map_err(|e| machine(format!("cannot name the printed file: {e}")))?;
     let part_path = part_path(&pdf_path);
     let finished = (|| {
-        let exe = std::env::current_exe()
-            .map_err(|_| machine("cannot resolve the app path".to_string()))?;
-        let mut cmd = std::process::Command::new(exe);
-        cmd.args(args(&part_path));
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        let stdout = match crate::gs::output_within(cmd, Duration::from_secs(2 * 60 * 60)) {
-            Ok(out) if out.status.success() && part_path.is_file() => out.stdout,
-            Ok(out) => {
-                return Err(CliFailure {
-                    refused: out.status.code() == Some(crate::cli::EXIT_INPUT_REFUSED),
-                    message: format!(
-                        "the print job could not be converted: {}",
-                        String::from_utf8_lossy(&out.stderr).trim()
-                    ),
-                })
-            }
-            Err(e) => return Err(machine(format!("the converter could not finish: {e}"))),
-        };
+        let stdout = convert(&part_path)?;
         before_rename(&pdf_path).map_err(machine)?;
         std::fs::rename(&part_path, &pdf_path)
             .map_err(|e| machine(format!("could not finalize the printed file: {e}")))?;

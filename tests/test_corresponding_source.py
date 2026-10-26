@@ -37,6 +37,7 @@ class TestManifest:
             "libheif", "libde265", "pi_heif",
             "libreoffice", "poppler", "poppler-data",
             "voikko-fi", "libvoikko", "libiconv", "dictionaries", "ghostscript",
+            "ghostxps",
         }
 
     def test_each_source_matches_the_version_that_ships(self):
@@ -69,6 +70,12 @@ class TestManifest:
         version = by["ghostscript"][0]["version"]
         assert f'[string]$GsVersion = "{version}"' in ghostscript
         assert by["ghostscript"][0]["file"] == f"ghostscript-{version}.tar.gz"
+        ghostxps = open(
+            os.path.join(REPO, "scripts", "bundle-ghostxps.ps1"), encoding="utf-8"
+        ).read()
+        version = by["ghostxps"][0]["version"]
+        assert f'$ExpectedVersion = "{version}"' in ghostxps
+        assert by["ghostxps"][0]["file"] == f"ghostpdl-{version}.tar.gz"
 
     def test_every_archive_is_versioned_pinned_and_fetchable_by_one_route(self):
         for row in rows():

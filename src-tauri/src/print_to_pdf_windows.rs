@@ -1,7 +1,7 @@
 //! The Windows receiver.
 //!
 //! The printer is a per-account queue on the in-box PS class driver that
-//! holds its jobs: paused, raw-only, keeping printed jobs, on the `NUL:` port.
+//! holds its jobs: paused, keeping printed jobs, on the `NUL:` port.
 //! No process listens anywhere, so no other process can stand in for this one.
 //! This process reads each finished job of its own queue straight from the
 //! spooler, stages the bytes in a private folder, and then deletes the job.
@@ -15,9 +15,9 @@
 //! delivered. The queue's DACL grants Print to the owning account alone and
 //! keeps the AppContainer entries that Windows gives every queue.
 //!
-//! Raw-only spooling (PRINTER_ATTRIBUTE_RAW_ONLY) makes the spooled data the
-//! driver's PostScript. An enhanced-metafile job is not PostScript, so a job
-//! whose datatype is not RAW is refused.
+//! The V4 class driver's RAW spool data is an XPS package, not PostScript;
+//! XPS jobs use bundled GhostXPS and PostScript jobs use Ghostscript. Jobs
+//! whose datatype is not RAW are refused.
 //!
 //! The pause holds a job before it reaches the port. A job that is released
 //! anyway (an administrator resumes the queue, or a spooler restart does not
@@ -48,7 +48,7 @@ use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{ERROR_HANDLE_EOF, ERROR_NO_MORE_ITEMS, ERROR_PRINT_CANCELLED};
 use windows::Win32::Graphics::Printing::{
     JOB_STATUS_DELETED, JOB_STATUS_DELETING, JOB_STATUS_SPOOLING,
-    PRINTER_ATTRIBUTE_KEEPPRINTEDJOBS, PRINTER_ATTRIBUTE_RAW_ONLY,
+    PRINTER_ATTRIBUTE_KEEPPRINTEDJOBS,
 };
 
 use super::{
@@ -64,7 +64,7 @@ const DRIVER_NAME: &str = "Microsoft PS Class Driver";
 /// The port of every held queue. A job that leaves the queue reaches no
 /// process through it.
 pub(super) const HOLD_PORT: &str = "NUL:";
-const HELD_ATTRIBUTES: u32 = PRINTER_ATTRIBUTE_RAW_ONLY | PRINTER_ATTRIBUTE_KEEPPRINTEDJOBS;
+const HELD_ATTRIBUTES: u32 = PRINTER_ATTRIBUTE_KEEPPRINTEDJOBS;
 /// In the 32-bit registry view (WOW6432Node on 64-bit Windows): the scripts
 /// open it through `Registry32` and this module through `KEY_WOW64_32KEY`.
 /// The installer's product keys live in the 64-bit view; a real uninstall
@@ -563,11 +563,11 @@ fn take_one(pass: &Pass, queue: &str, job: &JobFacts, name: &str, taker: &mut Ta
     if !datatype_is_raw(&job.datatype) {
         (pass.record_error)(match pass.spooler.delete_job(queue, job.id) {
             Ok(()) => format!(
-                "a print job arrived as {} data instead of PostScript and was removed from {queue}",
+                "a print job arrived as {} data instead of RAW and was removed from {queue}",
                 job.datatype
             ),
             Err(e) => format!(
-                "a print job arrived as {} data instead of PostScript and could not be removed from {queue}: {e}",
+                "a print job arrived as {} data instead of RAW and could not be removed from {queue}: {e}",
                 job.datatype
             ),
         });
@@ -1106,10 +1106,10 @@ if (-not (Test-SpPrivate $sddl $sid)) { $null = Set-Printer -InputObject $p -Per
 }
 function Set-SpHeld($n, $c) {
 $p = @(Get-SpPrinter $n)
-$w = @(Get-CimInstance Win32_Printer | ? { Test-SpName $_.Name $n })
-if ($p.Count -ne 1 -or $w.Count -ne 1) { throw "Printer $n could not be found." }
+if ($p.Count -ne 1) { throw "Printer $n could not be found." }
 $null = Set-Printer -InputObject $p[0] -KeepPrintedJobs $true -Datatype 'RAW' -Comment $c
-$null = Set-CimInstance -InputObject $w[0] -Property @{ RawOnly = $true }
+$w = @(Get-CimInstance Win32_Printer | ? { Test-SpName $_.Name $n })
+if ($w.Count -ne 1) { throw "Printer $n could not be verified after configuration." }
 $r = Invoke-CimMethod -InputObject $w[0] -MethodName 'Pause'
 if ([int]$r.ReturnValue -ne 0) { throw "Printer $n could not be paused (error $($r.ReturnValue))." }
 }
@@ -1159,6 +1159,8 @@ fn elevated(body: &str, nonce: &str) -> String {
 const INSTALL_BODY: &str = r#"if (Remove-SpLegacy) { Set-SpMarker 'Replaced' }
 $mine = @(Get-SpMine $spectraSid)
 if ($mine.Count -gt 0) { foreach ($p in $mine) { Set-SpPrivate $p $spectraSid; Set-SpHeld ([string]$p.Name) $spectraComment } } else {
+$driver = Get-PrinterDriver -Name '__DRIVER__' -ErrorAction SilentlyContinue
+if (-not $driver) { $null = Add-PrinterDriver -Name '__DRIVER__' }
 $port = Use-SpHoldPort
 $name = '__PRINTER_NAME__'
 if (@(Get-SpPrinter $name).Count -gt 0) { $name = "__PRINTER_NAME__ ($spectraUserLabel)" }
@@ -3775,7 +3777,7 @@ function Clear-SpResult { $script:resultNonce = ''; $script:resultMessage = '' }
     /// A printer record of the fake spooler.
     fn printer(name: &str, driver: &str, port: &str, sddl: &str, held: bool) -> String {
         format!(
-            "[pscustomobject]@{{ Name='{}'; DriverName='{driver}'; PortName='{port}'; PermissionSDDL='{sddl}'; KeepPrintedJobs=${held}; Datatype='RAW'; RawOnly=${held}; Paused=${held}; Comment='' }}",
+            "[pscustomobject]@{{ Name='{}'; DriverName='{driver}'; PortName='{port}'; PermissionSDDL='{sddl}'; KeepPrintedJobs=${held}; Datatype='RAW'; Paused=${held}; Comment='' }}",
             name.replace('\'', "''")
         )
     }
@@ -3803,6 +3805,7 @@ function Clear-SpResult { $script:resultNonce = ''; $script:resultMessage = '' }
         let harness = r#"
 $script:printers = @()
 $script:ports = @()
+$script:drivers = @([pscustomobject]@{ Name='Microsoft PS Class Driver' })
 $script:jobs = @()
 $script:events = @()
 $script:markers = @{}
@@ -3820,6 +3823,19 @@ function Get-PrinterPort {
   [CmdletBinding()]
   param([string]$Name)
   return @($script:ports)
+}
+function Get-PrinterDriver {
+  [CmdletBinding()]
+  param([string]$Name)
+  return @($script:drivers | Where-Object { $_.Name -eq $Name })
+}
+function Add-PrinterDriver {
+  [CmdletBinding()]
+  param([string]$Name)
+  $script:events += 'add-driver'
+  $driver = [pscustomobject]@{ Name=$Name }
+  $script:drivers += $driver
+  return $driver
 }
 function Add-PrinterPort {
   [CmdletBinding()]
@@ -3839,7 +3855,7 @@ function Add-Printer {
   [CmdletBinding()]
   param([string]$Name, [string]$DriverName, [string]$PortName, [switch]$KeepPrintedJobs, [string]$Datatype, [string]$PermissionSDDL, [string]$Comment)
   $script:events += 'add-printer'
-  $record = [pscustomobject]@{ Name=$Name; DriverName=$DriverName; PortName=$PortName; PermissionSDDL=$script:defaultSddl; KeepPrintedJobs=[bool]$KeepPrintedJobs; Datatype=$Datatype; RawOnly=$false; Paused=$false; Comment=$Comment }
+  $record = [pscustomobject]@{ Name=$Name; DriverName=$DriverName; PortName=$PortName; PermissionSDDL=$script:defaultSddl; KeepPrintedJobs=[bool]$KeepPrintedJobs; Datatype=$Datatype; Paused=$false; Comment=$Comment }
   $script:printers += $record
   return $record
 }
@@ -3866,15 +3882,8 @@ function Get-CimInstance {
   return @($script:printers | ForEach-Object {
     $attributes = 0x40
     if ($_.KeepPrintedJobs) { $attributes = $attributes -bor 0x100 }
-    if ($_.RawOnly) { $attributes = $attributes -bor 0x1000 }
     [pscustomobject]@{ Name=$_.Name; Attributes=[uint32]$attributes }
   })
-}
-function Set-CimInstance {
-  [CmdletBinding()]
-  param($InputObject, [hashtable]$Property)
-  $target = Find-FakePrinter $InputObject.Name
-  if ($Property.ContainsKey('RawOnly')) { $target.RawOnly = [bool]$Property['RawOnly']; $script:events += 'raw-only' }
 }
 function Invoke-CimMethod {
   [CmdletBinding()]
@@ -3909,6 +3918,7 @@ $state = [ordered]@{
   message = $script:message
   events = @($script:events)
   printers = @($script:printers)
+  drivers = @($script:drivers | ForEach-Object { $_.Name })
   ports = @($script:ports | ForEach-Object { $_.Name })
   jobs = @($script:jobs)
   markers = @($script:markers.Keys | Sort-Object)
@@ -4018,7 +4028,6 @@ $state = [ordered]@{
                 "set-HoldPortCreated",
                 "add-printer",
                 "set-permissions",
-                "raw-only",
                 "pause",
                 "remove-job"
             ]
@@ -4033,7 +4042,6 @@ $state = [ordered]@{
         assert_eq!(queue["PortName"], HOLD_PORT);
         assert_eq!(queue["DriverName"], DRIVER_NAME);
         assert_eq!(queue["KeepPrintedJobs"], true);
-        assert_eq!(queue["RawOnly"], true);
         assert_eq!(queue["Paused"], true);
         assert_eq!(queue["Datatype"], "RAW");
         assert_eq!(queue["Comment"], COMMENT);
@@ -4197,6 +4205,20 @@ $state = [ordered]@{
     }
 
     #[test]
+    fn install_registers_the_inbox_driver_when_it_is_not_registered() {
+        let state = run_probe(
+            "$script:drivers = @()",
+            &install_script(&account(), COMMENT, NONCE, FAKE_MARKER),
+        );
+        assert_ok(&state);
+        assert_eq!(
+            texts(&state, "events").first().map(String::as_str),
+            Some("add-driver")
+        );
+        assert!(texts(&state, "drivers").contains(&DRIVER_NAME.to_string()));
+    }
+
+    #[test]
     fn install_repairs_an_installed_queue_without_touching_its_jobs() {
         let setup = format!(
             "$script:ports = @({})\n$script:printers = @({})\n$script:jobs = @([pscustomobject]@{{ PrinterName='Spectra PDF'; Id=2 }})",
@@ -4208,7 +4230,7 @@ $state = [ordered]@{
             &install_script(&account(), COMMENT, NONCE, FAKE_MARKER),
         );
         assert_ok(&state);
-        assert_eq!(texts(&state, "events"), ["raw-only", "pause"]);
+        assert_eq!(texts(&state, "events"), ["pause"]);
         assert_eq!(
             state["jobs"].as_array().unwrap().len(),
             1,
@@ -4232,7 +4254,7 @@ $state = [ordered]@{
         assert_ok(&state);
         assert_eq!(
             texts(&state, "events"),
-            ["set-permissions", "raw-only", "pause"]
+            ["set-permissions", "pause"]
         );
         let sddl = printer_named(&state, "Spectra PDF")["PermissionSDDL"]
             .as_str()

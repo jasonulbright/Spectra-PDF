@@ -71,6 +71,7 @@ $runtimes = @{
     "engine"       = ""
     "python"       = "Python"
     "ghostscript"  = "## Ghostscript"
+    "ghostxps"     = "## GhostXPS"
     "tesseract"    = "Tesseract"
     "libreoffice"  = "LibreOffice"
     "jbig2enc"     = "jbig2enc"

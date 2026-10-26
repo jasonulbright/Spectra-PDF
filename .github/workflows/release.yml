@@ -419,6 +419,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Vendor GhostXPS (unmodified upstream, SHA-256 pinned)
+        # Windows print queues retain XPS packages from the in-box class
+        # driver. Bundle Artifex's standalone XPS interpreter beside its own
+        # pinned DLL; the bundler converts a sample XPS as its smoke test.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostxps.ps1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Vendor spelling dictionaries
         # 35 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
         # commit pinned in the script, each file SHA-256 verified against
@@ -592,6 +600,10 @@ jobs:
           foreach ($tree in @('resources/ghostscript', 'src-tauri/target/release/ghostscript')) {
             powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 -GateOnly -DestDir $tree
             if ($LASTEXITCODE -ne 0) { throw "$tree does not match the pinned Ghostscript files (exit $LASTEXITCODE)" }
+          }
+          foreach ($tree in @('resources/ghostxps', 'src-tauri/target/release/ghostxps')) {
+            powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostxps.ps1 -GateOnly -DestDir $tree
+            if ($LASTEXITCODE -ne 0) { throw "$tree does not match the pinned GhostXPS files (exit $LASTEXITCODE)" }
           }
           Remove-Item Env:SPECTRAPDF_GS_PATH -ErrorAction SilentlyContinue
           $statusOut = Join-Path $env:RUNNER_TEMP 'spectrapdf-gs-status.out'

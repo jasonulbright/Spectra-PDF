@@ -47,6 +47,7 @@ resources/fonts/
 # Ghostscript (vendored by scripts/bundle-ghostscript.ps1; unmodified upstream
 # binaries, same repo-hygiene class as resources/python).
 resources/ghostscript/
+resources/ghostxps/
 # Native Tesseract (vendored by scripts/bundle-tesseract.ps1; large binaries +
 # 47 language models, same repo-hygiene class as resources/python).
 resources/tesseract/

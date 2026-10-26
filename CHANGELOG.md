@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.1025.158
+
+**Safer scanning, clearer printer diagnostics, and security updates**
+
+### Fixed
+- Keep redaction search results visible in a narrow tool dock.
+- Accept PowerShell input and legacy WIA identifiers when selecting a scanner.
+- Offer duplex settings only when supported by the selected scan source.
+- Keep printer verification diagnostics within Windows' command-line limit and report which check failed.
+- Convert Windows printer jobs from the inbox V4 driver's XPS spool format to PDF.
+
+### Security
+- Update vulnerable Python, JavaScript and Rust dependencies to address the Dependabot alerts and RustSec findings.
+- Update bundled CPython and pip to the 3.14.9 security release and refresh the trusted root set.
+
 ## 2026.1017.157
 
 **Updates download and install automatically on Windows**

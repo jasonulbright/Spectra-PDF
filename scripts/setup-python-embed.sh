@@ -22,9 +22,9 @@ esac
 # CPython patch after python.org does, so the Linux runtime may trail
 # .python-version by patch releases of the SAME minor. The `python-linux` arm
 # of scripts/check-toolchains.py fails once a newer build of that minor exists.
-PBS_RELEASE="20261001"
-PBS_PINNED_VERSION="3.14.8"
-PBS_SHA256="b373a4a4e4e70fc05f368c9b53d7738bf37637682b650d96c742805d2da26c32"
+PBS_RELEASE="20261021"
+PBS_PINNED_VERSION="3.14.9"
+PBS_SHA256="561e91c1cadf30e84aec94d1917384ae3267e5f3e6e135e51fd1578bb19f4064"
 pin_minor="${PBS_PINNED_VERSION%.*}"
 pin_patch="${PBS_PINNED_VERSION##*.}"
 [ "${PYTHON_VERSION%.*}" = "$pin_minor" ] && [ "$pin_patch" -le "${PYTHON_VERSION##*.}" ] ||
@@ -32,10 +32,10 @@ pin_patch="${PBS_PINNED_VERSION##*.}"
 PBS_NAME="cpython-$PBS_PINNED_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_RELEASE/$(printf %s "$PBS_NAME" | sed 's/+/%2B/')"
 
-PIP_VERSION="26.2.1"
+PIP_VERSION="26.2.2"
 PIP_WHEEL="pip-$PIP_VERSION-py3-none-any.whl"
-PIP_SHA256="71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e"
-PIP_URL="https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/$PIP_WHEEL"
+PIP_SHA256="fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+PIP_URL="https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/$PIP_WHEEL"
 
 DEST="$LINUX_RESOURCES/python"
 PY="$DEST/bin/python3"
@@ -66,7 +66,7 @@ fi
 # build does: its licenses/ directory and PYTHON.json (which names each
 # linked library and its licence) ship in the runtime as licenses/.
 PBS_FULL_NAME="cpython-$PBS_PINNED_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
-PBS_FULL_SHA256="0f5cfcf664aa406ee958625ed5b29b1bfc76d553e8ad1304f48fec39b74e0554"
+PBS_FULL_SHA256="92f6abbce0283ed317873615396b5c43ccdcdf13ae9c7d68c9a07651df527528"
 PBS_FULL_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_RELEASE/$(printf %s "$PBS_FULL_NAME" | sed 's/+/%2B/g')"
 notices_version() {
   "$PY" -B -S -c "import json, sys; print(json.load(open(sys.argv[1]))['python_version'])" "$DEST/licenses/PYTHON.json" 2>/dev/null || true

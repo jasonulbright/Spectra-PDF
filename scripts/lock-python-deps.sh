@@ -18,10 +18,10 @@ PY="$LINUX_RESOURCES/python/bin/python3"
 IN="$REPO_ROOT/scripts/python-requirements.in"
 OUT="$REPO_ROOT/scripts/python-requirements-linux.txt"
 WINDOWS_LOCK="$REPO_ROOT/scripts/python-requirements.txt"
-PIP_VERSION="26.2.1"
+PIP_VERSION="26.2.2"
 PIP_WHEEL="pip-$PIP_VERSION-py3-none-any.whl"
-PIP_SHA256="71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e"
-PIP_URL="https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/$PIP_WHEEL"
+PIP_SHA256="fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+PIP_URL="https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/$PIP_WHEEL"
 
 [ -x "$PY" ] || die "Linux runtime missing -- run scripts/setup-python-embed.sh first; it extracts the interpreter before it reads the lock"
 

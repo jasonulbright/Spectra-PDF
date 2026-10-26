@@ -46,6 +46,21 @@ The Linux .deb and .rpm depend on the distribution's `ghostscript` package;
 the AppImage carries the Arch Linux `ghostscript` package listed under
 AppImage libraries below.
 
+## GhostXPS
+
+- **Version:** 10.08.0 (unmodified upstream Windows x64 build; the official
+  ZIP, executable, DLL and license text are SHA-256-pinned by
+  `scripts/bundle-ghostxps.ps1`)
+- **License:** GNU General Public License v3 or later, as stated in the
+  upstream GhostXPS release archive
+- **Role:** Invoked as a separate process on Windows to convert retained XPS
+  print jobs from the in-box class driver to PDF.
+- **Binary source:** <https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/gs10080>
+- **Corresponding source:** `ghostpdl-10.08.0.tar.gz` from the same release,
+  SHA-256-pinned in `scripts/corresponding-source.tsv`; this archive includes
+  GhostXPS's source.
+- **License text shipped at:** `resources/ghostxps/LICENSE-GhostXPS.txt`
+
 ## JBIG2 encoder (jbig2enc)
 
 - **Version:** 0.32 (unmodified upstream prebuilt; version- and SHA-256-pinned
@@ -136,7 +151,7 @@ written source offer below.
 
 ## Embedded Python runtime
 
-- **CPython 3.14.8** — Python Software Foundation License (PSF) — <https://www.python.org/>
+- **CPython 3.14.9** — Python Software Foundation License (PSF) — <https://www.python.org/>
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
 hash-pinned in `scripts/python-requirements.txt`, or in
@@ -640,7 +655,7 @@ resolves to a row in the manifest named in its section.
 
 ### Python runtime
 
-- CPython 3.14.8 from python-build-standalone release 20261001
+- CPython 3.14.9 from python-build-standalone release 20261021
   (`scripts/setup-python-embed.sh`). The build links OpenSSL, SQLite, libffi,
   XZ, bzip2, zlib, zlib-ng, expat, mpdecimal, libedit, ncurses, libuuid, Tcl/Tk,
   libX11, libXau, libxcb and Zstandard. Their licence texts, and `PYTHON.json`
