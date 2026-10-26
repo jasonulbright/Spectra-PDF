@@ -1484,7 +1484,7 @@ mod tests {
         let env = installer_environment(&layout.installer_temp);
         assert_eq!(env[0], ("TEMP", layout.installer_temp.clone()));
         assert_eq!(env[1], ("TMP", layout.installer_temp.clone()));
-        let source = include_str!("system.rs");
+        let source = include_str!("system.rs").replace("\r\n", "\n");
         let run = &source[source.find("fn run_installer(").unwrap()..];
         let run = &run[..run.find("
 }
@@ -1660,7 +1660,7 @@ mod tests {
         settle_claimed(&layout, &[id(1), id(2)], Outcome::Failed);
         assert_eq!(read_result(&layout.result_path(&id(1))).unwrap().version, "2026.1101.160");
         assert_eq!(read_result(&layout.result_path(&id(2))).unwrap().version, "");
-        let source = include_str!("system.rs");
+        let source = include_str!("system.rs").replace("\r\n", "\n");
         let stage2 = &source[source.find("pub fn stage2(").unwrap()..];
         let stage2 = &stage2[..stage2.find("\n}\n").unwrap()];
         assert!(!stage2.contains("Outcome::Failed, \"\""), "no failure result leaves the version out");

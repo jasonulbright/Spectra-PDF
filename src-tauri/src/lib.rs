@@ -61,6 +61,8 @@ pub mod engine_writes;
 pub mod health_engine;
 pub mod net;
 pub mod gs;
+#[cfg(windows)]
+mod gxps;
 pub mod audiveris;
 #[cfg(windows)]
 mod printers;

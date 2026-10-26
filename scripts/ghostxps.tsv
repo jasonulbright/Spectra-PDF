@@ -1,0 +1,6 @@
+# SHA-256 of each unmodified file scripts/bundle-ghostxps.ps1 ships, extracted
+# from the SHA-256-pinned official GhostXPS 10.08.0 Windows x64 release ZIP.
+file	member	sha256
+gxpswin64.exe	ghostxps-10.08.0-win64/gxpswin64.exe	082d9755d3631ff574e6d7fcb547262afbcea0f23d7bd36ecad2bb46ff1d8ebf
+gxpsdll64.dll	ghostxps-10.08.0-win64/gxpsdll64.dll	a3ce6db95e1e8913695868288b21258e8b7d6ea7d328aa713e1ac6a267e68a16
+LICENSE-GhostXPS.txt	ghostxps-10.08.0-win64/COPYING	0b383d5a63da644f628d99c33976ea6487ed89aaa59f0b3257992deac1171e6b

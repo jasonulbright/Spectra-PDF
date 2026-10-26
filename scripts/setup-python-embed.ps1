@@ -13,7 +13,7 @@ if ($PythonVersion -notmatch '^\d+\.\d+\.\d+$') {
 }
 # The SHA-256 python.org publishes for the embeddable package of that pin. A
 # pin changed without this value refuses at the download, never ships.
-$ExpectedSha256 = "a93abe456ab01bd96d7a085b3cdb6566b3063f4241360d114142fbdb07f0a310"
+$ExpectedSha256 = "3c01d7cfc666f746a6f064f60fb2156ab0ec464d3d738ab796371a46a9bb24a2"
 $Url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
 $ZipPath = "$env:TEMP\python-embed.zip"
 $DestDir = "$PSScriptRoot\..\resources\python"
@@ -28,6 +28,18 @@ function Get-EmbeddedVersion {
     return ([string]$reported).Trim()
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $algorithm = $null
+    try {
+        $algorithm = [System.Security.Cryptography.SHA256]::Create()
+        return [System.BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        if ($algorithm) { $algorithm.Dispose() }
+    }
+}
+
 Write-Host "Setting up Python $PythonVersion embedded runtime..."
 
 $Installed = Get-EmbeddedVersion
@@ -35,7 +47,7 @@ if ($Installed -ne $PythonVersion) {
     if ($Installed) { Write-Host "Replacing embedded Python $Installed" }
     Write-Host "Downloading $Url..."
     Invoke-DownloadWithRetry -Uri $Url -Description "Python $PythonVersion" -OutFile $ZipPath
-    $ActualSha256 = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $ActualSha256 = Get-Sha256 -Path $ZipPath
     if ($ActualSha256 -ne $ExpectedSha256) {
         throw "python-$PythonVersion-embed-amd64.zip has SHA-256 $ActualSha256; python.org publishes $ExpectedSha256"
     }
@@ -70,8 +82,13 @@ Install-PinnedPip -Python "$DestDir\python.exe"
 # signature verification) pulls cryptography/asn1crypto/certvalidator.
 $LockFile = "$PSScriptRoot\python-requirements.txt"
 Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
-& $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
+$DependencyInstallLog = Join-Path $PSScriptRoot "setup-python-embed-dependencies.local.log"
+& $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location *> $DependencyInstallLog
+$DependencyInstallExitCode = $LASTEXITCODE
+if ($DependencyInstallExitCode -ne 0) {
+    throw "Hash-verified dependency install failed with exit code $DependencyInstallExitCode; see $DependencyInstallLog"
+}
+Write-Host "Hash-pinned dependency install log: $DependencyInstallLog"
 
 # The wheels committed under vendor/wheels/ (HEIF decode). Installed from the
 # repository with --no-index, so a package withdrawn from the index cannot
@@ -135,7 +152,13 @@ if ($stale) {
 # accompany redistributed copies, and these files are the only copy the
 # bundled runtime carries; deleting them would ship packages without notices.
 Write-Host "Cleaning up..."
-& $DestDir\python.exe -m pip uninstall pip -y 2>&1 | Out-Null
+$PipCleanupLog = Join-Path $PSScriptRoot "setup-python-embed-pip-cleanup.local.log"
+& $DestDir\python.exe -m pip uninstall pip -y *> $PipCleanupLog
+$PipCleanupExitCode = $LASTEXITCODE
+if ($PipCleanupExitCode -ne 0) {
+    throw "Could not remove pip from the embedded runtime (exit code $PipCleanupExitCode); see $PipCleanupLog"
+}
+Write-Host "Pip cleanup log: $PipCleanupLog"
 Get-ChildItem $DestDir -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 # RECORD is not a licence file but pip requires it to uninstall or upgrade a
 # package. Without it, dependency upgrades fail with uninstall-no-record-file

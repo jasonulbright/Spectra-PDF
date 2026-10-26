@@ -45,6 +45,7 @@ jobs:
         run: |
           mkdir -p resources/python
           mkdir -p resources/ghostscript
+          mkdir -p resources/ghostxps
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract

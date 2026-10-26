@@ -860,11 +860,11 @@ def _setup_python_manifest(*versions: str, unstable: tuple = (), linux_only: tup
     return _toolchains().Fetched(rows)
 
 
-PYTHON_314 = ("Python 3.14.5rc1", "Python 3.14.5", "Python 3.14.6", "Python 3.14.7")
-SETUP_PYTHON_314 = ("3.15.0-rc.2", "3.14.7", "3.14.6", "3.14.5", "3.14.5-rc.1")
+PYTHON_314 = ("Python 3.14.5rc1", "Python 3.14.5", "Python 3.14.6", "Python 3.14.7", "Python 3.14.8", "Python 3.14.9")
+SETUP_PYTHON_314 = ("3.15.0-rc.2", "3.14.9", "3.14.8", "3.14.7", "3.14.6", "3.14.5", "3.14.5-rc.1")
 
 
-def _python(pin="3.14.7", venv="3.14.7\n", releases=None, venv_status=0, manifest=None):
+def _python(pin="3.14.9", venv="3.14.9\n", releases=None, venv_status=0, manifest=None):
     module = _toolchains()
     return module.python_verdict(
         module.Fetched(pin) if pin is not None else module.Fetched(error=".python-version: missing"),
@@ -878,9 +878,9 @@ def test_the_python_check_passes_the_newest_pin_in_the_venv() -> None:
     passed, lines = _python()
     assert passed, lines
     newer_elsewhere = _python_releases(
-        *PYTHON_314, "Python 3.14.8rc1", "Python 3.14.8", "Python 3.14.9", "Python 3.15.1",
-        pre=("Python 3.14.5rc1", "Python 3.14.8rc1", "Python 3.14.8"),
-        unpublished=("Python 3.14.9",),
+        *PYTHON_314, "Python 3.14.10rc1", "Python 3.14.10", "Python 3.15.2",
+        pre=("Python 3.14.5rc1", "Python 3.14.10rc1"),
+        unpublished=("Python 3.14.10",),
     )
     passed, lines = _python(releases=newer_elsewhere)
     assert passed, lines
@@ -888,24 +888,24 @@ def test_the_python_check_passes_the_newest_pin_in_the_venv() -> None:
 
 
 def test_the_python_check_holds_a_release_setup_python_does_not_offer_yet() -> None:
-    ahead = _python_releases(*PYTHON_314, "Python 3.14.8", pre=("Python 3.14.5rc1",))
+    ahead = _python_releases(*PYTHON_314, "Python 3.14.10", pre=("Python 3.14.5rc1",))
     for manifest in (
         _setup_python_manifest(*SETUP_PYTHON_314),
-        _setup_python_manifest("3.14.8", *SETUP_PYTHON_314, unstable=("3.14.8",)),
-        _setup_python_manifest("3.14.8", *SETUP_PYTHON_314, linux_only=("3.14.8",)),
+        _setup_python_manifest("3.14.10", *SETUP_PYTHON_314, unstable=("3.14.10",)),
+        _setup_python_manifest("3.14.10", *SETUP_PYTHON_314, linux_only=("3.14.10",)),
     ):
         passed, lines = _python(releases=ahead, manifest=manifest)
         assert passed, lines
-        assert lines[-1] == ("NOTE: python 3.14.8 released; pinned 3.14.7 until "
+        assert lines[-1] == ("NOTE: python 3.14.10 released; pinned 3.14.9 until "
                              "actions/setup-python offers it")
 
 
 @pytest.mark.parametrize("pin,offered,expected", [
-    ("3.14.7", ("3.14.8", *SETUP_PYTHON_314), "3.14.8"),
-    ("3.14.8", SETUP_PYTHON_314, "3.14.7"),
+    ("3.14.8", SETUP_PYTHON_314, "3.14.9"),
+    ("3.14.9", tuple(version for version in SETUP_PYTHON_314 if version != "3.14.9"), "3.14.8"),
 ])
 def test_the_python_check_requires_the_newest_release_both_offer(pin, offered, expected) -> None:
-    releases = _python_releases(*PYTHON_314, "Python 3.14.8", pre=("Python 3.14.5rc1",))
+    releases = _python_releases(*PYTHON_314, pre=("Python 3.14.5rc1",))
     passed, lines = _python(pin=pin, venv=f"{pin}\n", releases=releases,
                             manifest=_setup_python_manifest(*offered))
     assert not passed
@@ -917,7 +917,7 @@ def test_the_python_check_refuses_a_pin_behind_python_org() -> None:
     passed, lines = _python(pin="3.14.5", venv="3.14.5\n")
     assert not passed
     assert "Local version: 3.14.5" in lines
-    assert "Expected version: 3.14.7" in lines
+    assert "Expected version: 3.14.9" in lines
     assert ".python-version" in lines[-1] and EMBED_SCRIPT in lines[-1]
 
 
@@ -925,7 +925,7 @@ def test_the_python_check_refuses_a_venv_off_the_pin() -> None:
     passed, lines = _python(venv="3.14.3\n")
     assert not passed
     assert "Local version: 3.14.3" in lines
-    assert "Expected version: 3.14.7" in lines
+    assert "Expected version: 3.14.9" in lines
     assert "-m venv --clear .venv" in lines[-1]
 
 
@@ -3236,6 +3236,7 @@ RETRY_ROUTED_PS = (
     "add-linux-updater-entry.ps1",
     "add-portable-updater-entry.ps1",
     "bundle-ghostscript.ps1",
+    "bundle-ghostxps.ps1",
 )
 RETRY_ROUTED_PY = (
     "fetch-ghent-suite.py",
@@ -3534,6 +3535,7 @@ GH_CLI = re.compile(r"(?:^|[\s(@&|])gh\s+(?:api|release|run|pr|issue)\b", re.M)
 #: package-manager install, a lint.
 NO_FETCH_MODES = {
     ("bundle-ghostscript.ps1", "-GateOnly"),
+    ("bundle-ghostxps.ps1", "-GateOnly"),
     ("build-appimage.sh", "--install-packages"),
     ("build-appimage.sh", "--check"),
 }
@@ -3760,6 +3762,23 @@ def test_release_vendors_and_smokes_the_bundled_ghostscript() -> None:
     assert (
         "gate gs-notice powershell -ExecutionPolicy Bypass -File "
         "scripts/bundle-ghostscript.ps1 -GateOnly"
+    ) in parity
+
+
+def test_release_vendors_and_gates_the_bundled_ghostxps() -> None:
+    steps = _job_steps("release.yml", "release")
+    names = [name for name, _ in steps]
+    vendor = names.index("Vendor GhostXPS (unmodified upstream, SHA-256 pinned)")
+    assert "scripts/bundle-ghostxps.ps1" in steps[vendor][1]
+    assert STEP_TOKEN_ENV.search(steps[vendor][1])
+    assert vendor < names.index("Build, sign, and upload to a draft release")
+    runtime_gate = dict(steps)["Built CLI runs the bundled Ghostscript"]
+    assert "scripts/bundle-ghostxps.ps1 -GateOnly -DestDir $tree" in runtime_gate
+    assert "@('resources/ghostxps', 'src-tauri/target/release/ghostxps')" in runtime_gate
+    parity = (ROOT / "scripts/ci-parity-gates.sh").read_text(encoding="utf-8")
+    assert (
+        "gate gxps-notice powershell -ExecutionPolicy Bypass -File "
+        "scripts/bundle-ghostxps.ps1 -GateOnly"
     ) in parity
 
 

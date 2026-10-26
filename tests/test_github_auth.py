@@ -758,6 +758,7 @@ UNEXPORT_BOUNDARIES = [
     ("lock-python-deps.sh", "github_token_unexport", '"$PY"'),
     ("install-vendored-wheels.sh", "github_token_unexport", '"$PY"'),
     ("bundle-ghostscript.ps1", "Remove-GitHubTokenFromEnvironment", "& $SevenZip x $Installer"),
+    ("bundle-ghostxps.ps1", "Remove-GitHubTokenFromEnvironment", "Expand-Archive -LiteralPath $archive"),
 ]
 
 

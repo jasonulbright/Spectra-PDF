@@ -110,6 +110,7 @@ fi
 #     scripts/bundle-ghostscript.ps1. (PowerShell-only.) ---
 if command -v powershell >/dev/null 2>&1; then
   gate gs-notice powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 -GateOnly
+  gate gxps-notice powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostxps.ps1 -GateOnly
 fi
 
 # --- Release job: the File Explorer command handler builds, and both package
