@@ -353,7 +353,7 @@ export function SearchRedactPanel(): React.ReactElement {
   }
 
   return (
-    <div className="flex flex-col gap-3 h-full min-h-0" data-testid="search-redact-panel">
+    <div className="flex flex-col gap-3" data-testid="search-redact-panel">
       <div className="text-sm text-neutral-400">
         {tChrome('panel.common.workingOn')}{' '}
         <span className="text-neutral-200">{activeFile.name}</span>
@@ -549,7 +549,7 @@ export function SearchRedactPanel(): React.ReactElement {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 overflow-auto" data-testid="search-redact-results">
+      <div className="shrink-0" data-testid="search-redact-results">
         {results?.map((file) => {
           const pages = groupByPage(file.hits);
           const fileKeys = selectableKeys(file.path, file.hits);
