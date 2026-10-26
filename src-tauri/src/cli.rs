@@ -4168,7 +4168,7 @@ fn run_scan_test(args: &ScanTestArgs) -> i32 {
         out: abs(&args.output),
         attach_scans: args.attach_scans,
     };
-    let console = crate::scantest::StdioConsole;
+    let console = crate::scantest::StdioConsole::new();
     let report = match crate::scantest::run(&options, &console) {
         Ok(report) => report,
         Err(msg) => {
