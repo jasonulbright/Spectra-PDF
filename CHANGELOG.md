@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.1028.160
+
+**Sharper page rendering and smoother zoom**
+
+### Fixed
+- Refresh detailed page rendering after zoom, pan, resize and layout changes settle.
+- Make Ctrl/Meta-wheel zoom steps gradual while preserving continuous trackpad input.
+
 ## 2026.1026.159
 
 **More reliable scanning and redaction search**

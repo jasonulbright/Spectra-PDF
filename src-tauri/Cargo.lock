@@ -3931,7 +3931,7 @@ dependencies = [
 
 [[package]]
 name = "spectrapdf"
-version = "2026.1026.159"
+version = "2026.1028.160"
 dependencies = [
  "base64 0.22.1",
  "clap",
