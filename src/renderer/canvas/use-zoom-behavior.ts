@@ -3,7 +3,8 @@ import { pointer, select } from 'd3-selection';
 import { zoomIdentity, zoomTransform, type ZoomBehavior } from 'd3-zoom';
 import { createZoomBehavior } from './create-zoom-behavior';
 import { computeFitTransform } from './fit-transform';
-import { WHEEL_ZOOM_SPEED } from './zoom-constants';
+import { wheelZoomFactor } from './zoom-constants';
+import { wheelDeltaPx } from './reading-layout';
 
 export {
   MIN_SCALE,
@@ -80,8 +81,8 @@ export function useZoomBehavior({
       event.preventDefault();
       const [px, py] = pointer(event, vp);
       if (event.ctrlKey || event.metaKey) {
-        const dy = Math.max(-50, Math.min(50, event.deltaY));
-        zoomBehavior.scaleBy(sel, Math.pow(2, -dy * WHEEL_ZOOM_SPEED), [px, py]);
+        const dy = wheelDeltaPx(event.deltaY, event.deltaMode, vp.clientHeight);
+        zoomBehavior.scaleBy(sel, wheelZoomFactor(dy), [px, py]);
       } else if (event.altKey) {
         // Alt+wheel pans horizontally; a vertical-only wheel has no deltaX.
         const k = zoomTransform(vp).k;
