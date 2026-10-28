@@ -78,7 +78,7 @@ import {
   type PageHit,
   type WheelStepState,
 } from '../../canvas/reading-layout';
-import { WHEEL_ZOOM_SPEED } from '../../canvas/zoom-constants';
+import { wheelZoomFactor } from '../../canvas/zoom-constants';
 import {
   initialReadingViewFor,
   publishReadingView,
@@ -563,18 +563,27 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // jump anchor) reads slots, so paged scrolling needs no second code path.
   const slotH = g.slotH;
 
-  // A "settle" signal for the raster: PageView's detail layer only re-renders
-  // when its `version` changes; on the board that comes from <Canvas onSettle>,
-  // which isn't mounted here. So after a zoom, bump this a beat later (debounced
-  // — a burst of Ctrl+= re-details once) and fold it into the version handed to
-  // each PageCell, so the visible page re-rasters crisp at the new size instead
-  // of staying a CSS-stretched (blurry) base raster (regression). Keyed on the
-  // EFFECTIVE zoom, so a re-derived clamp re-details too.
-  const [zoomVersion, setZoomVersion] = useState(0);
+  // PageView's detail raster captures only the part visible when it runs.
+  // Coalesce every geometry change and scroll burst into one final render so
+  // zooms, pans, resizes and layout changes all sharpen at the settled view.
+  const [detailVersion, setDetailVersion] = useState(0);
+  const detailSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleDetailRender = useCallback(() => {
+    if (detailSettleTimerRef.current !== null) clearTimeout(detailSettleTimerRef.current);
+    detailSettleTimerRef.current = setTimeout(() => {
+      detailSettleTimerRef.current = null;
+      setDetailVersion((v) => v + 1);
+    }, ZOOM_SETTLE_MS);
+  }, []);
   useEffect(() => {
-    const t = setTimeout(() => setZoomVersion((v) => v + 1), ZOOM_SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [zoom]);
+    scheduleDetailRender();
+    return () => {
+      if (detailSettleTimerRef.current !== null) {
+        clearTimeout(detailSettleTimerRef.current);
+        detailSettleTimerRef.current = null;
+      }
+    };
+  }, [g, scheduleDetailRender]);
 
   const contentHeight = g.contentH;
   // The scaled-spacer scroll map. The DOM spacer caps at
@@ -643,7 +652,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     const el = e.currentTarget;
     posRef.current = { left: el.scrollLeft, virtualTop: virtualTopOf(el.scrollTop, smapRef.current) };
     setScrollTop(el.scrollTop);
-  }, []);
+    scheduleDetailRender();
+  }, [scheduleDetailRender]);
 
   // Visible page range [first, last], padded by OVERSCAN — pure + tested
   // (canvas/reading-page.ts), because an unclamped `first` could exceed `last`
@@ -1014,8 +1024,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
         touchedRef.current = true;
         const box = el.getBoundingClientRect();
         const pointer = { x: e.clientX - box.left - el.clientLeft, y: e.clientY - box.top - el.clientTop };
-        const clamped = Math.max(-50, Math.min(50, dy));
-        zoomBy(Math.pow(2, -clamped * WHEEL_ZOOM_SPEED), pointer);
+        zoomBy(wheelZoomFactor(dy), pointer);
         return;
       }
       if (e.altKey) {
@@ -1660,7 +1669,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           viewRotation={viewRotation}
           pdf={proxies.get(page.sourceDocId) ?? null}
           pageHeight={pageHeight}
-          renderVersion={props.renderVersion + zoomVersion}
+          renderVersion={props.renderVersion + detailVersion}
           selected={props.selectedPageIds.has(page.id)}
           collapsed={false}
           visibleNumber={i + 1}
