@@ -49,6 +49,20 @@ async function currentPageBox(): Promise<{ left: number; top: number; width: num
   return id ? await readingPageBox(id) : null;
 }
 
+async function detailRenderCount(): Promise<number> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__
+      .getRenderTimings()
+      .filter((t: { kind: string }) => t.kind === 'detail').length;
+  });
+}
+
+async function clearRenderTimings(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.clearRenderTimings();
+  });
+}
+
 async function waitForPage(
   predicate: (
     page: { left: number; top: number; width: number; height: number },
@@ -480,6 +494,8 @@ describe('reading view controls', () => {
       (v) => v.zoomMode === 'custom' && v.zoomPercent > 200,
       'Ctrl+wheel did not zoom in',
     );
+    const zoomed = await readingViewDom();
+    expect(zoomed!.zoomPercent).toBeLessThanOrEqual(230);
     await browser.pause(400);
     let last: unknown = null;
     try {
@@ -497,6 +513,34 @@ describe('reading view controls', () => {
     } catch {
       throw new Error(`the point under the cursor moved; last read: ${JSON.stringify(last)}`);
     }
+  });
+
+  it('refreshes the sharp page crop after a pan settles', async () => {
+    await setReadingZoomPercent('300');
+    await waitForReadingView((v) => v.zoomMode === 'custom' && v.zoomPercent === 300, '300% did not take');
+    await browser.waitUntil(async () => (await detailRenderCount()) > 0, {
+      timeout: 10_000,
+      timeoutMsg: 'the zoomed page never received a detail render',
+    });
+    await browser.pause(300);
+    await clearRenderTimings();
+
+    const before = (await readingViewDom())!;
+    expect(before.scrollWidth).toBeGreaterThan(before.clientWidth);
+    const path = await readingWheel({
+      x: before.box.left + before.box.width / 2,
+      y: before.box.top + before.box.height / 2,
+      deltaY: 120,
+      modifier: 'alt',
+    });
+    console.log(`Alt+wheel pan delivered through the ${path} path`);
+    await waitForReadingView((v) => v.scrollLeft !== before.scrollLeft, 'Alt+wheel did not pan the page');
+
+    await browser.waitUntil(async () => (await detailRenderCount()) > 0, {
+      timeout: 10_000,
+      interval: 100,
+      timeoutMsg: 'the visible page crop was not rendered sharply after panning settled',
+    });
   });
 
   it('Alt+wheel scrolls sideways only, and releasing Alt opens no menu', async () => {
