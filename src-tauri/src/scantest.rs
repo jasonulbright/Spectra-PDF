@@ -18,8 +18,6 @@
 //! apartment rule cannot be broken from here.
 
 use std::collections::HashSet;
-#[cfg(windows)]
-use std::io::BufRead;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -1323,9 +1321,221 @@ pub const NO_CONSOLE: &str = "no interactive console";
 /// stdin can supply an endless stream of answers that are neither y nor n.
 const MAX_INVALID: u32 = 3;
 
+#[cfg(any(windows, test))]
+#[derive(Default)]
+struct ConsoleLineInput {
+    units: Vec<u16>,
+    skip_lf: bool,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum ConsoleEcho {
+    None,
+    Character(u16),
+    Erase,
+    Newline,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum ConsoleLineAction {
+    Continue(ConsoleEcho),
+    Complete(String, ConsoleEcho),
+    Cancel(ConsoleEcho),
+}
+
+#[cfg(any(windows, test))]
+impl ConsoleLineInput {
+    fn accept(&mut self, unit: u16) -> ConsoleLineAction {
+        if self.skip_lf {
+            self.skip_lf = false;
+            if unit == b'\n' as u16 {
+                return ConsoleLineAction::Continue(ConsoleEcho::None);
+            }
+        }
+
+        match unit {
+            0x000D => {
+                self.skip_lf = true;
+                ConsoleLineAction::Complete(
+                    String::from_utf16_lossy(&std::mem::take(&mut self.units)),
+                    ConsoleEcho::Newline,
+                )
+            }
+            0x000A => ConsoleLineAction::Complete(
+                String::from_utf16_lossy(&std::mem::take(&mut self.units)),
+                ConsoleEcho::Newline,
+            ),
+            0x08 => match self.units.pop() {
+                Some(last) => {
+                    if (0xDC00..=0xDFFF).contains(&last)
+                        && self
+                            .units
+                            .last()
+                            .is_some_and(|high| (0xD800..=0xDBFF).contains(high))
+                    {
+                        self.units.pop();
+                    }
+                    ConsoleLineAction::Continue(ConsoleEcho::Erase)
+                }
+                None => ConsoleLineAction::Continue(ConsoleEcho::None),
+            },
+            0x03 | 0x1B => {
+                self.units.clear();
+                ConsoleLineAction::Cancel(ConsoleEcho::Newline)
+            }
+            _ => {
+                self.units.push(unit);
+                ConsoleLineAction::Continue(ConsoleEcho::Character(unit))
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+mod windows_console_input {
+    use super::{ConsoleEcho, ConsoleLineAction, ConsoleLineInput};
+    use std::fs::{File, OpenOptions};
+    use std::io;
+    use std::os::windows::io::AsRawHandle;
+    use std::ptr;
+
+    const ENABLE_LINE_INPUT: u32 = 0x0002;
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleMode(handle: isize, mode: *mut u32) -> i32;
+        fn ReadConsoleW(
+            input: isize,
+            buffer: *mut u16,
+            count: u32,
+            read: *mut u32,
+            control: *mut u8,
+        ) -> i32;
+        fn WriteConsoleW(
+            output: isize,
+            buffer: *const u16,
+            count: u32,
+            written: *mut u32,
+            reserved: *mut u8,
+        ) -> i32;
+    }
+
+    pub struct ConsoleInput {
+        input: File,
+        output: Option<File>,
+        line: ConsoleLineInput,
+    }
+
+    impl ConsoleInput {
+        pub fn open() -> Option<Self> {
+            let input = OpenOptions::new().read(true).open("CONIN$").ok()?;
+            let mut mode = 0;
+            if unsafe { GetConsoleMode(input.as_raw_handle() as isize, &mut mode) } == 0 {
+                return None;
+            }
+            let output = OpenOptions::new().write(true).open("CONOUT$").ok();
+            Some(Self {
+                input,
+                output,
+                line: ConsoleLineInput::default(),
+            })
+        }
+
+        pub fn read_line(&mut self) -> Option<String> {
+            let mut mode = 0;
+            if unsafe { GetConsoleMode(self.input.as_raw_handle() as isize, &mut mode) } == 0 {
+                return None;
+            }
+            let echo_input = mode & (ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT)
+                == (ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+
+            loop {
+                let unit = self.read_unit().ok()?;
+                match self.line.accept(unit) {
+                    ConsoleLineAction::Continue(echo) => {
+                        if !echo_input {
+                            self.echo(echo);
+                        }
+                    }
+                    ConsoleLineAction::Complete(answer, echo) => {
+                        if !echo_input {
+                            self.echo(echo);
+                        }
+                        return Some(answer.trim().to_string());
+                    }
+                    ConsoleLineAction::Cancel(echo) => {
+                        if !echo_input {
+                            self.echo(echo);
+                        }
+                        return None;
+                    }
+                }
+            }
+        }
+
+        fn read_unit(&self) -> io::Result<u16> {
+            let mut unit = 0u16;
+            let mut read = 0u32;
+            let ok = unsafe {
+                ReadConsoleW(
+                    self.input.as_raw_handle() as isize,
+                    &mut unit,
+                    1,
+                    &mut read,
+                    ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "console input ended",
+                ));
+            }
+            Ok(unit)
+        }
+
+        fn echo(&self, action: ConsoleEcho) {
+            let (buffer, length) = match action {
+                ConsoleEcho::None => return,
+                ConsoleEcho::Character(unit) => ([unit, 0, 0], 1),
+                ConsoleEcho::Erase => ([0x08, b' ' as u16, 0x08], 3),
+                ConsoleEcho::Newline => ([b'\r' as u16, b'\n' as u16, 0], 2),
+            };
+            let Some(output) = &self.output else {
+                return;
+            };
+            let handle = output.as_raw_handle() as isize;
+            let units = &buffer[..length];
+            let mut offset = 0;
+            while offset < units.len() {
+                let mut written = 0u32;
+                let ok = unsafe {
+                    WriteConsoleW(
+                        handle,
+                        units[offset..].as_ptr(),
+                        (units.len() - offset) as u32,
+                        &mut written,
+                        ptr::null_mut(),
+                    )
+                };
+                if ok == 0 || written == 0 {
+                    break;
+                }
+                offset += written as usize;
+            }
+        }
+    }
+}
+
 pub struct StdioConsole {
     #[cfg(windows)]
-    console_input: Option<std::sync::Mutex<std::io::BufReader<std::fs::File>>>,
+    console_input: Option<std::sync::Mutex<windows_console_input::ConsoleInput>>,
 }
 
 impl StdioConsole {
@@ -1334,13 +1544,11 @@ impl StdioConsole {
         {
             // PowerShell may wrap a native command's stdin even when the user
             // launched it interactively. Read keyboard answers from the
-            // attached console directly; without a console, keep the ordinary
-            // stdin fallback for scripted invocations.
-            let console_input = std::fs::OpenOptions::new()
-                .read(true)
-                .open("CONIN$")
-                .ok()
-                .map(|input| std::sync::Mutex::new(std::io::BufReader::new(input)));
+            // attached console directly. ReadConsoleW handles hosts where Enter
+            // is delivered as carriage return without a following line-feed.
+            // Without a console, keep the ordinary stdin fallback for scripts.
+            let console_input =
+                windows_console_input::ConsoleInput::open().map(std::sync::Mutex::new);
             Self { console_input }
         }
         #[cfg(not(windows))]
@@ -1357,13 +1565,11 @@ impl Console for StdioConsole {
     fn ask(&self, prompt: &str) -> Option<String> {
         print!("{prompt}");
         let _ = std::io::stdout().flush();
-        let mut answer = String::new();
         #[cfg(windows)]
-        let read = match &self.console_input {
-            Some(input) => input.lock().ok()?.read_line(&mut answer).ok()?,
-            None => std::io::stdin().read_line(&mut answer).ok()?,
-        };
-        #[cfg(not(windows))]
+        if let Some(input) = &self.console_input {
+            return input.lock().ok()?.read_line();
+        }
+        let mut answer = String::new();
         let read = std::io::stdin().read_line(&mut answer).ok()?;
         if read == 0 {
             None
@@ -2596,6 +2802,67 @@ mod tests {
         ScannerDevice {
             id: id.to_string(),
             name: format!("Scanner {id}"),
+        }
+    }
+
+    #[test]
+    fn console_line_input_completes_on_carriage_return_and_skips_optional_line_feed() {
+        let mut input = ConsoleLineInput::default();
+        assert_eq!(
+            input.accept(b'1' as u16),
+            ConsoleLineAction::Continue(ConsoleEcho::Character(b'1' as u16))
+        );
+        assert_eq!(
+            input.accept(b'\r' as u16),
+            ConsoleLineAction::Complete("1".to_string(), ConsoleEcho::Newline)
+        );
+        assert_eq!(
+            input.accept(b'\n' as u16),
+            ConsoleLineAction::Continue(ConsoleEcho::None)
+        );
+        assert_eq!(
+            input.accept(b'2' as u16),
+            ConsoleLineAction::Continue(ConsoleEcho::Character(b'2' as u16))
+        );
+        assert_eq!(
+            input.accept(b'\r' as u16),
+            ConsoleLineAction::Complete("2".to_string(), ConsoleEcho::Newline)
+        );
+    }
+
+    #[test]
+    fn console_line_input_completes_on_line_feed_and_allows_empty_answers() {
+        let mut input = ConsoleLineInput::default();
+        assert_eq!(
+            input.accept(b'\n' as u16),
+            ConsoleLineAction::Complete(String::new(), ConsoleEcho::Newline)
+        );
+    }
+
+    #[test]
+    fn console_line_input_backspace_removes_a_unicode_scalar() {
+        let mut input = ConsoleLineInput::default();
+        input.accept(0xD83D);
+        input.accept(0xDE00);
+        assert_eq!(
+            input.accept(0x08),
+            ConsoleLineAction::Continue(ConsoleEcho::Erase)
+        );
+        assert_eq!(
+            input.accept(b'\r' as u16),
+            ConsoleLineAction::Complete(String::new(), ConsoleEcho::Newline)
+        );
+    }
+
+    #[test]
+    fn console_line_input_escape_and_ctrl_c_cancel_the_answer() {
+        for cancel in [0x1B, 0x03] {
+            let mut input = ConsoleLineInput::default();
+            input.accept(b'1' as u16);
+            assert_eq!(
+                input.accept(cancel),
+                ConsoleLineAction::Cancel(ConsoleEcho::Newline)
+            );
         }
     }
 
