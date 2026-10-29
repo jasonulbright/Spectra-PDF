@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.1029.161
+
+**PowerShell scanner input**
+
+### Fixed
+- Fix scan-test prompts hanging after Enter in PowerShell.
+
 ## 2026.1028.160
 
 **Sharper page rendering and smoother zoom**
