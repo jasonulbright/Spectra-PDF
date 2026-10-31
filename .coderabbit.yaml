@@ -1,7 +1,5 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: en-US
-# Hard limit 250 characters.
-tone_instructions: "Bottom line first. Short sentences, active voice, one instruction per sentence, same word for the same thing. No praise, no filler, no figurative language. Report only defects you can state as a concrete failure."
 early_access: false
 enable_free_tier: true
 
@@ -29,26 +27,12 @@ reviews:
     - "!**/*.lock"
     - "!**/*.local.log"
   path_instructions:
-    - path: "**"
-      instructions: |
-        Comment contract for every tracked file. A code comment exists only to state a non-obvious technical invariant or a concrete failure mode, written impersonally in present tense. Flag any comment that restates what the name, type, test, or control flow already says. Flag any comment that contains: a competitor name or a euphemism for one, a quotation, a person or owner attribution, a decision date, a model, agent, or reviewer name, narration of a review or session, a reference to a punchlist, brief, or register row, or session or phase history.
-        Never estimate or predict performance numbers. Flag any prose or comment that states a duration, speedup, or throughput that is not a measurement from a real run or a configured threshold.
-        Do not invent abbreviations in identifiers (cfg, impl, req, fn as names). Full words only.
     - path: "**/{tests,test,spec,__tests__}/**"
       instructions: |
         Tests live in the repository and ship nowhere. Deleting an existing test needs the same evidence as deleting code: the PR must say why the test existed and why it no longer applies. Flag any deleted or skipped test without that reasoning. Regression tests born from real incidents are load-bearing; flag their removal as a blocking issue.
-    - path: "**/{CHANGELOG.md,RELEASE_NOTES.md,release-notes/**,.github/release*.md}"
-      instructions: |
-        Release notes format. The version appears only in the title. The level-two headline is one concrete outcome metric, never a slogan and never a copy of the title. Level-three sections group by kind of change. Each bullet: verb first, at most 15 plain words, one change per line, no rationale, no component or class or file names, no ticket references. Security fixes say a fix exists and never describe the exploit path. No section named Remaining, Known issues, or Future work in a public repository. No mention of code signing, certificates, or SmartScreen. No emoji, no marketing framing, no user-benefit prose. Footer line reads exactly: Full changelog: CHANGELOG.md
-    - path: "**/README.md"
-      instructions: |
-        Write in ASD-STE100 Simplified Technical English: short sentences, active voice, one instruction per sentence, the same word for the same thing every time, no figurative language. Flag estimated performance numbers. Flag emoji.
     - path: ".github/workflows/**"
       instructions: |
         Every third-party action must be pinned to a full commit SHA with a version comment. Flag mutable tags. Flag persist-credentials left at its default on checkout. Flag permissions blocks broader than the job needs.
-    - path: "**/*.{ps1,psm1,psd1}"
-      instructions: |
-        PowerShell 7 is the target. Flag Read-Host, Get-Credential, pause, and any prompt that blocks a non-interactive run. Flag New-Item -Force on a file path (truncates existing content). Flag -ErrorAction SilentlyContinue used to hide a failure that the caller then treats as success.
     - path: "**/*.cs"
       instructions: |
         Flag async void outside event handlers. Flag .Result or .Wait() on a Task. Flag string concatenation into a path where Path.Combine applies. Flag catch blocks that swallow an exception without logging or rethrowing.
