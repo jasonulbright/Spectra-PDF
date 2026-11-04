@@ -4,7 +4,16 @@ import sys
 # The engine tree is a payload, not a cache: set before any engine import so
 # no launcher (windowed, CLI, scheduled, watched-folder, or a bare
 # `python __startup__.py`) writes __pycache__ into it, whatever its environment.
-sys.dont_write_bytecode = True
+#
+# A launcher that names a cache directory of its own (PYTHONPYCACHEPREFIX;
+# `engine::python_env` in the host points it at the per-user cache, or the
+# portable root) keeps bytecode there instead, outside the payload. Every
+# later start then reads the engine and its packages compiled, which is the
+# difference between a seconds-long import and a sub-second one: without a
+# cache, every engine process recompiles every module from source, because
+# the payload ships none and this line forbids writing any.
+if sys.pycache_prefix is None:
+    sys.dont_write_bytecode = True
 
 import os  # noqa: E402
 

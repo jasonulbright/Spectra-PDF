@@ -1856,7 +1856,28 @@ pub fn build_app_window(
     };
     app.state::<BackdropState>().record(label, backdrop);
     crate::session::on_window_created(app, &window);
+    warm_engine(app, label);
     Ok(window)
+}
+
+/// Start the window's engine process now rather than at its first request.
+///
+/// The process imports the whole engine before it reads a request — seconds
+/// on a cold machine — and until now that import began only when the first
+/// open sent `check_encrypted`, so the first document of every window waited
+/// for it in full. Started here, the import overlaps the webview's own load
+/// and the user's trip through the file dialog; the renderer still shows
+/// "Starting the document engine…" for whatever remains. A start that fails
+/// is only logged: the first request retries it exactly as before
+/// (`lock_started`), with the error surfaced where it always was.
+fn warm_engine(app: &AppHandle, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::engine::start(&app, &label).await {
+            eprintln!("[engine {label}] early start failed: {error}");
+        }
+    });
 }
 
 #[cfg(windows)]
