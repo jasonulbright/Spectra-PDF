@@ -1958,6 +1958,15 @@ pub async fn renderer_ready(app: AppHandle, window: tauri::WebviewWindow) {
     if crate::engine::window_engine_starting(&app, &label) {
         let _ = app.emit_to(label.as_str(), "engine:starting", true);
     }
+    // The health worker is one more whole-engine import, and it used to begin
+    // at the first open, beside the first page's render. The window has
+    // painted and its own engine has had a head start, so it begins now; a
+    // start that fails is retried by the first health request as before.
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::health_engine::start(&app).await {
+            eprintln!("[health] early start failed: {error}");
+        }
+    });
 }
 
 /// The renderer's viewport changed size. Put the webview back on the client
