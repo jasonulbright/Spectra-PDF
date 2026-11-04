@@ -421,21 +421,30 @@ describe('i18n catalogs', () => {
   });
 
   // A locale can pass every check above and still render English: i18next only
-  // serves a language it was handed a `resources` entry for, and the entry is
-  // a separate edit from the SHIPPED_LOCALES row. The failure is silent — the
-  // fallback IS English — so the two lists are compared as source text here.
-  it('every shipped locale is registered as an i18next resource', () => {
+  // serves a language whose catalog was registered, and the failure is silent
+  // — the fallback IS English. Catalogs other than `en` are registered on
+  // demand from one chunk per `locales/<tag>/chrome.json`, so what is checked
+  // here is that the loader covers every shipped tag: the glob that names the
+  // chunks is in place, the source catalog is inline, and every shipped tag's
+  // folder holds a catalog for the glob to find.
+  it('every shipped locale is reachable by the i18next catalog loader', () => {
     const src = readFileSync(resolve(__dirname, '../src/renderer/i18n.ts'), 'utf8');
+    expect(src).toContain("import.meta.glob<{ default: Record<string, string> }>(\n  ['./locales/*/chrome.json', '!./locales/en/chrome.json'],\n)");
+    expect(src).toContain("CATALOG_CHUNKS[`./locales/${language}/chrome.json`]");
     const block = src.slice(src.indexOf('resources: {'), src.indexOf('interpolation:'));
     expect(block.length).toBeGreaterThan(0);
-    const registered = new Set(
+    const inline = new Set(
       [...block.matchAll(/^\s*'?([A-Za-z-]+)'?:\s*\{\s*chrome:/gm)].map((m) => m[1]),
     );
+    expect(inline.has('en'), 'the source catalog must be inline: it is the fallback').toBe(true);
     for (const locale of SHIPPED_LOCALES) {
-      expect(registered.has(locale), `${locale} is shipped but has no resources entry`).toBe(true);
+      expect(
+        existsSync(resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`)),
+        `${locale} is shipped but has no catalog for the loader to find`,
+      ).toBe(true);
     }
-    // The detector must be able to fail: a name that is not registered.
-    expect(registered.has('qqq')).toBe(false);
+    // The detector must be able to fail: a tag that has no catalog.
+    expect(existsSync(resolve(__dirname, '../src/renderer/locales/qqq/chrome.json'))).toBe(false);
   });
 
   // The list above is a MIRROR, and a mirror only gates what it is compared

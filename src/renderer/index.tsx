@@ -8,7 +8,8 @@ import { watchWindowCompose } from './lib/compose-settle';
 import { signalFirstPaint } from './lib/first-paint';
 import { stampInitialTheme } from './lib/theme-boot';
 import { installEditingMarker } from './lib/editing-marker';
-import './i18n'; // Initializes i18next before anything renders a string
+import { warmPdfWorker } from './lib/pdfRenderer';
+import { i18nReady } from './i18n'; // Initializes i18next before anything renders a string
 import './styles.css';
 
 // The shell CSS keys on BOTH [data-theme] and [data-backdrop], so both are
@@ -27,6 +28,10 @@ import './styles.css';
 function FirstPaintSignal(): null {
   React.useEffect(() => {
     signalFirstPaint();
+    // The first document's pdf.js worker boots from here, behind the shell's
+    // first frame and ahead of the user's file pick, instead of inside the
+    // open itself.
+    warmPdfWorker();
   }, []);
   return null;
 }
@@ -58,8 +63,9 @@ adoptStyleNonce();
 stampInitialTheme();
 // The capability report is read before the first render: menus and commands
 // resolve their platform-bound entries against it, and an entry must never
-// appear and then vanish.
-void Promise.all([initBackdrop(), loadPlatformCapabilities()]).finally(() => {
+// appear and then vanish. The UI language's catalog is waited for in the
+// same breath, so the first frame is already in that language.
+void Promise.all([initBackdrop(), loadPlatformCapabilities(), i18nReady]).finally(() => {
   const root = createRoot(document.getElementById('root')!);
   root.render(
     <>

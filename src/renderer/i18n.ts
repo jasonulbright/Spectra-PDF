@@ -1,5 +1,6 @@
 // The i18next core. Catalogs are BUNDLED (no runtime
-// fetch); keys are STABLE SEMANTIC IDS derived from the data tables that
+// fetch from anywhere but the app's own assets); keys are STABLE SEMANTIC
+// IDS derived from the data tables that
 // already name every surface (command ids, menu ids), so English copy can
 // change without orphaning translations. `en` is the source catalog,
 // GENERATED from the registry/menu tables by `scripts/gen-i18n-en.mjs` —
@@ -7,40 +8,22 @@
 // vitest parity gate diffs the generated output against the checked-in
 // file, and every other locale's key set must equal en's exactly.
 //
+// Only `en` rides in the entry chunk. The 27 other catalogs are half a
+// megabyte each, and importing all of them statically put sixteen megabytes
+// of JSON into the script every window parses before React can mount — on
+// a launch by double-clicked file, that parse sat between the click and the
+// open's first step, for strings the user's language never reads. Each
+// catalog is now its own chunk, served on demand by the i18next backend
+// below: the launch loads exactly one (`i18nReady`), a language switch loads
+// its target before switching, and English answers while a load is in flight.
+//
 // Under VITE_E2E the language is FORCED to 'en': the e2e suite asserts
 // English text in places, and locale coverage is its own spec driving the
 // Settings control.
-import i18next from 'i18next';
+import i18next, { type BackendModule } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { foldSentences } from './lib/sentence-join';
 import enChrome from './locales/en/chrome.json';
-import esChrome from './locales/es/chrome.json';
-import frChrome from './locales/fr/chrome.json';
-import deChrome from './locales/de/chrome.json';
-import itChrome from './locales/it/chrome.json';
-import ptBrChrome from './locales/pt-BR/chrome.json';
-import jaChrome from './locales/ja/chrome.json';
-import zhCnChrome from './locales/zh-CN/chrome.json';
-import nlChrome from './locales/nl/chrome.json';
-import daChrome from './locales/da/chrome.json';
-import svChrome from './locales/sv/chrome.json';
-import nbChrome from './locales/nb/chrome.json';
-import fiChrome from './locales/fi/chrome.json';
-import ruChrome from './locales/ru/chrome.json';
-import ukChrome from './locales/uk/chrome.json';
-import plChrome from './locales/pl/chrome.json';
-import csChrome from './locales/cs/chrome.json';
-import skChrome from './locales/sk/chrome.json';
-import koChrome from './locales/ko/chrome.json';
-import zhTwChrome from './locales/zh-TW/chrome.json';
-import trChrome from './locales/tr/chrome.json';
-import huChrome from './locales/hu/chrome.json';
-import elChrome from './locales/el/chrome.json';
-import roChrome from './locales/ro/chrome.json';
-import slChrome from './locales/sl/chrome.json';
-import caChrome from './locales/ca/chrome.json';
-import arChrome from './locales/ar/chrome.json';
-import heChrome from './locales/he/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -200,40 +183,58 @@ function pseudo(catalog: Record<string, string>): Record<string, string> {
   );
 }
 
-void i18next.use(initReactI18next).init({
+/**
+ * Every shipped catalog but the inline source one, as a loader for its own
+ * chunk. The key is the file path Vite saw, so a locale's catalog is found by
+ * the folder that carries its tag: `SHIPPED_LOCALES` names the folders, and
+ * the catalog gate checks that each named folder holds a complete catalog.
+ */
+const CATALOG_CHUNKS = import.meta.glob<{ default: Record<string, string> }>(
+  ['./locales/*/chrome.json', '!./locales/en/chrome.json'],
+);
+
+/**
+ * The i18next backend that serves those chunks. i18next asks it for a
+ * language's catalog the first time that language is wanted — at init for
+ * the launch language, and inside `changeLanguage` for a switch, which then
+ * announces the new language only once its catalog is in the store. A
+ * language that has no chunk, or whose chunk fails to load, is given an
+ * empty catalog: every key of it then falls back to English, which is also
+ * what a stalled load must never turn into — a namespace i18next considers
+ * unloaded suspends every `useTranslation` component above it.
+ */
+const catalogBackend: BackendModule = {
+  type: 'backend',
+  init() {},
+  read(language, namespace, callback) {
+    const chunk = namespace === 'chrome' ? CATALOG_CHUNKS[`./locales/${language}/chrome.json`] : undefined;
+    if (!chunk) {
+      callback(null, {});
+      return;
+    }
+    chunk().then(
+      (module) => callback(null, module.default),
+      (error: unknown) => {
+        console.error(`[i18n] the ${language} catalog did not load:`, error);
+        callback(null, {});
+      },
+    );
+  },
+};
+
+/** Settles once i18next is initialized with the launch language's catalog in
+ * its store. The entry point waits for it before the first render, so a
+ * non-English UI never flashes English first; the wait is one small chunk,
+ * behind a still-hidden window. */
+export const i18nReady: Promise<void> = i18next.use(initReactI18next).use(catalogBackend).init({
   lng: detectLanguage(),
   fallbackLng: 'en',
   defaultNS: 'chrome',
   ns: ['chrome'],
+  // Only the source catalog is inline; the backend above serves the others.
+  partialBundledLanguages: true,
   resources: {
     en: { chrome: enChrome },
-    es: { chrome: esChrome },
-    fr: { chrome: frChrome },
-    de: { chrome: deChrome },
-    it: { chrome: itChrome },
-    'pt-BR': { chrome: ptBrChrome },
-    ja: { chrome: jaChrome },
-    'zh-CN': { chrome: zhCnChrome },
-    nl: { chrome: nlChrome },
-    da: { chrome: daChrome },
-    sv: { chrome: svChrome },
-    nb: { chrome: nbChrome },
-    fi: { chrome: fiChrome },
-    ru: { chrome: ruChrome },
-    uk: { chrome: ukChrome },
-    pl: { chrome: plChrome },
-    cs: { chrome: csChrome },
-    sk: { chrome: skChrome },
-    ko: { chrome: koChrome },
-    'zh-TW': { chrome: zhTwChrome },
-    tr: { chrome: trChrome },
-    hu: { chrome: huChrome },
-    el: { chrome: elChrome },
-    ro: { chrome: roChrome },
-    sl: { chrome: slChrome },
-    ca: { chrome: caChrome },
-    ar: { chrome: arChrome },
-    he: { chrome: heChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? {
           qps: { chrome: pseudo(enChrome as Record<string, string>) },
@@ -243,7 +244,13 @@ void i18next.use(initReactI18next).init({
   },
   interpolation: { escapeValue: false }, // React escapes; double-escaping corrupts
   returnEmptyString: false,
-});
+}).then(
+  () => undefined,
+  (error: unknown) => {
+    // English is in the store whatever happened; the app renders in it.
+    console.error('[i18n] initialization failed:', error);
+  },
+);
 
 /** The DEV/e2e pseudo-locales and the direction each one proves. They have no
  * BCP-47 identity, so their direction cannot be derived and is stated here —
@@ -322,7 +329,9 @@ syncDocumentLanguage(i18next.language ?? 'en');
 i18next.on('languageChanged', syncDocumentLanguage);
 
 /** Switch the live UI language (the Settings panel persists the pref and
- * calls this; react-i18next re-renders every hooked component). */
+ * calls this; react-i18next re-renders every hooked component). i18next
+ * fetches the target's catalog from the backend before it announces the
+ * switch, so the UI lands whole in the new language. */
 export function setAppLanguage(pref: string): void {
   void i18next.changeLanguage(
     pref in PSEUDO_DIRECTIONS ? pref : resolveLanguage(pref),

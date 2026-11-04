@@ -1215,9 +1215,40 @@ export function WorkspaceCanvasView({
   // property of the machine, not of any document, so it is fetched here
   // (where the engine handle lives) and read from the module cache by the
   // pickers deep in the page tree.
+  //
+  // Not at mount, though. The listing opens every installed font file (a
+  // few hundred on a typical Windows machine, more with a cold disk) and the
+  // engine is one FIFO: issued from the same commit that mounts this view
+  // for a freshly opened document, it stood in front of that document's
+  // initial-view read, a restricted document's first-paint plaintext read
+  // and the next file's own open. It waits for the first document to land
+  // and for an idle moment instead; the pickers show the bundled families
+  // until it arrives and re-render when it does.
+  const hasDocuments = docs.length > 0;
   useEffect(() => {
-    primeSystemFonts(engineCall);
-  }, [engineCall]);
+    if (!hasDocuments) return;
+    const host = globalThis as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    let cancelled = false;
+    const prime = (): void => {
+      if (!cancelled) primeSystemFonts(engineCall);
+    };
+    if (typeof host.requestIdleCallback === 'function') {
+      // The timeout is the floor: a busy app still gets its pickers filled.
+      const id = host.requestIdleCallback(prime, { timeout: 2000 });
+      return () => {
+        cancelled = true;
+        host.cancelIdleCallback?.(id);
+      };
+    }
+    const timer = setTimeout(prime, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [engineCall, hasDocuments]);
   // The lines of a pending text box come from the engine that will draw it.
   useEffect(() => {
     provideTextBoxEngine(textBoxEngine((method, params) => engineCall(method, params), app.getEditFontPath));
