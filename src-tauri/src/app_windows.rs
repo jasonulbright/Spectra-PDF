@@ -1952,6 +1952,12 @@ pub async fn renderer_ready(app: AppHandle, window: tauri::WebviewWindow) {
     if let Some(focus) = app.state::<ShowGate>().mark_ready(&label) {
         show_now(&app, &label, focus);
     }
+    // The engine was started with the window (`warm_engine`), before this
+    // renderer could listen: tell it again when the import is still running,
+    // so its status shows what a first open would wait on.
+    if crate::engine::window_engine_starting(&app, &label) {
+        let _ = app.emit_to(label.as_str(), "engine:starting", true);
+    }
 }
 
 /// The renderer's viewport changed size. Put the webview back on the client

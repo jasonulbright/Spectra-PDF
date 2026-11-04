@@ -467,6 +467,12 @@ pub struct EngineWorker {
     generation: AtomicU64,
     retiring: AtomicBool,
     closed: AtomicBool,
+    /// A window process that has been spawned and has not yet reported ready:
+    /// it is importing the engine. A renderer that mounts after the spawn
+    /// (the process is started with the window, before the page loads) asks
+    /// for this on `renderer_ready`, since it missed the `engine:starting`
+    /// event the spawn emitted.
+    starting: AtomicBool,
     role: Role,
     /// The window's own registrations; used in the window slot only.
     credentials: std::sync::Mutex<CredentialLedger>,
@@ -485,6 +491,7 @@ impl EngineWorker {
             generation: AtomicU64::new(0),
             retiring: AtomicBool::new(false),
             closed: AtomicBool::new(false),
+            starting: AtomicBool::new(false),
             role,
             credentials: std::sync::Mutex::new(CredentialLedger::default()),
             given: std::sync::Mutex::new(Given::default()),
@@ -2323,6 +2330,13 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<(), St
     start_process(app, label, &worker).await
 }
 
+/// Whether `label`'s window engine process is spawned but still importing.
+pub fn window_engine_starting<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    app.state::<EngineState>()
+        .existing_worker(label)
+        .is_some_and(|worker| worker.starting.load(Ordering::SeqCst))
+}
+
 /// The launcher's arguments, then this process's role and window.
 fn spawn_args(launcher_args: Vec<String>, role: Role, label: &str) -> Vec<String> {
     let mut args = launcher_args;
@@ -2415,6 +2429,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
     // work, job or run start shows as the operation that is already running.
     let signals_start = worker.role == Role::Window;
     if signals_start {
+        worker.starting.store(true, Ordering::SeqCst);
         let _ = app.emit_to(label, "engine:starting", true);
     }
     let app_handle = app.clone();
@@ -2478,6 +2493,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
                     let trimmed = msg.trim();
                     if starting && trimmed.contains(ENGINE_READY_LINE) {
                         starting = false;
+                        worker.starting.store(false, Ordering::SeqCst);
                         let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
                     }
                     if !trimmed.is_empty() {
@@ -2492,6 +2508,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
             }
         }
         if starting {
+            worker.starting.store(false, Ordering::SeqCst);
             let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
         }
         if claimed_oversize {
