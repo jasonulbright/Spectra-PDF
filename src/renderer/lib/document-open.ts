@@ -83,8 +83,20 @@ export async function prepareDocumentWorkingCopy(
   try {
     const opened = await openWithCredentials(workingPath, fileName, io);
     if (opened) {
-      const buffer = await io.readBuffer(workingPath);
-      const info = await io.call('get_page_count', { file: workingPath });
+      // The copy's bytes are final once its credentials are settled (an
+      // owner open rewrites it in place; nothing after does), so the read
+      // and the engine's page count, both readers, go out together rather
+      // than one engine round trip after the other. Both are waited for
+      // before either failure is raised: the cleanup below removes the copy,
+      // and a read still in flight on it would then fail on its own.
+      const [read, counted] = await Promise.allSettled([
+        io.readBuffer(workingPath),
+        io.call('get_page_count', { file: workingPath }),
+      ]);
+      if (read.status === 'rejected') throw read.reason;
+      if (counted.status === 'rejected') throw counted.reason;
+      const buffer = read.value;
+      const info = counted.value;
       if (opened.password !== null) io.rememberPassword(sourcePath, opened.password);
       prepared = {
         workingPath,
