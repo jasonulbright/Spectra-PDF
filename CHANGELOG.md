@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.1105.163
+
+**Paragraph editor shows the document's own font**
+
+### Fixed
+- Show the paragraph's own font in the editor when it is installed.
+- Keep the paragraph editor's text wrapped at the paragraph width while typing.
+
 ## 2026.1105.162
 
 **Faster document open and a clearer paragraph editor**

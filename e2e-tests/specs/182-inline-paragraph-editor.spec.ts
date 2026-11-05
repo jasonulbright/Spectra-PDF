@@ -65,12 +65,22 @@ describe('inline paragraph editor', () => {
     expect(Math.abs(look.rect[1] - boxRect[1])).toBeLessThan(3);
     expect(Math.abs(look.rect[2] - boxRect[2])).toBeLessThan(3);
     expect(look.family).toContain('Liberation Serif');
+    expect(look.family).toMatch(/^"?Times"?, /);
     expect(look.color).toBe('rgb(178, 0, 0)');
 
     await setContentEditableValue(
       '[data-testid="edit-para-input"]',
       'Alpha beta gamma delta words flowing on the second line, and more',
     );
+    // The longer text wraps inside the editor at the paragraph's own width
+    // while typing, before any commit.
+    const live = await browser.execute(function () {
+      const el = document.querySelector('[data-testid="edit-para-input"]') as HTMLElement;
+      const lh = parseFloat(getComputedStyle(el).lineHeight);
+      return { width: el.getBoundingClientRect().width, lines: el.scrollHeight / lh };
+    });
+    expect(Math.abs(live.width - boxRect[2])).toBeLessThan(3);
+    expect(live.lines).toBeGreaterThan(2.5);
     // Caret is not at the end: plain Enter would split here.
     await browser.keys(['Home']);
     await browser.keys(['Control', 'Enter']);
