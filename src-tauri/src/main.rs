@@ -249,9 +249,11 @@ fn attach_parent_console_with_keyboard_input(force_console_stdin: bool) {
 /// Moves an interactive `scan-test` into its own console window.
 ///
 /// Returns true when the process now owns a fresh console with CONIN$ and
-/// CONOUT$ installed as the standard handles. Returns false, leaving the
-/// process attached to the parent console as before, when the run is
-/// redirected, has no parent console, or a window cannot be created.
+/// CONOUT$ installed as the standard handles. Returns false when the run is
+/// redirected, has no parent console, or a window cannot be created. The
+/// caller then attaches to the parent console as before: after a failed
+/// window this function has already released its own console and does not
+/// re-attach.
 #[cfg(windows)]
 fn open_scan_test_window(argv: &[String]) -> bool {
     use spectrapdf_lib::scantest::{
@@ -301,7 +303,9 @@ fn open_scan_test_window(argv: &[String]) -> bool {
 
     // SAFETY: Win32 calls below take live local buffers or NUL-terminated
     // wide strings; handles are checked against INVALID_HANDLE_VALUE before
-    // they are installed.
+    // they are installed. `File::from_raw_handle` takes `parent_out`, which
+    // `CreateFileW` just returned: it is open, nothing else stores or closes
+    // it, and the `File` closes it on drop.
     unsafe {
         let kind = |which: u32| {
             let handle = GetStdHandle(which);
@@ -344,8 +348,8 @@ fn open_scan_test_window(argv: &[String]) -> bool {
 
         FreeConsole();
         if AllocConsole() == 0 {
-            // Back to the caller's console; the run proceeds as it always did.
-            AttachConsole(ATTACH_PARENT_PROCESS);
+            // No console is attached now. The caller re-attaches to the
+            // parent and installs the handles, as it always did.
             return false;
         }
         let title = wide("Spectra PDF scan-test");
@@ -370,9 +374,8 @@ fn open_scan_test_window(argv: &[String]) -> bool {
             ptr::null(),
         );
         if input == INVALID_HANDLE_VALUE || output == INVALID_HANDLE_VALUE {
-            // The new window is unusable. Leave it and return to the caller.
+            // The new window is unusable. Leave it; the caller re-attaches.
             FreeConsole();
-            AttachConsole(ATTACH_PARENT_PROCESS);
             return false;
         }
         SetStdHandle(STD_INPUT_HANDLE, input);

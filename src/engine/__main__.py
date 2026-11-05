@@ -281,7 +281,8 @@ def _sweep_stale_temp() -> None:
 
 def main() -> None:
     platform_support.adopt_lease_channel()
-    threading.Thread(target=_sweep_stale_temp, name="stale-temp-sweep", daemon=True).start()
+    sweep = threading.Thread(target=_sweep_stale_temp, name="stale-temp-sweep", daemon=True)
+    sweep.start()
     server = JsonRpcServer()
     server.register("ping", ping)
     server.register("merge", merge)
@@ -515,6 +516,9 @@ def main() -> None:
     print("engine: ready", file=sys.stderr, flush=True)
 
     server.run(input_stream=sys.stdin, output_stream=sys.stdout)
+    # A short-lived CLI engine can finish before the sweep does; give it a
+    # bounded moment so stale argument folders are not left to the next start.
+    sweep.join(timeout=2.0)
 
 
 if __name__ == "__main__":

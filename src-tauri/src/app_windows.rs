@@ -1957,6 +1957,11 @@ pub async fn renderer_ready(app: AppHandle, window: tauri::WebviewWindow) {
     // so its status shows what a first open would wait on.
     if crate::engine::window_engine_starting(&app, &label) {
         let _ = app.emit_to(label.as_str(), "engine:starting", true);
+        // The engine may have reported ready between the read and the emit:
+        // send the corrective state so the status cannot stay on screen.
+        if !crate::engine::window_engine_starting(&app, &label) {
+            let _ = app.emit_to(label.as_str(), "engine:starting", false);
+        }
     }
     // The health worker is one more whole-engine import, and it used to begin
     // at the first open, beside the first page's render. The window has

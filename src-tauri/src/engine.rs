@@ -2499,8 +2499,12 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
                     let trimmed = msg.trim();
                     if starting && trimmed.contains(ENGINE_READY_LINE) {
                         starting = false;
-                        worker.starting.store(false, Ordering::SeqCst);
-                        let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
+                        // Only the process that owns the slot's startup state
+                        // may clear it: a replacement may already be importing.
+                        if worker.generation.load(Ordering::SeqCst) == generation {
+                            worker.starting.store(false, Ordering::SeqCst);
+                            let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
+                        }
                     }
                     if !trimmed.is_empty() {
                         eprintln!("[engine {tag}] {}", trimmed);
@@ -2513,7 +2517,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
                 _ => {}
             }
         }
-        if starting {
+        if starting && worker.generation.load(Ordering::SeqCst) == generation {
             worker.starting.store(false, Ordering::SeqCst);
             let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
         }
