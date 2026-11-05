@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import i18next from '../src/renderer/i18n';
 import type { QueueItem } from '../src/renderer/components/OperationQueue';
 import {
   DOCUMENTLESS_METHODS,
@@ -194,6 +195,10 @@ describe('formatOutcome — a finished line, in the language asked for', () => {
   it('falls back to the plain completion for every other operation', () => {
     expect(formatOutcome(null, 'en')).toBe('Complete');
   });
+
+  // Catalogs other than English are chunks loaded on demand; a pinned
+  // language renders from its catalog only once that chunk is in the store.
+  beforeAll(() => i18next.loadLanguages('de'));
 
   it('renders from the catalog of the language it is given', () => {
     const outcome = { imagesModified: 2, imagesWidened: 0, imagesRemoved: 1, imagesRemovedForCompression: 0 };
