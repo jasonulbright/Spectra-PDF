@@ -10,6 +10,7 @@
     "build:app": "cd .. && cross-env VITE_E2E=1 npx tauri build --debug --no-bundle --features e2e-net-private"
   },
   "devDependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "@types/mocha": "^10.0.0",
     "@types/node": "^26.1.2",
     "@wdio/cli": "^9.30.0",

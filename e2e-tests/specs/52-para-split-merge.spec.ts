@@ -331,6 +331,9 @@ describe('paragraph split + merge', () => {
       },
     ]);
     await browser.releaseActions();
+    // The drag leaves the editor open at the dragged width; the commit sends it.
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await browser.keys(['Control', 'Enter']);
     await waitForReindexedParas(
       nowId,
       (paras) => paras.length >= 1 && paras[0].lineCount > preLines,
