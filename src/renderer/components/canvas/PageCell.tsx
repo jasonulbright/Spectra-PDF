@@ -61,6 +61,7 @@ import {
   spanColorsToStyles,
   spanFacesToStyles,
   spanSizesToStyles,
+  paragraphBoxLook,
   type SpanColor,
   type SpanFace,
   type SpanSize,
@@ -5991,7 +5992,10 @@ function ParagraphEditor({
       style={{
         left: `${rect.x * 100}%`,
         top: `${rect.y * 100}%`,
-        minWidth: `${rect.w * 100}%`,
+        // The editor is as wide as the paragraph it edits, so the text wraps
+        // where the page's own text does. The toolbar floats and no longer
+        // widens it.
+        width: `${rect.w * 100}%`,
       }}
       onPointerDown={(e) => {
         e.stopPropagation();
@@ -6008,6 +6012,14 @@ function ParagraphEditor({
         // Enter/Escape at the WRAPPER so they work from EVERY control
         // (the size/colour inputs, not just the textarea — regression
         // that Escape did nothing while a control had focus).
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          // Ctrl+Enter commits from anywhere in the text, with no split.
+          // Held open while the text is changed and invalid, as Enter is.
+          e.preventDefault();
+          if (value !== para.text && !valid) return;
+          finish();
+          return;
+        }
         if (e.key === 'Enter' && e.shiftKey) {
           // Shift+Enter is a HARD LINE BREAK inside the paragraph — the one
           // thing plain Enter cannot be, since it already means commit (caret
@@ -6162,7 +6174,7 @@ function ParagraphEditor({
         </div>
       )}
       <div
-        className="page-editpara-toolbar"
+        className={`page-editpara-toolbar${rect.y < 0.1 ? ' below' : ''}`}
         role="group"
         aria-label={tChrome('canvas.editpara.styleGroup')}
       >
@@ -6530,6 +6542,7 @@ function ParagraphEditor({
              an LTR paragraph inherit a direction would be a different bug. */
           dir={para.rtl ? 'rtl' : 'ltr'}
           style={{
+            ...paragraphBoxLook(para),
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,
             maxHeight: `${Math.min(12, para.lineCount + 1) * fontPx * 1.25 + 8}px`,

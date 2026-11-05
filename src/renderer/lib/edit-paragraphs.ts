@@ -1015,6 +1015,55 @@ const HTML_FAMILY: Record<string, string> = {
   mono: 'Liberation Mono, Courier New, Courier, monospace',
 };
 
+/**
+ * The editor box's own look, so the text under the caret reads like the text
+ * on the page: the dominant span's bundled stand-in family (an installed or
+ * unclassified face falls through to the app default — see HTML_FAMILY), the
+ * paragraph's weight, slant, fill colour and alignment. Display only: none of
+ * this is sent on a commit (the seeds-versus-overrides contract of EditSpan).
+ */
+export function paragraphBoxLook(para: {
+  spans: EditSpan[];
+  bold: boolean;
+  italic: boolean;
+  color: string;
+  alignment: string;
+}): {
+  fontFamily?: string;
+  fontWeight?: number;
+  fontStyle?: 'italic';
+  color?: string;
+  textAlign?: 'left' | 'right' | 'center' | 'justify';
+} {
+  const counts = new Map<string, number>();
+  for (const sp of para.spans) {
+    if (sp.family && HTML_FAMILY[sp.family]) {
+      counts.set(sp.family, (counts.get(sp.family) ?? 0) + (sp.end - sp.start));
+    }
+  }
+  let family: string | undefined;
+  let best = 0;
+  for (const [name, n] of counts) {
+    if (n > best) {
+      best = n;
+      family = name;
+    }
+  }
+  const align =
+    para.alignment === 'right' || para.alignment === 'center' || para.alignment === 'justify'
+      ? para.alignment
+      : para.alignment === 'left'
+        ? 'left'
+        : undefined;
+  return {
+    ...(family ? { fontFamily: HTML_FAMILY[family] } : {}),
+    ...(para.bold ? { fontWeight: 700 } : {}),
+    ...(para.italic ? { fontStyle: 'italic' as const } : {}),
+    ...(/^#[0-9a-fA-F]{6}$/.test(para.color) ? { color: para.color } : {}),
+    ...(align ? { textAlign: align } : {}),
+  };
+}
+
 /** Render the style segments as ONE html string for the rich
  * surface.
  *
