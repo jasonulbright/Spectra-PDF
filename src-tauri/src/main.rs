@@ -62,10 +62,19 @@ fn main() {
                     Some(CliCommand::ScanTest(ref args)) if !args.list
                 )
         );
-    attach_parent_console_with_keyboard_input(scan_test_interactive);
+    // A keyboard-driven scan-test runs in a console window of its own: the
+    // exe is GUI-subsystem, so the shell does not wait for it and would
+    // redraw its prompt over the run. Redirected runs keep the parent console.
+    let own_window = scan_test_interactive && open_scan_test_window(&argv);
+    if !own_window {
+        attach_parent_console_with_keyboard_input(scan_test_interactive);
+    }
 
     if let Some(refusal) = spectrapdf_lib::cli::launch_refusal(&argv) {
         eprintln!("error: {refusal}");
+        if own_window {
+            hold_scan_test_window();
+        }
         std::process::exit(2);
     }
 
@@ -84,6 +93,9 @@ fn main() {
     match cli.command {
         Some(command) => {
             let code = spectrapdf_lib::cli::run(command, cli.gs_path);
+            if own_window {
+                hold_scan_test_window();
+            }
             std::process::exit(code);
         }
         None if cli.minimized => {
@@ -233,6 +245,159 @@ fn attach_parent_console_with_keyboard_input(force_console_stdin: bool) {
         }
     }
 }
+
+/// Moves an interactive `scan-test` into its own console window.
+///
+/// Returns true when the process now owns a fresh console with CONIN$ and
+/// CONOUT$ installed as the standard handles. Returns false, leaving the
+/// process attached to the parent console as before, when the run is
+/// redirected, has no parent console, or a window cannot be created.
+#[cfg(windows)]
+fn open_scan_test_window(argv: &[String]) -> bool {
+    use spectrapdf_lib::scantest::{
+        scan_test_window, ScanTestWindow, StdHandleKind, SCAN_TEST_NEW_WINDOW_NOTICE,
+    };
+    use std::ffi::OsStr;
+    use std::io::Write;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
+
+    extern "system" {
+        fn AttachConsole(dw_process_id: u32) -> i32;
+        fn AllocConsole() -> i32;
+        fn FreeConsole() -> i32;
+        fn SetConsoleTitleW(title: *const u16) -> i32;
+        fn CreateFileW(
+            lp_file_name: *const u16,
+            dw_desired_access: u32,
+            dw_share_mode: u32,
+            lp_security_attributes: *const u8,
+            dw_creation_disposition: u32,
+            dw_flags_and_attributes: u32,
+            h_template_file: *const u8,
+        ) -> isize;
+        fn SetStdHandle(n_std_handle: u32, h_handle: isize) -> i32;
+        fn GetStdHandle(n_std_handle: u32) -> isize;
+        fn GetFileType(h_file: isize) -> u32;
+        fn GetConsoleMode(h_console_handle: isize, lp_mode: *mut u32) -> i32;
+    }
+
+    const ATTACH_PARENT_PROCESS: u32 = 0xFFFFFFFF;
+    const GENERIC_WRITE: u32 = 0x40000000;
+    const GENERIC_READ: u32 = 0x80000000;
+    const FILE_SHARE_READ: u32 = 0x00000001;
+    const FILE_SHARE_WRITE: u32 = 0x00000002;
+    const OPEN_EXISTING: u32 = 3;
+    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32;
+    const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5u32;
+    const STD_ERROR_HANDLE: u32 = 0xFFFFFFF4u32;
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    let wide = |text: &str| -> Vec<u16> { OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect() };
+    let list = matches!(
+        Cli::try_parse_from(argv),
+        Ok(cli) if matches!(cli.command, Some(CliCommand::ScanTest(ref args)) if args.list)
+    );
+
+    // SAFETY: Win32 calls below take live local buffers or NUL-terminated
+    // wide strings; handles are checked against INVALID_HANDLE_VALUE before
+    // they are installed.
+    unsafe {
+        let kind = |which: u32| {
+            let handle = GetStdHandle(which);
+            let present = handle != 0 && handle != INVALID_HANDLE_VALUE;
+            let mut mode = 0;
+            let file_type = if present { GetFileType(handle) } else { 0 };
+            let console_ok = present && GetConsoleMode(handle, &mut mode) != 0;
+            StdHandleKind::from_file_type(present, file_type, console_ok)
+        };
+        let window = scan_test_window(
+            list,
+            kind(STD_INPUT_HANDLE),
+            kind(STD_OUTPUT_HANDLE),
+            kind(STD_ERROR_HANDLE),
+        );
+        if window != ScanTestWindow::OwnWindow {
+            return false;
+        }
+
+        // Tell the caller where the run went, while still attached to it.
+        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+            return false; // No parent console: nothing to leave, keep today's path.
+        }
+        let conout = wide("CONOUT$");
+        let parent_out = CreateFileW(
+            conout.as_ptr(),
+            GENERIC_WRITE,
+            FILE_SHARE_WRITE,
+            ptr::null(),
+            OPEN_EXISTING,
+            0,
+            ptr::null(),
+        );
+        if parent_out != INVALID_HANDLE_VALUE {
+            use std::os::windows::io::{FromRawHandle, RawHandle};
+            let mut out = std::fs::File::from_raw_handle(parent_out as RawHandle);
+            let _ = writeln!(out, "{SCAN_TEST_NEW_WINDOW_NOTICE}");
+            let _ = out.flush();
+        }
+
+        FreeConsole();
+        if AllocConsole() == 0 {
+            // Back to the caller's console; the run proceeds as it always did.
+            AttachConsole(ATTACH_PARENT_PROCESS);
+            return false;
+        }
+        let title = wide("Spectra PDF scan-test");
+        SetConsoleTitleW(title.as_ptr());
+
+        let input = CreateFileW(
+            wide("CONIN$").as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ptr::null(),
+            OPEN_EXISTING,
+            0,
+            ptr::null(),
+        );
+        let output = CreateFileW(
+            conout.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ptr::null(),
+            OPEN_EXISTING,
+            0,
+            ptr::null(),
+        );
+        if input == INVALID_HANDLE_VALUE || output == INVALID_HANDLE_VALUE {
+            // The new window is unusable. Leave it and return to the caller.
+            FreeConsole();
+            AttachConsole(ATTACH_PARENT_PROCESS);
+            return false;
+        }
+        SetStdHandle(STD_INPUT_HANDLE, input);
+        SetStdHandle(STD_OUTPUT_HANDLE, output);
+        SetStdHandle(STD_ERROR_HANDLE, output);
+    }
+    true
+}
+
+/// Keeps the scan-test window open until the tester has read the report path.
+#[cfg(windows)]
+fn hold_scan_test_window() {
+    use spectrapdf_lib::scantest::{Console, StdioConsole, SCAN_TEST_CLOSE_PROMPT};
+    let console = StdioConsole::new();
+    console.say("");
+    let _ = console.ask(SCAN_TEST_CLOSE_PROMPT);
+}
+
+#[cfg(not(windows))]
+fn open_scan_test_window(_argv: &[String]) -> bool {
+    false
+}
+
+#[cfg(not(windows))]
+fn hold_scan_test_window() {}
 
 #[cfg(not(windows))]
 fn attach_parent_console() {
