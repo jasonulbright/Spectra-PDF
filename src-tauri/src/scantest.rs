@@ -1533,6 +1533,73 @@ mod windows_console_input {
     }
 }
 
+/// What a standard handle was at process start, as far as the window decision
+/// cares. `Detached` is a handle that is missing, invalid or not a console
+/// device the caller passed on, which is what a GUI-subsystem exe started from
+/// an interactive shell normally gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdHandleKind {
+    Detached,
+    Console,
+    /// A disk file or a pipe: the caller redirected this stream.
+    Redirected,
+}
+
+impl StdHandleKind {
+    /// Maps `GetFileType` and `GetConsoleMode` results (file type 1 disk,
+    /// 2 char, 3 pipe; `console_mode_ok` is whether `GetConsoleMode` worked).
+    /// A character device that is not a console, such as NUL, counts as
+    /// redirected so the run keeps what the caller chose.
+    pub fn from_file_type(present: bool, file_type: u32, console_mode_ok: bool) -> Self {
+        if !present {
+            return Self::Detached;
+        }
+        match file_type {
+            1 | 3 => Self::Redirected,
+            2 if console_mode_ok => Self::Console,
+            2 => Self::Redirected,
+            _ => Self::Detached,
+        }
+    }
+}
+
+/// Where an interactive `scan-test` shows its prompts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanTestWindow {
+    /// Today's behaviour: attach to the caller's console (or keep redirects).
+    ParentConsole,
+    /// A new console window of its own, held open at the end.
+    OwnWindow,
+}
+
+/// Decides whether `scan-test` runs in its own console window.
+///
+/// The exe is GUI-subsystem, so a shell does not wait for it and redraws its
+/// prompt over the run while its line editor competes for the same console
+/// input. A run that a person drives at the keyboard therefore gets its own
+/// window. Anything redirected (a script, CI, piped answers, a log file), and
+/// `--list`, which never prompts, keeps the parent console exactly as before.
+pub fn scan_test_window(
+    list: bool,
+    stdin: StdHandleKind,
+    stdout: StdHandleKind,
+    stderr: StdHandleKind,
+) -> ScanTestWindow {
+    let redirected = [stdin, stdout, stderr].contains(&StdHandleKind::Redirected);
+    if list || redirected {
+        ScanTestWindow::ParentConsole
+    } else {
+        ScanTestWindow::OwnWindow
+    }
+}
+
+/// The line printed in the caller's console just before the run moves out.
+pub const SCAN_TEST_NEW_WINDOW_NOTICE: &str =
+    "scan-test continues in a new window. Answer the prompts there.";
+
+/// The line shown before the own window closes.
+pub const SCAN_TEST_CLOSE_PROMPT: &str = "Press Enter to close this window. ";
+
 pub struct StdioConsole {
     #[cfg(windows)]
     console_input: Option<std::sync::Mutex<windows_console_input::ConsoleInput>>,
@@ -3955,5 +4022,53 @@ mod tests {
         assert!(record.scratch.is_empty() && record.staged.is_empty());
         let json = serde_json::to_value(&record).expect("serializes");
         assert!(json.get("staged").is_none() && json.get("scratch").is_none());
+    }
+
+    #[test]
+    fn scan_test_window_interactive_run_gets_its_own_window() {
+        use StdHandleKind::{Console, Detached};
+        assert_eq!(
+            scan_test_window(false, Detached, Detached, Detached),
+            ScanTestWindow::OwnWindow
+        );
+        assert_eq!(
+            scan_test_window(false, Console, Console, Console),
+            ScanTestWindow::OwnWindow
+        );
+    }
+
+    #[test]
+    fn scan_test_window_redirected_or_list_keeps_the_parent_console() {
+        use StdHandleKind::{Console, Redirected};
+        // Piped answers, a redirected report, a redirected error stream.
+        assert_eq!(
+            scan_test_window(false, Redirected, Console, Console),
+            ScanTestWindow::ParentConsole
+        );
+        assert_eq!(
+            scan_test_window(false, Console, Redirected, Console),
+            ScanTestWindow::ParentConsole
+        );
+        assert_eq!(
+            scan_test_window(false, Console, Console, Redirected),
+            ScanTestWindow::ParentConsole
+        );
+        // --list never prompts.
+        assert_eq!(
+            scan_test_window(true, Console, Console, Console),
+            ScanTestWindow::ParentConsole
+        );
+    }
+
+    #[test]
+    fn scan_test_window_handle_kinds_follow_the_file_type() {
+        use StdHandleKind::{Console, Detached, Redirected};
+        assert_eq!(StdHandleKind::from_file_type(false, 0, false), Detached);
+        assert_eq!(StdHandleKind::from_file_type(true, 1, false), Redirected);
+        assert_eq!(StdHandleKind::from_file_type(true, 3, false), Redirected);
+        assert_eq!(StdHandleKind::from_file_type(true, 2, true), Console);
+        // NUL is a character device but not a console.
+        assert_eq!(StdHandleKind::from_file_type(true, 2, false), Redirected);
+        assert_eq!(StdHandleKind::from_file_type(true, 0, false), Detached);
     }
 }

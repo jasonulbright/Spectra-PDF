@@ -32,6 +32,41 @@ const ASSET_URLS = {
   standardFontDataUrl: assetBase('standard_fonts'),
 } as const;
 
+// ── One worker per document, booted ahead of time ────────────────────────
+// Every document gets a pdf.js worker of its own, as before: `destroy()` on
+// its loading task still terminates the thread, which is the only way to stop
+// a parse that has wedged, and one document's crash never takes another's
+// worker with it. What changes is WHEN the thread boots. Left to pdf.js, the
+// worker is created inside `getDocument`, so every open paid the 1.26 MB
+// worker script's fetch, compile and handshake (tens of milliseconds, the
+// same for an 800-byte file as for a 200-page one) before the first page
+// could be parsed. A spare is now kept booting in the background: a load
+// takes it and starts the next one, so the boot overlaps whatever the app
+// was doing before the document arrived — the file dialog, the engine's
+// credential probes, the previous document's index.
+let spare: pdfjsLib.PDFWorker | null = null;
+
+function bootWorker(): pdfjsLib.PDFWorker {
+  const worker = new pdfjsLib.PDFWorker();
+  // A spare nobody ever takes must not surface its boot failure as an
+  // unhandled rejection; the load that takes it awaits the same promise and
+  // reports the failure where a document can be told about it.
+  void worker.promise.catch(() => {});
+  return worker;
+}
+
+/** Start booting the spare worker now, so the first open finds it ready.
+ * Called once the shell has painted; harmless to call again. */
+export function warmPdfWorker(): void {
+  spare ??= bootWorker();
+}
+
+function takeWorker(): pdfjsLib.PDFWorker {
+  const worker = spare ?? bootWorker();
+  spare = bootWorker();
+  return worker;
+}
+
 export async function loadDocument(buffer: PdfBuffer, password?: string): Promise<pdfjsLib.PDFDocumentProxy> {
   // Tauri IPC serializes file bytes as a number[]; other sources may pass an
   // ArrayBuffer or Uint8Array. Typed-array input is copied because pdf.js
@@ -45,13 +80,34 @@ export async function loadDocument(buffer: PdfBuffer, password?: string): Promis
   } else {
     data = new Uint8Array(buffer);
   }
-  return pdfjsLib.getDocument({
+  const worker = takeWorker();
+  const task = pdfjsLib.getDocument({
     data,
+    worker,
     useWorkerFetch: false,
     useSystemFonts: true,
     ...ASSET_URLS,
     ...(password !== undefined ? { password } : {}),
-  }).promise;
+  });
+  // pdf.js terminates a worker it created itself when the task is destroyed,
+  // and leaves one it was handed alive. This worker belongs to this document
+  // alone, so the task's `destroy` is made to take it down too — the holders
+  // (`pdfDocCache`, `withOwnDocument`) keep calling `loadingTask.destroy()`
+  // and keep getting the kill switch they had.
+  const destroyTask = task.destroy.bind(task);
+  task.destroy = async () => {
+    try {
+      await destroyTask();
+    } finally {
+      worker.destroy();
+    }
+  };
+  // Bytes pdf.js refuses (not a PDF, wrong password) leave a task nobody
+  // holds a proxy to, so nobody would ever destroy it; its worker goes now.
+  void task.promise.catch(() => {
+    void task.destroy().catch(() => {});
+  });
+  return task.promise;
 }
 
 export async function renderPageToCanvas(

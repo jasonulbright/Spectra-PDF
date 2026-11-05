@@ -492,7 +492,13 @@ def print_pdf(
     if layout == "booklet":
         resolved_orient = "landscape"
     elif imposition:
-        resolved_orient = orientation if orientation != "auto" else "portrait"
+        if orientation != "auto":
+            resolved_orient = orientation
+        elif layout == "nup" and nup_cols > nup_rows:
+            # A wide grid (1x2) on a portrait sheet gives two narrow cells.
+            resolved_orient = "landscape"
+        else:
+            resolved_orient = "portrait"
     else:
         resolved_orient = orientation  # may stay "auto" (no DEVMODE override)
 

@@ -1,10 +1,15 @@
 // A sweep reports the repairs it applied as engine fixup ids; the result row
 // shows each one by its localized name, never by its id.
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { appliedFixupNames } from '../src/renderer/components/FolderPreflightDialog';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
+import i18next from '../src/renderer/i18n';
+
+// Catalogs other than English are chunks loaded on demand; a pinned language
+// renders from its catalog only once that chunk is in the store.
+beforeAll(() => i18next.loadLanguages('de'));
 
 function engineFixupIds(): string[] {
   const src = readFileSync(resolve(__dirname, '../src/engine/preflight_profiles.py'), 'utf8');

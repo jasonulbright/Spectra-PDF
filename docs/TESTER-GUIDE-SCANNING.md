@@ -19,10 +19,21 @@ helps too.
    You can also pass `--device 1` (or another number from that list); an exact
    device ID from `spectrapdf.exe scanners` works too.
 
-3. Answer the prompts. It tells you when to load the feeder, when to press
-   things, and when a step is safe to skip.
-4. When it finishes, attach the two files it names (`scan-test-report.json`
-   and `.txt`) to a [new GitHub issue](https://github.com/jasonulbright/Spectra-PDF/issues/new).
+   PowerShell prints one line, "scan-test continues in a new window", and the
+   test opens in its **own console window**. Switch to that window. PowerShell
+   returns to its prompt right away; that is expected, so leave it alone and
+   do your typing in the new window. You do not need
+   `Start-Process -Wait -NoNewWindow` or any other wrapper.
+
+3. Answer the prompts in the new window. It tells you when to load the
+   feeder, when to press things, and when a step is safe to skip.
+4. When it finishes, the window shows the path of the two report files
+   (`scan-test-report.json` and `.txt`) and waits. Read it, then press Enter
+   to close the window. The window stays open until you do.
+5. Attach the two files to a [new GitHub issue](https://github.com/jasonulbright/Spectra-PDF/issues/new).
+
+If you redirect the output or pipe answers in (for a script), no new window
+opens and the test runs in the console you started it from.
 
 That's it.
 

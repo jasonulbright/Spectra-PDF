@@ -1442,9 +1442,13 @@ function AppContent(): React.ReactElement {
         const first = placeholders.keys().next();
         if (!first.done) pendingOpens.focus(first.value);
       }
-      const recoveredOrigins = opts?.webOrigin
+      // Asked now and answered later: the recovery read runs beside the
+      // claim below rather than as one more serial hop before it, and it is
+      // first consulted only once a document lands.
+      const recoveringOrigins = opts?.webOrigin
         ? null
-        : await app.webOriginsFor(canonicalSet).catch(() => ({}) as Record<string, string>);
+        : app.webOriginsFor(canonicalSet).catch(() => ({}) as Record<string, string>);
+      let recoveredOrigins: Record<string, string> | null = null;
       const originFor = (filePath: string): string | undefined =>
         opts?.webOrigin ?? recoveredOrigins?.[filePath];
       //
@@ -1462,6 +1466,7 @@ function AppContent(): React.ReactElement {
       holding = canonicalSet;
       claimHolds.current.hold(holding);
       const { granted, refused } = await claimPaths(canonicalSet, 'write');
+      if (recoveringOrigins) recoveredOrigins = await recoveringOrigins;
       for (const r of refused) pendingOpens.settle(placeholders.get(r.path));
       if (refused.length > 0) void reportClaimRefusal(refused, 'window');
       unopened = new Set(granted);

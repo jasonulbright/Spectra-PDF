@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -467,6 +467,12 @@ pub struct EngineWorker {
     generation: AtomicU64,
     retiring: AtomicBool,
     closed: AtomicBool,
+    /// A window process that has been spawned and has not yet reported ready:
+    /// it is importing the engine. A renderer that mounts after the spawn
+    /// (the process is started with the window, before the page loads) asks
+    /// for this on `renderer_ready`, since it missed the `engine:starting`
+    /// event the spawn emitted.
+    starting: AtomicBool,
     role: Role,
     /// The window's own registrations; used in the window slot only.
     credentials: std::sync::Mutex<CredentialLedger>,
@@ -485,6 +491,7 @@ impl EngineWorker {
             generation: AtomicU64::new(0),
             retiring: AtomicBool::new(false),
             closed: AtomicBool::new(false),
+            starting: AtomicBool::new(false),
             role,
             credentials: std::sync::Mutex::new(CredentialLedger::default()),
             given: std::sync::Mutex::new(Given::default()),
@@ -2142,11 +2149,19 @@ pub fn get_soffice_path(app: &AppHandle) -> String {
 /// - `PYTHONUTF8`: the JSON-RPC channel is UTF-8 by contract; without it an
 ///   embedded Python on Windows decodes stdin as cp1252 and mojibakes every
 ///   non-ASCII value (the engine also reconfigures its own stdio).
-/// - `PYTHONDONTWRITEBYTECODE`: the installed tree is a payload, not a cache;
-///   without it the interpreter writes `__pycache__` beside every engine
-///   module it imports, so the install directory grows files no uninstall
-///   removes. `__startup__.py` also sets `sys.dont_write_bytecode` so a
-///   launcher that misses this table is still covered.
+/// - `PYTHONPYCACHEPREFIX`: where the interpreter keeps the bytecode it
+///   compiles ([`bytecode_cache_dir`]). The installed tree is a payload, not
+///   a cache, and ships no bytecode; without a cache every engine process
+///   compiles every engine module and every package it imports from source
+///   before it reads its first request, which is most of the seconds a cold
+///   engine costs the first open of a window (and the first operation of
+///   every other process class, and every health worker). With the prefix,
+///   that compile happens once per user and update, outside the payload.
+/// - `PYTHONDONTWRITEBYTECODE`, when no cache directory resolves: without it
+///   the interpreter writes `__pycache__` beside every engine module it
+///   imports, so the install directory grows files no uninstall removes.
+///   `__startup__.py` also sets `sys.dont_write_bytecode` when no prefix is
+///   given, so a launcher that misses this table is still covered.
 /// - The colour-profile assent, told to the engine rather than looked up by
 ///   it: the installed and portable containers keep the record in different
 ///   places, and this binary is the one authority on which container it is.
@@ -2163,16 +2178,31 @@ pub fn get_soffice_path(app: &AppHandle) -> String {
 ///   worker's `RLIMIT_DATA` ceiling counts those buffers, and its import alone
 ///   exceeds the ceiling without this.
 pub fn python_env() -> Vec<(String, String)> {
+    python_env_with(bytecode_cache_dir().as_deref())
+}
+
+/// [`python_env`] with the bytecode cache directory stated, for the one
+/// caller that resolves it and for tests.
+pub fn python_env_with(bytecode_cache: Option<&Path>) -> Vec<(String, String)> {
     let mut env = vec![
         ("PYTHONUTF8".to_string(), "1".to_string()),
         ("PYTHONNOUSERSITE".to_string(), "1".to_string()),
-        ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
-        ("OPENBLAS_NUM_THREADS".to_string(), "1".to_string()),
-        (
-            crate::portable::ICC_ASSENT_ENV.to_string(),
-            crate::portable::assent_env_value(crate::portable::icc_assent()).to_string(),
-        ),
     ];
+    match bytecode_cache {
+        Some(dir) => {
+            env.push(("PYTHONPYCACHEPREFIX".to_string(), dir.to_string_lossy().to_string()));
+            // An empty value reads as unset, and cancels one inherited from
+            // the user's environment: the interpreter writes no bytecode at
+            // all while that variable is set, prefix or not.
+            env.push(("PYTHONDONTWRITEBYTECODE".to_string(), String::new()));
+        }
+        None => env.push(("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string())),
+    }
+    env.push(("OPENBLAS_NUM_THREADS".to_string(), "1".to_string()));
+    env.push((
+        crate::portable::ICC_ASSENT_ENV.to_string(),
+        crate::portable::assent_env_value(crate::portable::icc_assent()).to_string(),
+    ));
     if let Some(root) = image_root() {
         env.push((IMAGE_ROOT_ENV.to_string(), root.to_string_lossy().to_string()));
         if let Some(tzpath) = image_tzpath(&root) {
@@ -2180,6 +2210,50 @@ pub fn python_env() -> Vec<(String, String)> {
         }
     }
     env
+}
+
+/// Where every Python spawn of this copy keeps the bytecode it compiles,
+/// decided once per process: `pycache` under the portable root when one is in
+/// force (a copy on a stick leaves nothing in the host's profile), else under
+/// the per-user cache directory (`%LOCALAPPDATA%\<identifier>` on Windows,
+/// `$XDG_CACHE_HOME/<identifier>` or `~/.cache/<identifier>` elsewhere — the
+/// directory Tauri's `app_cache_dir` names). None when neither resolves; the
+/// interpreter then writes no bytecode at all, as it always did. The directory
+/// is not created here: the interpreter creates what it writes, so a copy that
+/// never starts an engine leaves no folder behind.
+pub fn bytecode_cache_dir() -> Option<PathBuf> {
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let portable = crate::portable::root_decision().ok().and_then(|decision| decision.root());
+        bytecode_cache_dir_from(portable, per_user_cache_dir())
+    })
+    .clone()
+}
+
+/// The per-user cache root of this platform, from the environment alone so
+/// the headless CLI, which has no Tauri path resolver, lands in the same
+/// directory as the windowed app.
+fn per_user_cache_dir() -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+    };
+    base.filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(crate::portable::APP_IDENTIFIER))
+}
+
+/// The portable root when one is in force, else the per-user cache root;
+/// `pycache` under whichever it is. Pure, for the tests.
+fn bytecode_cache_dir_from(portable: Option<&Path>, per_user: Option<PathBuf>) -> Option<PathBuf> {
+    portable
+        .map(Path::to_path_buf)
+        .or(per_user)
+        .filter(|root| root.is_absolute())
+        .map(|root| root.join("pycache"))
 }
 
 /// Read by `engine/platform_support.py`.
@@ -2260,6 +2334,13 @@ pub fn python_args(script: &str) -> Vec<String> {
 pub async fn start<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<(), String> {
     let worker = app.state::<EngineState>().worker(label)?;
     start_process(app, label, &worker).await
+}
+
+/// Whether `label`'s window engine process is spawned but still importing.
+pub fn window_engine_starting<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    app.state::<EngineState>()
+        .existing_worker(label)
+        .is_some_and(|worker| worker.starting.load(Ordering::SeqCst))
 }
 
 /// The launcher's arguments, then this process's role and window.
@@ -2354,6 +2435,7 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
     // work, job or run start shows as the operation that is already running.
     let signals_start = worker.role == Role::Window;
     if signals_start {
+        worker.starting.store(true, Ordering::SeqCst);
         let _ = app.emit_to(label, "engine:starting", true);
     }
     let app_handle = app.clone();
@@ -2417,7 +2499,12 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
                     let trimmed = msg.trim();
                     if starting && trimmed.contains(ENGINE_READY_LINE) {
                         starting = false;
-                        let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
+                        // Only the process that owns the slot's startup state
+                        // may clear it: a replacement may already be importing.
+                        if worker.generation.load(Ordering::SeqCst) == generation {
+                            worker.starting.store(false, Ordering::SeqCst);
+                            let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
+                        }
                     }
                     if !trimmed.is_empty() {
                         eprintln!("[engine {tag}] {}", trimmed);
@@ -2430,7 +2517,8 @@ async fn start_process<R: Runtime>(app: &AppHandle<R>, label: &str, worker: &Arc
                 _ => {}
             }
         }
-        if starting {
+        if starting && worker.generation.load(Ordering::SeqCst) == generation {
+            worker.starting.store(false, Ordering::SeqCst);
             let _ = app_handle.emit_to(label.as_str(), "engine:starting", false);
         }
         if claimed_oversize {
@@ -3023,7 +3111,7 @@ mod start_tests {
         assert_eq!(image_root_from(Some(&image), Some(&elsewhere.join("spectrapdf"))), None);
         assert_eq!(image_root_from(None, Some(&image.join("bin").join("spectrapdf"))), None);
         assert_eq!(
-            image_root_from(Some(std::path::Path::new("mount")), Some(&image.join("bin").join("spectrapdf"))),
+            image_root_from(Some(Path::new("mount")), Some(&image.join("bin").join("spectrapdf"))),
             None
         );
     }
@@ -3063,6 +3151,39 @@ mod start_tests {
         let env = python_env();
         assert!(env.iter().any(|(k, v)| k == "PYTHONNOUSERSITE" && v == "1"));
         assert!(env.iter().any(|(k, v)| k == "PYTHONUTF8" && v == "1"));
+    }
+
+    #[test]
+    fn bytecode_is_cached_outside_the_payload_or_not_written_at_all() {
+        let value = |env: &[(String, String)], key: &str| {
+            env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+        };
+        let cache = if cfg!(windows) { r"C:\Users\me\AppData\Local\com.spectrapdf.app\pycache" } else { "/home/me/.cache/com.spectrapdf.app/pycache" };
+        let cached = python_env_with(Some(Path::new(cache)));
+        assert_eq!(value(&cached, "PYTHONPYCACHEPREFIX").as_deref(), Some(cache));
+        assert_eq!(value(&cached, "PYTHONDONTWRITEBYTECODE").as_deref(), Some(""));
+        // No cache directory: the interpreter writes no bytecode anywhere,
+        // as before — never into the payload.
+        let uncached = python_env_with(None);
+        assert_eq!(value(&uncached, "PYTHONDONTWRITEBYTECODE").as_deref(), Some("1"));
+        assert_eq!(value(&uncached, "PYTHONPYCACHEPREFIX"), None);
+        // Both tables carry everything else alike.
+        for key in ["PYTHONUTF8", "PYTHONNOUSERSITE", "OPENBLAS_NUM_THREADS", crate::portable::ICC_ASSENT_ENV] {
+            assert_eq!(value(&cached, key), value(&uncached, key), "{key}");
+        }
+    }
+
+    #[test]
+    fn the_bytecode_cache_prefers_the_portable_root_and_needs_an_absolute_one() {
+        let portable = if cfg!(windows) { Path::new(r"E:\SpectraPDF\data") } else { Path::new("/media/stick/SpectraPDF/data") };
+        let per_user = if cfg!(windows) { PathBuf::from(r"C:\Users\me\AppData\Local\com.spectrapdf.app") } else { PathBuf::from("/home/me/.cache/com.spectrapdf.app") };
+        assert_eq!(
+            bytecode_cache_dir_from(Some(portable), Some(per_user.clone())),
+            Some(portable.join("pycache"))
+        );
+        assert_eq!(bytecode_cache_dir_from(None, Some(per_user.clone())), Some(per_user.join("pycache")));
+        assert_eq!(bytecode_cache_dir_from(None, None), None);
+        assert_eq!(bytecode_cache_dir_from(Some(Path::new("relative")), None), None);
     }
 
     #[test]

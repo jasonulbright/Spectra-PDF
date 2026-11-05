@@ -132,6 +132,7 @@ from engine.font_inventory import list_document_fonts
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 import tempfile
+import threading
 
 from engine.inplace import reclaim_stale_stages
 from engine.credentials import (
@@ -262,10 +263,26 @@ def ping() -> dict:
     return {"status": "ok", "engine": "spectra-pdf", "version": "0.2.0"}
 
 
-def main() -> None:
-    platform_support.adopt_lease_channel()
+def _sweep_stale_temp() -> None:
+    """Remove what a killed engine left in the temporary directory: staged
+    writes and Ghostscript argument folders (each holding a stored password).
+
+    Both sweeps list the whole temporary directory, which on a long-lived
+    Windows machine holds tens of thousands of entries; run before the ready
+    line, they held every process's first request behind two such listings.
+    They run on a thread beside the server instead. Both only touch entries
+    whose owning process is provably dead — this process's own stages carry
+    its pid and its argument folders are younger than the stale age — so a
+    request served meanwhile never races them, and `staging_target` still
+    reclaims a write's own folder before using it."""
     reclaim_stale_stages(tempfile.gettempdir())
     remove_stale_gs_argfiles()
+
+
+def main() -> None:
+    platform_support.adopt_lease_channel()
+    sweep = threading.Thread(target=_sweep_stale_temp, name="stale-temp-sweep", daemon=True)
+    sweep.start()
     server = JsonRpcServer()
     server.register("ping", ping)
     server.register("merge", merge)
@@ -499,6 +516,9 @@ def main() -> None:
     print("engine: ready", file=sys.stderr, flush=True)
 
     server.run(input_stream=sys.stdin, output_stream=sys.stdout)
+    # A short-lived CLI engine can finish before the sweep does; give it a
+    # bounded moment so stale argument folders are not left to the next start.
+    sweep.join(timeout=2.0)
 
 
 if __name__ == "__main__":

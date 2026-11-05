@@ -1211,7 +1211,12 @@ pub async fn ensure_parent_dirs(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn create_working_copy(file_path: String) -> Result<String, String> {
-    working_copy_in(&crate::scratch::root(), &file_path)
+    // Off the async runtime, like `snapshot`: the copy is file I/O that a
+    // slow volume or a scan of the new file can hold for a while, and every
+    // other command of the window would otherwise wait behind it.
+    tauri::async_runtime::spawn_blocking(move || working_copy_in(&crate::scratch::root(), &file_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Copy `file_path` into a new working folder under `root`. The folder's name

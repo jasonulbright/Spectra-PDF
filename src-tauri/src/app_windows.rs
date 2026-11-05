@@ -1856,7 +1856,28 @@ pub fn build_app_window(
     };
     app.state::<BackdropState>().record(label, backdrop);
     crate::session::on_window_created(app, &window);
+    warm_engine(app, label);
     Ok(window)
+}
+
+/// Start the window's engine process now rather than at its first request.
+///
+/// The process imports the whole engine before it reads a request — seconds
+/// on a cold machine — and until now that import began only when the first
+/// open sent `check_encrypted`, so the first document of every window waited
+/// for it in full. Started here, the import overlaps the webview's own load
+/// and the user's trip through the file dialog; the renderer still shows
+/// "Starting the document engine…" for whatever remains. A start that fails
+/// is only logged: the first request retries it exactly as before
+/// (`lock_started`), with the error surfaced where it always was.
+fn warm_engine(app: &AppHandle, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::engine::start(&app, &label).await {
+            eprintln!("[engine {label}] early start failed: {error}");
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -1931,6 +1952,26 @@ pub async fn renderer_ready(app: AppHandle, window: tauri::WebviewWindow) {
     if let Some(focus) = app.state::<ShowGate>().mark_ready(&label) {
         show_now(&app, &label, focus);
     }
+    // The engine was started with the window (`warm_engine`), before this
+    // renderer could listen: tell it again when the import is still running,
+    // so its status shows what a first open would wait on.
+    if crate::engine::window_engine_starting(&app, &label) {
+        let _ = app.emit_to(label.as_str(), "engine:starting", true);
+        // The engine may have reported ready between the read and the emit:
+        // send the corrective state so the status cannot stay on screen.
+        if !crate::engine::window_engine_starting(&app, &label) {
+            let _ = app.emit_to(label.as_str(), "engine:starting", false);
+        }
+    }
+    // The health worker is one more whole-engine import, and it used to begin
+    // at the first open, beside the first page's render. The window has
+    // painted and its own engine has had a head start, so it begins now; a
+    // start that fails is retried by the first health request as before.
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::health_engine::start(&app).await {
+            eprintln!("[health] early start failed: {error}");
+        }
+    });
 }
 
 /// The renderer's viewport changed size. Put the webview back on the client

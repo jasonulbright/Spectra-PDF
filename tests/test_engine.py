@@ -4411,6 +4411,26 @@ class TestPrintPipeline:
         assert "-dFitPage" in argv
         assert "/Orientation 1" in argv[argv.index("-c") + 1]
 
+    def test_nup_wide_grid_auto_is_landscape(self, tmp_dir, monkeypatch, gs_path):
+        # Issue #67: 1x2 on "auto" must author a landscape sheet.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      layout="nup", nup_rows=1, nup_cols=2,
+                      sheet_width=595, sheet_height=842)
+        assert r["orientation"] == "landscape"
+        with pikepdf.open(cap["files"][0]) as out:
+            assert [float(v) for v in out.pages[0].mediabox] == [0, 0, 842, 595]
+        assert "/Orientation 2" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+
+    def test_nup_tall_grid_auto_stays_portrait(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300])
+        r = print_pdf(file=src, printer="P", gs_path=gs_path,
+                      layout="nup", nup_rows=2, nup_cols=1,
+                      sheet_width=595, sheet_height=842)
+        assert r["orientation"] == "portrait"
+
     def test_booklet_pipeline_forces_landscape(self, tmp_dir, monkeypatch, gs_path):
         cap = self._capture(monkeypatch, tmp_dir)
         src = self._sized(tmp_dir, [300, 300, 300, 300])
@@ -4542,6 +4562,17 @@ class TestPrintPreview:
             assert r["sheets"] == 1
             assert len(r["pages"]) == 1
             assert r["prepass"] == ["flatten", "nup2x2"]
+        finally:
+            self._cleanup(r)
+
+    def test_nup_preview_wide_grid_auto_is_landscape(self, tmp_dir, gs_path):
+        from engine.printer import print_preview
+        src = self._pdf(tmp_dir, [300, 300])
+        r = print_preview(file=src, gs_path=gs_path,
+                          layout="nup", nup_rows=1, nup_cols=2,
+                          sheet_width=595, sheet_height=842)
+        try:
+            assert r["orientation"] == "landscape"
         finally:
             self._cleanup(r)
 

@@ -13,6 +13,14 @@ export default defineConfig({
     outDir: '../../dist/renderer',
     emptyOutDir: true,
   },
+  // Every worker is created with `type: 'module'`, so the bundle can be one
+  // too. The default (an IIFE) cannot be code-split, so a worker that reaches
+  // `i18n` inlined all 28 locale catalogs — 16 MB parsed on every boot of
+  // the metadata worker — where the module format leaves them as the lazy
+  // chunks they are in the main bundle.
+  worker: {
+    format: 'es',
+  },
   server: {
     port: 5173,
     strictPort: true,
