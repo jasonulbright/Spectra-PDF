@@ -207,9 +207,58 @@ describe('inline paragraph editor conditions', () => {
     );
   });
 
+  it('a paragraph whose text runs up the page follows the grip on the vertical axis', async function () {
+    this.timeout(120_000);
+    await open(async (doc) => {
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const page = doc.addPage([400, 300]);
+      const c = rgb(0, 0, 0);
+      page.drawText('Vertical paragraph first', { x: 200, y: 60, size: 16, font, color: c, rotate: degrees(90) });
+      page.drawText('and its second line', { x: 182, y: 60, size: 16, font, color: c, rotate: degrees(90) });
+    });
+    await $('.page-editpara').waitForDisplayed({ timeout: 30_000 });
+    await $('.page-editpara').doubleClick();
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    const box = async () =>
+      await browser.execute(function () {
+        const r = (document.querySelector('.page-editpara-editor') as HTMLElement).getBoundingClientRect();
+        return { top: r.top, height: r.height };
+      });
+    const before = await box();
+    const grip = await $('[data-testid="edit-para-grip-end"]');
+    const loc = await grip.getLocation();
+    const size = await grip.getSize();
+    const cx = Math.round(loc.x + size.width / 2);
+    const cy = Math.round(loc.y + size.height / 2);
+    await browser.performActions([
+      {
+        type: 'pointer',
+        id: 'p1',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 0, x: cx, y: cy },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerMove', duration: 200, x: cx, y: cy - 30 },
+          { type: 'pointerMove', duration: 100, x: cx, y: cy - 60 },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+    ]);
+    await browser.releaseActions();
+    const after = await box();
+    // The box moved or resized along the vertical axis by about the drag.
+    expect(Math.abs(after.top - before.top) + Math.abs(after.height - before.height)).toBeGreaterThan(30);
+    await browser.keys(['Escape']);
+  });
+
   it('a right-to-left paragraph edits right-to-left and commits', async function () {
     this.timeout(120_000);
     await open(async (doc) => {
+      if (!existsSync(ARABIC_FONT)) {
+        throw new Error(
+          `${ARABIC_FONT} is missing. The right-to-left fixture needs the bundled fonts: run scripts/sync-edit-fonts.ps1 once.`,
+        );
+      }
       const font = await doc.embedFont(readFileSync(ARABIC_FONT), { subset: true });
       const page = doc.addPage([400, 300]);
       // The font library reorders right-to-left text to visual order itself.

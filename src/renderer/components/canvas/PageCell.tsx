@@ -5434,7 +5434,12 @@ function ParagraphEditor({
   // The editor's own box while a width grip is held, as fractions of the page:
   // the text wraps at the dragged width at once, and the engine commit still
   // happens on release.
-  const [gripBox, setGripBox] = useState<{ left: number; width: number } | null>(null);
+  const [gripBox, setGripBox] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height?: number;
+  } | null>(null);
   // A width the user dragged to and has not committed yet: the editor stays
   // open at that width, and the next commit (Enter, Ctrl+Enter, click-away)
   // sends it with the text, as one undoable edit.
@@ -5953,12 +5958,14 @@ function ParagraphEditor({
     // A second drag starts from the width the first one left.
     const baseX = gripBox ? gripBox.left : rect.x;
     const baseW = gripBox ? gripBox.width : rect.w;
+    const baseY = gripBox ? gripBox.top : rect.y;
+    const baseH = gripBox?.height ?? rect.h;
     const ptInline =
       pendingBox?.box_width ??
       (inlineIsVerticalOnPage ? para.boxPt[3] - para.boxPt[1] : para.boxPt[2] - para.boxPt[0]);
     const originPt = pendingBox?.box_left ?? boxLeftPt(0);
     const dispInlinePx =
-      inlineDir[0] !== 0 ? baseW * cell.clientWidth : rect.h * cell.clientHeight;
+      inlineDir[0] !== 0 ? baseW * cell.clientWidth : baseH * cell.clientHeight;
     if (!(ptInline > 0) || !(dispInlinePx > 0)) return;
     const pxPerPt = dispInlinePx / ptInline;
     const startX = e.clientX;
@@ -5980,7 +5987,23 @@ function ParagraphEditor({
         const dxFrac = (ev.clientX - startX) / cell.clientWidth;
         const rightEdge = (side === 'end') === inlineDir[0] > 0;
         const width = Math.max(0.02, rightEdge ? baseW + dxFrac : baseW - dxFrac);
-        setGripBox({ left: rightEdge ? baseX : baseX + (baseW - width), width });
+        setGripBox({
+          left: rightEdge ? baseX : baseX + (baseW - width),
+          top: baseY,
+          width,
+          ...(gripBox?.height !== undefined ? { height: gripBox.height } : {}),
+        });
+      } else if (inlineDir[1] !== 0 && cell.clientHeight > 0) {
+        // Inline runs down or up the page: the same, on the vertical axis.
+        const dyFrac = (ev.clientY - startY) / cell.clientHeight;
+        const bottomEdge = (side === 'end') === inlineDir[1] > 0;
+        const height = Math.max(0.02, bottomEdge ? baseH + dyFrac : baseH - dyFrac);
+        setGripBox({
+          left: baseX,
+          top: bottomEdge ? baseY : baseY + (baseH - height),
+          width: baseW,
+          height,
+        });
       }
     };
     const detach = (): void => {
@@ -5994,7 +6017,11 @@ function ParagraphEditor({
       const width = side === 'end' ? ptInline + deltaPt : ptInline - deltaPt;
       if (Math.abs(deltaPt) < 1 || !(width > 4)) {
         // A click is not a resize, and a sub-4pt box is a mis-drag.
-        setGripBox(pendingBox ? { left: baseX, width: baseW } : null);
+        setGripBox(
+          pendingBox
+            ? { left: baseX, top: baseY, width: baseW, ...(gripBox?.height !== undefined ? { height: baseH } : {}) }
+            : null,
+        );
         return;
       }
       // Keep the editor open at the dragged width; the commit sends it.
@@ -6009,7 +6036,11 @@ function ParagraphEditor({
     };
     const onAbort = (): void => {
       detach();
-      setGripBox(pendingBox ? { left: baseX, width: baseW } : null);
+      setGripBox(
+          pendingBox
+            ? { left: baseX, top: baseY, width: baseW, ...(gripBox?.height !== undefined ? { height: baseH } : {}) }
+            : null,
+        );
     };
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
@@ -6021,7 +6052,8 @@ function ParagraphEditor({
       className="page-edittext-editor page-editpara-editor"
       style={{
         left: `${(gripBox ? gripBox.left : rect.x) * 100}%`,
-        top: `${rect.y * 100}%`,
+        top: `${(gripBox ? gripBox.top : rect.y) * 100}%`,
+        ...(gripBox?.height !== undefined ? { height: `${gripBox.height * 100}%` } : {}),
         // The editor is as wide as the paragraph it edits, so the text wraps
         // where the page's own text does. The toolbar floats and no longer
         // widens it. A held width grip overrides it with the dragged width.
