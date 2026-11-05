@@ -20,11 +20,21 @@ import {
 
 const ORIGINAL = 'Alpha beta gamma delta words flowing on the second line';
 
-type Fixture = { name: string; draw: (page: PDFPage, regular: PDFFont, bold: PDFFont) => void };
+type Fixture = { name: string; pages?: number; draw: (page: PDFPage, regular: PDFFont, bold: PDFFont) => void };
 
 const FIXTURES: Fixture[] = [
   {
     name: 'plain',
+    draw: (page, f) => {
+      const c = rgb(0, 0, 0);
+      page.drawText('Alpha beta gamma delta words', { x: 60, y: 200, size: 18, font: f, color: c });
+      page.drawText('flowing on the second line', { x: 60, y: 178, size: 18, font: f, color: c });
+    },
+  },
+  {
+    // Same paragraph on the first of four pages, so the view can scroll.
+    name: 'scrolling',
+    pages: 4,
     draw: (page, f) => {
       const c = rgb(0, 0, 0);
       page.drawText('Alpha beta gamma delta words', { x: 60, y: 200, size: 18, font: f, color: c });
@@ -73,6 +83,7 @@ describe('inline paragraph editor behaviour', () => {
     const regular = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const page = doc.addPage([400, 300]);
+    for (let i = 1; i < (fx.pages ?? 1); i += 1) doc.addPage([400, 300]);
     fx.draw(page, regular, bold);
     serial += 1;
     const file = `${name}-${serial}.pdf`;
@@ -151,31 +162,40 @@ describe('inline paragraph editor behaviour', () => {
     this.timeout(120_000);
     const view = async () =>
       await browser.execute(function () {
-        let scroller: HTMLElement | null = (document.querySelector('[data-page-id]') as HTMLElement | null)?.parentElement ?? null;
-        while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /(auto|scroll)/.test(getComputedStyle(scroller).overflowY))) {
-          scroller = scroller.parentElement;
-        }
+        const scroller = document.querySelector('[data-testid="document-view"]') as HTMLElement | null;
         const box = (document.querySelector('.page-editpara') as HTMLElement | null)?.getBoundingClientRect();
         return {
-          top: scroller?.scrollTop ?? 0,
-          left: scroller?.scrollLeft ?? 0,
+          found: scroller !== null,
+          room: scroller ? scroller.scrollHeight - scroller.clientHeight : 0,
+          top: scroller?.scrollTop ?? -1,
+          left: scroller?.scrollLeft ?? -1,
           bx: box ? Math.round(box.x) : null,
           by: box ? Math.round(box.y) : null,
         };
       });
     const zoom = async () => (await getState()).readingView?.zoomPercent;
-    await openFixture('plain');
+    await openFixture('scrolling');
     await browser.waitUntil(async () => (await zoom()) !== undefined, {
       timeout: 15_000,
       timeoutMsg: 'the reading view never reported a zoom',
+    });
+    // A real, nonzero scroll offset to preserve.
+    const room = (await view()).room;
+    expect(room).toBeGreaterThan(60);
+    await browser.execute(function () {
+      (document.querySelector('[data-testid="document-view"]') as HTMLElement).scrollTop = 40;
+    });
+    await browser.waitUntil(async () => (await view()).top === 40, {
+      timeout: 5_000,
+      timeoutMsg: 'the view did not scroll to the test offset',
     });
     const before = await view();
     const zoomBefore = await zoom();
     await openEditor();
     const during = await view();
     expect(await zoom()).toBe(zoomBefore);
-    expect(Math.abs((during.top ?? 0) - (before.top ?? 0))).toBeLessThanOrEqual(1);
-    expect(Math.abs((during.left ?? 0) - (before.left ?? 0))).toBeLessThanOrEqual(1);
+    expect(during.top).toBe(before.top);
+    expect(during.left).toBe(before.left);
     await browser.keys(['Escape']);
     await $('[data-testid="edit-para-input"]').waitForExist({ reverse: true, timeout: 10_000 });
     await $('.page-editpara').waitForDisplayed({ timeout: 10_000 });
@@ -246,10 +266,10 @@ describe('inline paragraph editor behaviour', () => {
         weight: Number(getComputedStyle(s as HTMLElement).fontWeight),
       }));
     });
-    const bold = weights.filter((w) => w.weight >= 600);
-    const regular = weights.filter((w) => w.weight < 600);
-    expect(bold.length).toBeGreaterThan(0);
-    expect(regular.length).toBeGreaterThan(0);
+    // Each piece of text carries its own weight: the plain start stays
+    // regular and the bold run stays bold.
+    expect(weights.some((w) => (w.text ?? '').includes('Plain start') && w.weight < 600)).toBe(true);
+    expect(weights.some((w) => (w.text ?? '').includes('BOLD') && w.weight >= 600)).toBe(true);
     await browser.keys(['Escape']);
   });
 });
