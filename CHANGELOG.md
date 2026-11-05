@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.1105.164
+
+**Paragraph editor follows the width grips**
+
+### Fixed
+- Resize the paragraph editor live by dragging its width grips.
+- Keep the paragraph editor open after a width drag until you commit.
+
 ## 2026.1105.163
 
 **Paragraph editor shows the document's own font**
