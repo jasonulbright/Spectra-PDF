@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.1105.162
+
+**Faster document open and a clearer paragraph editor**
+
+### Fixed
+- Start the document engine with the window.
+- Cache engine bytecode between runs.
+- Print wide pages-per-sheet grids in landscape on automatic orientation.
+- Run interactive scan-test in its own console window for keyboard input.
+- Open the paragraph editor over its paragraph with the page's look.
+- Commit a paragraph edit with Ctrl+Enter.
+
+### Security
+- Update a bundled archive library to fix a reported vulnerability.
+
 ## 2026.1029.161
 
 **PowerShell scanner input**
