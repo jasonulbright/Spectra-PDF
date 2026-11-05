@@ -26,6 +26,9 @@
   },
   "overrides": {
     "serialize-javascript": "^7.0.4",
-    "@puppeteer/browsers": "^3.0.2"
+    "@puppeteer/browsers": "^3.0.2",
+    "glob@^10": {
+      "minimatch": "^11.0.1"
+    }
   }
 }

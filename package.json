@@ -109,6 +109,17 @@
     "vite": "8.2.4",
     "vitest": "4.1.12"
   },
+  "overrides": {
+    "@eslint/config-array": {
+      "minimatch": "^11.0.1"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    },
+    "eslint": {
+      "minimatch": "^11.0.1"
+    }
+  },
   "author": "Jason Ulbright",
   "license": "MIT",
   "private": true
