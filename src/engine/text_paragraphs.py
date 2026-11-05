@@ -2290,7 +2290,16 @@ def _display_font_name(font) -> str | None:
     except Exception:
         return None
     raw = re.sub(r"^[A-Z]{6}\+", "", raw)
-    raw = re.split(r"[-,]", raw, maxsplit=1)[0]
+    # Drop only trailing parts that are style words; a hyphen that belongs to
+    # the family ("MS-Gothic") stays and reads as a space.
+    parts = re.split(r"[-,]", raw)
+    while len(parts) > 1 and re.fullmatch(
+        r"(?i)(?:PS|MT|Bold|Italic|Oblique|Regular|Roman|Book|Normal|Light|Medium|"
+        r"Semibold|Demi|Heavy|Black|Thin|Condensed|Narrow|It)+",
+        parts[-1],
+    ):
+        parts.pop()
+    raw = " ".join(parts)
     raw = re.sub(r"(PS|MT)+$", "", raw)
     raw = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", raw).strip()
     if not re.fullmatch(r"[A-Za-z0-9 ]{2,40}", raw):

@@ -14,6 +14,9 @@ from engine.text_paragraphs import _display_font_name
         ("/ArialMT", "Arial"),
         ("/Helvetica", "Helvetica"),
         ("/CourierNewPSMT", "Courier New"),
+        ("/MS-Gothic", "MS Gothic"),
+        ("/MS-Gothic,Bold", "MS Gothic"),
+        ("/Times-Roman", "Times"),
         ("/Bad(Name", None),
     ],
 )
