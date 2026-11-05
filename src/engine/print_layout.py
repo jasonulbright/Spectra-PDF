@@ -430,9 +430,12 @@ def impose_sheets(
                 )
                 if border:
                     bx, by, bw, bh = cell
+                    # Inset by half the stroke so it isn't clipped at the
+                    # sheet edge (a centred stroke spills half outside).
                     content.append(
                         "q 0 G 0.5 w {} {} {} {} re S Q".format(
-                            _fmt(bx), _fmt(by), _fmt(bw), _fmt(bh)
+                            _fmt(bx + 0.25), _fmt(by + 0.25),
+                            _fmt(bw - 0.5), _fmt(bh - 0.5)
                         )
                     )
             page = out.add_blank_page(page_size=(sheet_w, sheet_h))
