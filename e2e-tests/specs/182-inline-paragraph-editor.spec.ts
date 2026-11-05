@@ -80,7 +80,8 @@ describe('inline paragraph editor', () => {
         await browser.execute(function () {
           const h = (window as any).__SPECTRA_TEST__;
           const ids: string[] = h.editTextPageIds();
-          return ids.length > 0 && h.editParagraphs(ids[0]).some((q: { text: string }) => q.text.includes('and more'));
+          const paras: { text: string }[] = ids.length > 0 ? h.editParagraphs(ids[0]) : [];
+          return paras.length === 1 && paras[0].text === 'Alpha beta gamma delta words flowing on the second line, and more';
         }),
       { timeout: 30_000, timeoutMsg: 'Ctrl+Enter did not commit the edited text' },
     );

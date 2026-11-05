@@ -5555,6 +5555,8 @@ function ParagraphEditor({
       basePx: fontPx,
       baseSize: Math.max(1, size),
       rev,
+      parentBold: para.bold,
+      parentItalic: para.italic,
     },
   );
   // The face covering a code-point position (for a per-span toggle to flip
@@ -6014,7 +6016,9 @@ function ParagraphEditor({
         // that Escape did nothing while a control had focus).
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
           // Ctrl+Enter commits from anywhere in the text, with no split.
-          // Held open while the text is changed and invalid, as Enter is.
+          // Held open while the text is changed and invalid, as Enter is,
+          // and ignored mid-IME: the composed text is not in `value` yet.
+          if (composingRef.current) return;
           e.preventDefault();
           if (value !== para.text && !valid) return;
           finish();
@@ -6175,6 +6179,13 @@ function ParagraphEditor({
       )}
       <div
         className={`page-editpara-toolbar${rect.y < 0.1 ? ' below' : ''}`}
+        style={{
+          // Never wider than the page space beside the paragraph, in either
+          // text direction, so the wrapped rows stay on the page.
+          maxWidth: `min(560px, 90vw, ${
+            (Math.max(0.05, Math.min(1 - rect.x, rect.x + rect.w)) / Math.max(rect.w, 0.01)) * 100
+          }%)`,
+        }}
         role="group"
         aria-label={tChrome('canvas.editpara.styleGroup')}
       >
@@ -6543,6 +6554,7 @@ function ParagraphEditor({
           dir={para.rtl ? 'rtl' : 'ltr'}
           style={{
             ...paragraphBoxLook(para),
+            minWidth: 0,
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,
             maxHeight: `${Math.min(12, para.lineCount + 1) * fontPx * 1.25 + 8}px`,

@@ -1037,10 +1037,11 @@ export function paragraphBoxLook(para: {
 } {
   const counts = new Map<string, number>();
   for (const sp of para.spans) {
-    if (sp.family && HTML_FAMILY[sp.family]) {
-      counts.set(sp.family, (counts.get(sp.family) ?? 0) + (sp.end - sp.start));
-    }
+    const key = sp.family ?? '';
+    counts.set(key, (counts.get(key) ?? 0) + (sp.end - sp.start));
   }
+  // The winner is chosen over ALL spans; it maps to a stand-in only when the
+  // bundled set has one, so an installed majority is not painted serif.
   let family: string | undefined;
   let best = 0;
   for (const [name, n] of counts) {
@@ -1049,6 +1050,7 @@ export function paragraphBoxLook(para: {
       family = name;
     }
   }
+  if (family !== undefined && !HTML_FAMILY[family]) family = undefined;
   const align =
     para.alignment === 'right' || para.alignment === 'center' || para.alignment === 'justify'
       ? para.alignment
@@ -1094,15 +1096,25 @@ export function segmentsToHtml(
     smallCaps?: boolean;
     misspelled?: boolean;
   }>,
-  opts: { basePx: number; baseSize: number; rev: number },
+  opts: {
+    basePx: number;
+    baseSize: number;
+    rev: number;
+    /** The surface itself is bold/italic: a segment whose seed says false must
+     * then state a normal weight/slant, or it would inherit the parent's. */
+    parentBold?: boolean;
+    parentItalic?: boolean;
+  },
 ): string {
-  const { basePx, baseSize, rev } = opts;
+  const { basePx, baseSize, rev, parentBold, parentItalic } = opts;
   const parts: string[] = [];
   segments.forEach((seg, i) => {
     const style: string[] = [];
     if (seg.color && /^#[0-9a-f]{6}$/i.test(seg.color)) style.push(`color:${seg.color}`);
     if (seg.bold) style.push('font-weight:700');
+    else if (parentBold) style.push('font-weight:400');
     if (seg.italic) style.push('font-style:italic');
+    else if (parentItalic) style.push('font-style:normal');
     if (seg.family && HTML_FAMILY[seg.family]) style.push(`font-family:${HTML_FAMILY[seg.family]}`);
     if (seg.size !== null && Number.isFinite(seg.size) && baseSize > 0) {
       const px = (seg.size / baseSize) * basePx;
