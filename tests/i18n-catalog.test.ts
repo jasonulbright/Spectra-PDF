@@ -428,7 +428,8 @@ describe('i18n catalogs', () => {
   // chunks is in place, the source catalog is inline, and every shipped tag's
   // folder holds a catalog for the glob to find.
   it('every shipped locale is reachable by the i18next catalog loader', () => {
-    const src = readFileSync(resolve(__dirname, '../src/renderer/i18n.ts'), 'utf8');
+    // A Windows checkout may hold CRLF line ends; the multi-line pattern below is LF.
+    const src = readFileSync(resolve(__dirname, '../src/renderer/i18n.ts'), 'utf8').replace(/\r\n/g, '\n');
     expect(src).toContain("import.meta.glob<{ default: Record<string, string> }>(\n  ['./locales/*/chrome.json', '!./locales/en/chrome.json'],\n)");
     expect(src).toContain("CATALOG_CHUNKS[`./locales/${language}/chrome.json`]");
     const block = src.slice(src.indexOf('resources: {'), src.indexOf('interpolation:'));

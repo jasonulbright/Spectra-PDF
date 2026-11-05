@@ -19,6 +19,19 @@ import os  # noqa: E402
 
 # Add the directory containing the 'engine' package to sys.path
 engine_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The host starts this script by a verbatim path (backslash-backslash-?-backslash
+# before the drive). A module imported through a verbatim sys.path entry gets
+# a verbatim __file__, and the interpreter cannot place its bytecode under a
+# cache prefix: it appends "?\C:\..." below the prefix, an illegal name, and
+# every write fails without a message. A plain path names the same directory.
+_VERBATIM = "\\\\?\\"
+if (
+    os.name == "nt"
+    and engine_dir.startswith(_VERBATIM)
+    and not engine_dir.startswith(_VERBATIM + "UNC\\")
+    and len(engine_dir) < 240
+):
+    engine_dir = engine_dir[len(_VERBATIM):]
 if engine_dir not in sys.path:
     sys.path.insert(0, engine_dir)
 

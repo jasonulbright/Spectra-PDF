@@ -2189,7 +2189,13 @@ pub fn python_env_with(bytecode_cache: Option<&Path>) -> Vec<(String, String)> {
         ("PYTHONNOUSERSITE".to_string(), "1".to_string()),
     ];
     match bytecode_cache {
-        Some(dir) => env.push(("PYTHONPYCACHEPREFIX".to_string(), dir.to_string_lossy().to_string())),
+        Some(dir) => {
+            env.push(("PYTHONPYCACHEPREFIX".to_string(), dir.to_string_lossy().to_string()));
+            // An empty value reads as unset, and cancels one inherited from
+            // the user's environment: the interpreter writes no bytecode at
+            // all while that variable is set, prefix or not.
+            env.push(("PYTHONDONTWRITEBYTECODE".to_string(), String::new()));
+        }
         None => env.push(("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string())),
     }
     env.push(("OPENBLAS_NUM_THREADS".to_string(), "1".to_string()));
@@ -3151,7 +3157,7 @@ mod start_tests {
         let cache = if cfg!(windows) { r"C:\Users\me\AppData\Local\com.spectrapdf.app\pycache" } else { "/home/me/.cache/com.spectrapdf.app/pycache" };
         let cached = python_env_with(Some(Path::new(cache)));
         assert_eq!(value(&cached, "PYTHONPYCACHEPREFIX").as_deref(), Some(cache));
-        assert_eq!(value(&cached, "PYTHONDONTWRITEBYTECODE"), None);
+        assert_eq!(value(&cached, "PYTHONDONTWRITEBYTECODE").as_deref(), Some(""));
         // No cache directory: the interpreter writes no bytecode anywhere,
         // as before — never into the payload.
         let uncached = python_env_with(None);
