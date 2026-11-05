@@ -61,6 +61,7 @@ import {
   spanColorsToStyles,
   spanFacesToStyles,
   spanSizesToStyles,
+  paragraphBoxLook,
   type SpanColor,
   type SpanFace,
   type SpanSize,
@@ -5554,6 +5555,8 @@ function ParagraphEditor({
       basePx: fontPx,
       baseSize: Math.max(1, size),
       rev,
+      parentBold: para.bold,
+      parentItalic: para.italic,
     },
   );
   // The face covering a code-point position (for a per-span toggle to flip
@@ -5991,7 +5994,10 @@ function ParagraphEditor({
       style={{
         left: `${rect.x * 100}%`,
         top: `${rect.y * 100}%`,
-        minWidth: `${rect.w * 100}%`,
+        // The editor is as wide as the paragraph it edits, so the text wraps
+        // where the page's own text does. The toolbar floats and no longer
+        // widens it.
+        width: `${rect.w * 100}%`,
       }}
       onPointerDown={(e) => {
         e.stopPropagation();
@@ -6008,6 +6014,16 @@ function ParagraphEditor({
         // Enter/Escape at the WRAPPER so they work from EVERY control
         // (the size/colour inputs, not just the textarea — regression
         // that Escape did nothing while a control had focus).
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          // Ctrl+Enter commits from anywhere in the text, with no split.
+          // Held open while the text is changed and invalid, as Enter is,
+          // and ignored mid-IME: the composed text is not in `value` yet.
+          if (composingRef.current) return;
+          e.preventDefault();
+          if (value !== para.text && !valid) return;
+          finish();
+          return;
+        }
         if (e.key === 'Enter' && e.shiftKey) {
           // Shift+Enter is a HARD LINE BREAK inside the paragraph — the one
           // thing plain Enter cannot be, since it already means commit (caret
@@ -6162,7 +6178,14 @@ function ParagraphEditor({
         </div>
       )}
       <div
-        className="page-editpara-toolbar"
+        className={`page-editpara-toolbar${rect.y < 0.1 ? ' below' : ''}`}
+        style={{
+          // Never wider than the page space beside the paragraph, in either
+          // text direction, so the wrapped rows stay on the page.
+          maxWidth: `min(560px, 90vw, ${
+            (Math.max(0.05, Math.min(1 - rect.x, rect.x + rect.w)) / Math.max(rect.w, 0.01)) * 100
+          }%)`,
+        }}
         role="group"
         aria-label={tChrome('canvas.editpara.styleGroup')}
       >
@@ -6530,6 +6553,8 @@ function ParagraphEditor({
              an LTR paragraph inherit a direction would be a different bug. */
           dir={para.rtl ? 'rtl' : 'ltr'}
           style={{
+            ...paragraphBoxLook(para),
+            minWidth: 0,
             fontSize: `${fontPx}px`,
             lineHeight: 1.25,
             maxHeight: `${Math.min(12, para.lineCount + 1) * fontPx * 1.25 + 8}px`,

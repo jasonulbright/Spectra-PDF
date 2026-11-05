@@ -2560,9 +2560,13 @@ input:not([type]) {
   box-sizing: border-box;
   width: 100%;
   min-width: 120px;
-  padding: 1px 3px;
-  border: 1.5px solid var(--accent, #3b82f6);
-  border-radius: 2px;
+  /* No inset: the text starts exactly where the page's own text starts, so
+     the paragraph does not appear to jump when its editor opens. The frame
+     is drawn OUTSIDE the box. */
+  padding: 0;
+  border: 0;
+  box-shadow: 0 0 0 1.5px var(--accent, #3b82f6);
+  border-radius: 1px;
   background: #fff;
   color: #111;
   font-family: Helvetica, Arial, sans-serif;
@@ -2582,7 +2586,7 @@ input:not([type]) {
   outline: none;
 }
 .page-editpara-rich.invalid {
-  border-color: #dc2626;
+  box-shadow: 0 0 0 1.5px #dc2626;
 }
 /* Both edit surfaces carry `resize: both`, and the corner grip is the ONE
    native control chrome left in the product after the control layer replaced
@@ -2632,7 +2636,19 @@ input:not([type]) {
 
    The row stays OPAQUE — it sits over the paragraph's own glyphs, and a
    translucent ground lets document text read through the controls. */
+/* The toolbar floats ABOVE the editor (BELOW it for a paragraph at the top
+   edge of the page) so the editor sits exactly over the paragraph it edits
+   and nothing of the paragraph is covered. */
+.page-editpara-editor {
+  z-index: 6;
+}
 .page-editpara-toolbar {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 100%;
+  width: max-content;
+  max-width: min(560px, 90vw);
+  z-index: 2;
   display: flex;
   align-items: center;
   /* WRAPS: the row is wider than a narrow paragraph, and the page clips its
@@ -2640,7 +2656,7 @@ input:not([type]) {
      rather than merely running past it. */
   flex-wrap: wrap;
   gap: 4px 10px;
-  margin-bottom: 3px;
+  margin-bottom: 5px;
   padding: 4px 7px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -2648,6 +2664,12 @@ input:not([type]) {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   font-size: 11px;
   color: var(--text);
+}
+.page-editpara-toolbar.below {
+  bottom: auto;
+  top: 100%;
+  margin-bottom: 0;
+  margin-top: 5px;
 }
 .page-editpara-ctl {
   display: inline-flex;
