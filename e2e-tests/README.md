@@ -62,6 +62,10 @@ Without it, discovery falls back to an installed copy, and with none those
 specs run the capability-ABSENT axis, where the surfaces must refuse by name.
 `151-gs-absent` pins that axis from inside the app on every machine.
 
+The right-to-left case of spec 184 embeds `resources/fonts/IBMPlexSansArabic-Regular.ttf`.
+That folder is generated, not tracked: run `scripts/sync-edit-fonts.ps1` once on a fresh
+checkout, or the spec stops with a message that names the missing file.
+
 ## Run the suite
 
 ```powershell
