@@ -66,3 +66,22 @@ describe('segmentsToHtml inside a bold or italic paragraph', () => {
     expect(segmentsToHtml([seg], opts)).not.toContain('font-weight');
   });
 });
+
+describe('paragraphBoxLook own font name', () => {
+  it('puts the embedded font family first, then the stand-in', () => {
+    const look = paragraphBoxLook({
+      ...base,
+      spans: [{ start: 0, end: 9, run: 0, family: 'sans', font_name: 'Calibri' }],
+    });
+    expect(look.fontFamily).toMatch(/^"Calibri", Liberation Sans/);
+  });
+
+  it('refuses a font name that is not plain letters, digits and spaces', () => {
+    const look = paragraphBoxLook({
+      ...base,
+      spans: [{ start: 0, end: 9, run: 0, family: 'serif', font_name: 'x";}body{' }],
+    });
+    expect(look.fontFamily).toContain('Liberation Serif');
+    expect(look.fontFamily).not.toContain('body');
+  });
+});

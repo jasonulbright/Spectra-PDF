@@ -39,6 +39,10 @@ export interface EditSpan {
   bold?: boolean;
   italic?: boolean;
   family?: FaceSelector;
+  /** The family name of the span's own embedded font (subset tag and style
+   * suffix removed). Display only: the editor offers it to the browser ahead
+   * of the bundled stand-in, so an installed face shows as itself. */
+  font_name?: string;
   size?: number;
   /** The span is an INDIVISIBLE block (a tate-chu-yoko run): the engine
    * measured its inline fit as one unit and cannot split it, so a hard
@@ -256,6 +260,7 @@ interface EngineParagraphListing {
       bold?: boolean;
       italic?: boolean;
       family?: FaceSelector;
+      font_name?: string;
       size?: number;
       /** The span is an indivisible block the engine cannot split. */
       atomic?: boolean;
@@ -335,6 +340,9 @@ export async function fetchEditTextListing(
         ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
         ...(s.family === 'serif' || s.family === 'sans' || s.family === 'mono'
           ? { family: s.family }
+          : {}),
+        ...(typeof s.font_name === 'string' && /^[A-Za-z0-9 ]{2,40}$/.test(s.font_name)
+          ? { font_name: s.font_name }
           : {}),
         ...(typeof s.size === 'number' && Number.isFinite(s.size) ? { size: s.size } : {}),
         ...(s.atomic === true ? { atomic: true } : {}),
@@ -1051,6 +1059,28 @@ export function paragraphBoxLook(para: {
     }
   }
   if (family !== undefined && !HTML_FAMILY[family]) family = undefined;
+  // The dominant span's own font name leads the stack: an installed face
+  // renders as itself, anything else falls through to the stand-in.
+  const names = new Map<string, number>();
+  for (const sp of para.spans) {
+    if (sp.font_name && /^[A-Za-z0-9 ]{2,40}$/.test(sp.font_name)) {
+      names.set(sp.font_name, (names.get(sp.font_name) ?? 0) + (sp.end - sp.start));
+    }
+  }
+  let ownName: string | undefined;
+  let ownBest = 0;
+  for (const [name, n] of names) {
+    if (n > ownBest) {
+      ownBest = n;
+      ownName = name;
+    }
+  }
+  const stack =
+    ownName !== undefined
+      ? `"${ownName}", ${family ? HTML_FAMILY[family] : 'Liberation Sans, Arial, Helvetica, sans-serif'}`
+      : family
+        ? HTML_FAMILY[family]
+        : undefined;
   const align =
     para.alignment === 'right' || para.alignment === 'center' || para.alignment === 'justify'
       ? para.alignment
@@ -1058,7 +1088,7 @@ export function paragraphBoxLook(para: {
         ? 'left'
         : undefined;
   return {
-    ...(family ? { fontFamily: HTML_FAMILY[family] } : {}),
+    ...(stack ? { fontFamily: stack } : {}),
     ...(para.bold ? { fontWeight: 700 } : {}),
     ...(para.italic ? { fontStyle: 'italic' as const } : {}),
     ...(/^#[0-9a-fA-F]{6}$/.test(para.color) ? { color: para.color } : {}),

@@ -1502,8 +1502,8 @@ mod tests {
             let args"), "a failed copy falls through to the restart");
     }
 
-    const FAILED_V: &str = "2026.1101.160";
-    const NEWER_V: &str = "2026.1108.161";
+    const FAILED_V: &str = "2099.1101.160";
+    const NEWER_V: &str = "2099.1108.161";
 
     fn last_apply(path: &Path, outcome: Outcome, version: &str) {
         portable_update::write_json(

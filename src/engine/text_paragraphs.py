@@ -2276,6 +2276,28 @@ def _fill_color_hex(color) -> str:
     return "#000000"
 
 
+def _display_font_name(font) -> str | None:
+    """The family name an editor can try first: the font's /BaseFont without its
+    subset tag, style suffix and PostScript/TrueType marker, split at case
+    changes ("TimesNewRomanPS-BoldMT" gives "Times New Roman"). DISPLAY-ONLY:
+    the renderer offers it to the browser, which uses it only when installed."""
+    if font is None:
+        return None
+    try:
+        from engine.pdf_fonts import name_str
+
+        raw = name_str(font.get("/BaseFont", "")).lstrip("/")
+    except Exception:
+        return None
+    raw = re.sub(r"^[A-Z]{6}\+", "", raw)
+    raw = re.split(r"[-,]", raw, maxsplit=1)[0]
+    raw = re.sub(r"(PS|MT)+$", "", raw)
+    raw = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", raw).strip()
+    if not re.fullmatch(r"[A-Za-z0-9 ]{2,40}", raw):
+        return None
+    return raw
+
+
 def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
     out = []
     # `style_of` reads the pdf's font dicts, so memoize per member
@@ -2324,6 +2346,9 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
                 entry["italic"] = sit
                 if sfam is not None:
                     entry["family"] = sfam
+                shown_name = _display_font_name(m.font)
+                if shown_name is not None:
+                    entry["font_name"] = shown_name
                 entry["size"] = round(m.style["size"], 2)
                 if m.atomic:
                     # The span is an INDIVISIBLE block (tate-chu-yoko): the
