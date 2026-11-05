@@ -1,7 +1,7 @@
 #!/bin/sh
 # Supplemental release metadata checks. Run once with local candidate validation.
 # Functional suites already run in that validation.
-# Do not rerun this script at each commit, push, and tag boundary.
+# Do not rerun this script at each commit, push, and tag boundary. Run it on the merged release commit before the tag is pushed.
 R="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$R/ci-parity.results.local.txt"
 : > "$OUT"
@@ -61,7 +61,7 @@ gate npm-audit npm audit --production --audit-level=high
 gate cargo-audit sh scripts/cargo-audit.sh
 
 # --- Release job: version consistency (tag == package.json == tauri.conf == Cargo.toml) ---
-# Not tag-aware here (no tag yet at push time); instead assert the four surfaces
+# Not tag-aware here (no tag yet before the tag is pushed); instead assert the four surfaces
 # AGREE, and that the version is either already tagged (tree not bumped since
 # that release) or the next YYYY.MDD.N release after the local tags -- the
 # release run's verify job applies the same rule to the pushed tag.
