@@ -4321,7 +4321,7 @@ def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_che
     assert "--no-firejail" not in gate
     script = (ROOT / "scripts" / "appimage-catalog-gate.sh").read_text(encoding="utf-8")
     assert 'VERSION_ID="22.04"' in script
-    assert "apt-get purge -y $remove" in script
+    assert "apt_run purge -y $remove" in script
     assert "X-AppImage-Self-Contained=true" in script
 
 
@@ -4641,3 +4641,17 @@ def test_the_readme_describes_the_linux_release_exactly_when_the_switch_lists_li
                  "> rpm -K spectrapdf-<version>-1.x86_64.rpm"):
         assert line in note, line
     assert readme.count("rpm --import") == 1 and readme.count("rpm -K") == 1
+
+
+@pytest.mark.parametrize(
+    ("workflow", "tag_expression"),
+    [("release.yml", "github.ref_name"), ("release-redo.yml", "inputs.tag")],
+)
+def test_one_release_publisher_runs_per_tag(workflow, tag_expression):
+    """Two runs for one tag would edit the same draft release together. Both
+    workflows share the group name, so a redo waits for a running release, and
+    neither cancels a run that has begun to upload."""
+    text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+    block = text.split("\nconcurrency:\n", 1)[1].split("\n\n", 1)[0]
+    assert "group: release-${{ " + tag_expression + " }}" in block
+    assert "cancel-in-progress: false" in block
