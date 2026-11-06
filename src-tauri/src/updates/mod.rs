@@ -411,6 +411,19 @@ impl UpdateState {
         inner.total = None;
         inner.working = false;
     }
+
+    /// A check that failed late. It fails the state only while the phase is
+    /// still `Checking`: a download or a restored staged update that began
+    /// during the check keeps its state, and `working` stays set.
+    fn fail_check(&self, error: &UpdateError) {
+        let mut inner = self.lock();
+        if check_may_settle(inner.phase, inner.working) {
+            inner.phase = Phase::Failed;
+            inner.failure = Some(error.kind);
+            inner.received = None;
+            inner.total = None;
+        }
+    }
 }
 
 fn detect_container() -> ContainerKind {
@@ -577,7 +590,7 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Option<CheckResult>, U
     let manifest = match fetch_manifest().await {
         Ok(manifest) => manifest,
         Err(error) => {
-            state.fail(&error);
+            state.fail_check(&error);
             publish(&app);
             return Err(error);
         }
@@ -605,7 +618,7 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Option<CheckResult>, U
                 verify::check_binding(&sig, &artifact.signed_name(manifest.version)).map_err(from_verify)
             });
         if let Err(error) = bound {
-            state.fail(&error);
+            state.fail_check(&error);
             publish(&app);
             return Err(error);
         }
