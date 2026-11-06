@@ -72,14 +72,30 @@ grep -q 'VERSION_ID="22.04"' /etc/os-release || die "the gate mirrors the catalo
 
 step() { echo "==> $*"; }
 
-step "the catalog worker's tools"
 export DEBIAN_FRONTEND=noninteractive
+# A hosted runner can hold the dpkg lock or stall a package trigger. Each apt-get
+# call gets a time limit and a lock wait, and runs up to three times, so one
+# stalled call fails fast instead of holding the job until its own time limit.
+export NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+apt_run() {
+  _try=1
+  while :; do
+    timeout 600 apt-get -o DPkg::Lock::Timeout=120 "$@" >/dev/null && return 0
+    [ "$_try" -ge 3 ] && return 1
+    echo "apt-get $1 failed or timed out (attempt $_try of 3); trying again" >&2
+    dpkg --configure -a >/dev/null 2>&1 || true
+    sleep $((_try * 10))
+    _try=$((_try + 1))
+  done
+}
+
+step "the catalog worker's tools"
 # shellcheck disable=SC2086
-apt-get update >/dev/null && apt-get install -y --no-install-recommends $APT_TOOLS >/dev/null ||
+apt_run update && apt_run install -y --no-install-recommends $APT_TOOLS ||
   die "apt-get could not install the catalog worker's tools"
 # runtime-fuse2 mounts through libfuse2, which runs the fusermount helper.
 if ! command -v fusermount >/dev/null 2>&1; then
-  apt-get install -y --no-install-recommends fuse >/dev/null || die "apt-get could not install fusermount"
+  apt_run install -y --no-install-recommends fuse || die "apt-get could not install fusermount"
 fi
 
 step "no GTK 3 and no WebKitGTK"
@@ -89,7 +105,7 @@ for p in $GTK_PACKAGES; do
 done
 if [ -n "$remove" ]; then
   # shellcheck disable=SC2086
-  apt-get purge -y $remove >/dev/null || die "apt-get could not remove$remove"
+  apt_run purge -y $remove || die "apt-get could not remove$remove"
 fi
 for tool in Xvfb xdotool xwininfo import convert identify tesseract icewm file mimetype desktop-file-validate appstreamcli readelf objdump killall fusermount; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is missing after GTK and WebKitGTK were removed"
@@ -152,7 +168,21 @@ fi
 echo "mounted at $APPDIR"
 
 step "appdir-lint.sh"
-bash appdir-lint.sh "$APPDIR" > appdir-lint.log 2>&1 || { cat appdir-lint.log; die "appdir-lint.sh refused the image"; }
+# appstreamcli checks that each URL in the metadata answers. A host that
+# answers 5xx once is not a defect of the image, so a run that fails with
+# url-not-reachable runs again, up to three times. Any other finding fails at once.
+lint_try=1
+while :; do
+  bash appdir-lint.sh "$APPDIR" > appdir-lint.log 2>&1 && break
+  if grep -q 'url-not-reachable' appdir-lint.log && [ "$lint_try" -lt 3 ]; then
+    echo "appdir-lint.sh could not reach a metadata URL (attempt $lint_try of 3); trying again"
+    sleep $((lint_try * 15))
+    lint_try=$((lint_try + 1))
+    continue
+  fi
+  cat appdir-lint.log
+  die "appdir-lint.sh refused the image"
+done
 grep -v 'Blacklisted file' appdir-lint.log || true
 set -- "$APPDIR"/usr/share/metainfo/*appdata.xml
 [ -f "$1" ] || die "the image has no usr/share/metainfo/*appdata.xml"
