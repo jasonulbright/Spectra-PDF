@@ -28,6 +28,7 @@ from engine.printer import (
     build_setpagedevice_ps,
     parse_page_spec,
     print_pdf,
+    windows_duplex,
 )
 from engine.print_layout import (
     apply_subset,
@@ -4387,7 +4388,9 @@ class TestPrintPipeline:
                       color="gray")
         assert r["prepass"] == []
         argv = cap["argv"][0]
-        assert "-dDuplex=true" in argv and "-dTumble=false" in argv
+        # Landscape swaps the edge: the driver reads dmDuplex against the
+        # landscape page, so "long" (the sheet's long edge) is Tumble=true.
+        assert "-dDuplex=true" in argv and "-dTumble=true" in argv
         ps = argv[argv.index("-c") + 1]
         assert ps == (
             "<< /UserSettings << /Paper 9 /Orientation 2 /Color 1 "
@@ -4422,6 +4425,43 @@ class TestPrintPipeline:
         with pikepdf.open(cap["files"][0]) as out:
             assert [float(v) for v in out.pages[0].mediabox] == [0, 0, 842, 595]
         assert "/Orientation 2" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+
+    def test_windows_duplex_swaps_edges_only_on_landscape(self):
+        # Issue #67: dmDuplex is read against the page, so a landscape page
+        # needs the opposite switch for the same sheet edge.
+        assert windows_duplex("short", "landscape") == "long"
+        assert windows_duplex("long", "landscape") == "short"
+        for orient in ("portrait", "auto"):
+            assert windows_duplex("short", orient) == "short"
+            assert windows_duplex("long", orient) == "long"
+        for mode in ("printer", "simplex"):
+            assert windows_duplex(mode, "landscape") == mode
+
+    def test_nup_wide_grid_short_edge_sends_untumbled_duplex(self, tmp_dir, monkeypatch, gs_path):
+        # Issue #67: 1x2 on landscape paper, flip on the SHORT edge. The sheet
+        # is landscape, so the short edge is the page's vertical edge:
+        # DMDUP_VERTICAL = Tumble=false.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300, 300, 300])
+        print_pdf(file=src, printer="P", gs_path=gs_path, duplex="short",
+                  layout="nup", nup_rows=1, nup_cols=2,
+                  sheet_width=595, sheet_height=842)
+        argv = cap["argv"][0]
+        assert "-dDuplex=true" in argv and "-dTumble=false" in argv
+        assert "/Orientation 2" in argv[argv.index("-c") + 1]
+        cap["argv"].clear()
+        print_pdf(file=src, printer="P", gs_path=gs_path, duplex="long",
+                  layout="nup", nup_rows=1, nup_cols=2,
+                  sheet_width=595, sheet_height=842)
+        assert "-dTumble=true" in cap["argv"][0]
+
+    def test_nup_portrait_sheet_keeps_driver_edge(self, tmp_dir, monkeypatch, gs_path):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300, 300])
+        print_pdf(file=src, printer="P", gs_path=gs_path, duplex="short",
+                  layout="nup", nup_rows=2, nup_cols=1,
+                  sheet_width=595, sheet_height=842)
+        assert "-dTumble=true" in cap["argv"][0]
 
     def test_nup_tall_grid_auto_stays_portrait(self, tmp_dir, monkeypatch, gs_path):
         cap = self._capture(monkeypatch, tmp_dir)
