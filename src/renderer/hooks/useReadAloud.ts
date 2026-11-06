@@ -535,6 +535,9 @@ export function useReadAloud(options: Options): ReadAloudApi {
       // convention — a control that does nothing when pressed says nothing.
       const at = Math.max(session.cursor + delta, 0);
       clearSpeech();
+      // A paused synthesizer stays paused through a cancel in some engines. The
+      // new sentence would queue silently under a "speaking" status.
+      window.speechSynthesis.resume();
       session.cursor = at;
       void advanceRef.current(session);
     },

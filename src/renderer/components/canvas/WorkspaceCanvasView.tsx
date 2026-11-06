@@ -3869,6 +3869,9 @@ export function WorkspaceCanvasView({
       // existence check does NOT drop it — this is the one placement that
       // survives), which is exactly why it must be force-cleared here.
       setAddTextPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
+      // Crop placement freezes the same `rotationAtDraw` at draw time, so a
+      // buffer change that bakes a rotation makes it stale too.
+      setCropPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // (Selection shares the positional-id hazard; it lives in the ui slice
       // now and the reducer clears it wherever buffers change.)
     }
