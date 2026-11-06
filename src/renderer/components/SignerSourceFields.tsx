@@ -200,19 +200,27 @@ export function SignerSourceFields({
    * into the other surface's copy of this form. */
   const rootRef = useRef<HTMLDivElement>(null);
 
+  /** The newest store load. An older load that finishes after a newer one
+   * started changes nothing, so its rows never replace the newer answer and
+   * its end never clears the newer load's busy flag. */
+  const storeLoad = useRef(0);
+
   const loadStoreCerts = useCallback(async () => {
+    const mine = ++storeLoad.current;
     setStoreBusy(true);
     setStoreFailure(null);
     try {
       const rows = await dialog.listStoreCertificates();
-      setStoreCerts(rows);
+      if (mine === storeLoad.current) setStoreCerts(rows);
       return rows;
     } catch (e: unknown) {
-      setStoreCerts([]);
-      setStoreFailure(classifyStoreFailure(e));
+      if (mine === storeLoad.current) {
+        setStoreCerts([]);
+        setStoreFailure(classifyStoreFailure(e));
+      }
       return [];
     } finally {
-      setStoreBusy(false);
+      if (mine === storeLoad.current) setStoreBusy(false);
     }
   }, []);
 
