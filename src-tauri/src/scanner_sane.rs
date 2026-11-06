@@ -1079,6 +1079,18 @@ impl SaneSession {
     }
 }
 
+/// Clears the acquisition flags when the run ends, however it ends.
+struct AcquireFlags<'a> {
+    running: &'a AtomicBool,
+}
+
+impl Drop for AcquireFlags<'_> {
+    fn drop(&mut self) {
+        ACQUIRING.store(false, Ordering::SeqCst);
+        self.running.store(false, Ordering::SeqCst);
+    }
+}
+
 impl ScanSession for SaneSession {
     fn capabilities(&self) -> Result<ScannerCapabilities, ScanRefusal> {
         let Some(_guard) = try_hold() else {
@@ -1092,12 +1104,11 @@ impl ScanSession for SaneSession {
             return Err(busy());
         }
         let _guard = hold();
+        // Resets both flags on every exit, a panic in the device call included.
+        let _flags = AcquireFlags { running: &self.running };
         ACQUIRING.store(true, Ordering::SeqCst);
         self.cancel.store(false, Ordering::SeqCst);
-        let outcome = self.with_device(|device| run(device, &settings, &dir, &sink, &self.cancel));
-        ACQUIRING.store(false, Ordering::SeqCst);
-        self.running.store(false, Ordering::SeqCst);
-        outcome
+        self.with_device(|device| run(device, &settings, &dir, &sink, &self.cancel))
     }
 
     fn cancel(&self) {
