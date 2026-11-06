@@ -782,3 +782,12 @@ class TestTheCheckoutPreservesTheBundleBytes:
         for line in out.splitlines():
             path, _, value = line.rpartition(": text: ")
             assert value == "unset", f"{path} would be EOL-translated on checkout"
+
+
+def test_a_bundle_without_anchors_is_read_again_not_kept(tmp_path, monkeypatch):
+    """A read that failed for a moment must not stay "no anchors" until the
+    engine restarts."""
+    monkeypatch.setattr(msctl, "_bundle_dir", lambda: tmp_path)
+    msctl._CACHE.clear()
+    assert msctl.available() is False
+    assert tmp_path not in msctl._CACHE

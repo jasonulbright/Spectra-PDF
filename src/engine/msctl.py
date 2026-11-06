@@ -144,7 +144,11 @@ def _bundle() -> _Bundle:
     cached = _CACHE.get(directory)
     if cached is None:
         cached = _read_bundle(directory)
-        _CACHE[directory] = cached
+        # A bundle with no anchor is not kept. A read that failed for a moment
+        # (a file held by another program) would otherwise stay "no anchors"
+        # until the engine restarts. The next call reads the files again.
+        if any(cached.certificates.values()):
+            _CACHE[directory] = cached
     return cached
 
 
