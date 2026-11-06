@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.1106.165
+
+**Duplex edge follows the sheet on landscape pages**
+
+### Fixed
+- Flip a landscape sheet on the edge you pick: short edge flips on the short edge of the paper, and long edge on the long edge. This covers pages per sheet and booklets.
+
 ## 2026.1105.164
 
 **Paragraph editor follows the width grips**

@@ -117,6 +117,23 @@ DUPLEX_SWITCHES: dict[str, list[str]] = {
     "short": ["-dDuplex=true", "-dTumble=true"],
 }
 
+def windows_duplex(duplex: str, orientation: str) -> str:
+    """The duplex mode to hand the Windows driver so the user's edge is the sheet's edge.
+
+    The dialog names the edge of the SHEET: "long" flips on the long edge of the
+    paper, "short" on the short edge. dmDuplex is not read that way. DMDUP_VERTICAL
+    (Tumble=false) binds along the vertical edge of the PAGE as the driver lays it
+    out, and DMDUP_HORIZONTAL (Tumble=true) along the horizontal edge. On a
+    landscape page the vertical edge is the short edge of the sheet, so the two
+    modes swap: "short" must send Tumble=false. Reported in issue 67:
+    a 1x2 grid on landscape paper flipped on the long edge for both
+    choices. A portrait or unset orientation is unchanged.
+    """
+    if orientation == "landscape":
+        return {"long": "short", "short": "long"}.get(duplex, duplex)
+    return duplex
+
+
 # UserSettings integer values (DEVMODE constants).
 _ORIENT_VALUES = {"portrait": 1, "landscape": 2}
 _COLOR_VALUES = {"gray": 1, "color": 2}
@@ -537,7 +554,13 @@ def print_pdf(
                 resolved_orient, color, doc_name, jobs,
             )
         else:
-            _run_jobs(build_gs_args(job_file, printer, job_pages, job_fit, gs_path, duplex, us_ps), jobs)
+            _run_jobs(
+                build_gs_args(
+                    job_file, printer, job_pages, job_fit, gs_path,
+                    windows_duplex(duplex, resolved_orient), us_ps,
+                ),
+                jobs,
+            )
 
     stages: list[str] = []
     sheets_out: int | None = None
