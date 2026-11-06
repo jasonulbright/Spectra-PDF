@@ -411,6 +411,19 @@ impl UpdateState {
         inner.total = None;
         inner.working = false;
     }
+
+    /// A check that failed late. It fails the state only while the phase is
+    /// still `Checking`: a download or a restored staged update that began
+    /// during the check keeps its state, and `working` stays set.
+    fn fail_check(&self, error: &UpdateError) {
+        let mut inner = self.lock();
+        if check_may_settle(inner.phase, inner.working) {
+            inner.phase = Phase::Failed;
+            inner.failure = Some(error.kind);
+            inner.received = None;
+            inner.total = None;
+        }
+    }
 }
 
 fn detect_container() -> ContainerKind {
@@ -577,13 +590,16 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Option<CheckResult>, U
     let manifest = match fetch_manifest().await {
         Ok(manifest) => manifest,
         Err(error) => {
-            state.fail(&error);
+            state.fail_check(&error);
             publish(&app);
             return Err(error);
         }
     };
     if manifest.version <= Version::running() {
         let mut inner = state.lock();
+        if !check_may_settle(inner.phase, inner.working) {
+            return Ok(None);
+        }
         inner.phase = Phase::Idle;
         inner.version = None;
         inner.offer = None;
@@ -602,7 +618,7 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Option<CheckResult>, U
                 verify::check_binding(&sig, &artifact.signed_name(manifest.version)).map_err(from_verify)
             });
         if let Err(error) = bound {
-            state.fail(&error);
+            state.fail_check(&error);
             publish(&app);
             return Err(error);
         }
@@ -611,6 +627,13 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Option<CheckResult>, U
     let auto = {
         let mut inner = state.lock();
         inner.failed = failed;
+        if !check_may_settle(inner.phase, inner.working) {
+            // A download started, or a staged update was restored, while this
+            // check ran. Its state is newer than this answer.
+            return Ok(Some(CheckResult {
+                version: manifest.version.to_string(),
+            }));
+        }
         inner.phase = Phase::Available;
         inner.version = Some(manifest.version);
         inner.offer = Some(Offer {
@@ -626,6 +649,13 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Option<CheckResult>, U
     Ok(Some(CheckResult {
         version: manifest.version.to_string(),
     }))
+}
+
+/// A finished check may set the phase only while the phase is still
+/// `Checking`. A download (`working`) or a restored staged update (`Ready`)
+/// that began during the check owns the state.
+fn check_may_settle(phase: Phase, working: bool) -> bool {
+    phase == Phase::Checking && !working
 }
 
 // ── Prepare ───────────────────────────────────────────────────────────────
@@ -1269,6 +1299,15 @@ pub async fn update_open_release(app: AppHandle) -> Result<(), UpdateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_finished_check_settles_only_a_checking_phase() {
+        assert!(check_may_settle(Phase::Checking, false));
+        assert!(!check_may_settle(Phase::Checking, true));
+        for phase in [Phase::Idle, Phase::Available, Phase::Downloading, Phase::Verifying, Phase::Ready, Phase::Failed] {
+            assert!(!check_may_settle(phase, false), "{phase:?}");
+        }
+    }
 
     const ON: Prefs = Prefs {
         check_on_launch: true,
