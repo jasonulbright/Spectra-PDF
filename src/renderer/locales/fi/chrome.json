@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "Esikatselun DPI-arvon on oltava 18–300, mutta se on {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Esikatselu tarvitsee paperikoon (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Esikatselun sivurajan on oltava 1–{{PREVIEW_MAX_PAGES}}, mutta se on {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Tulostus peruttiin: {{done}} / {{jobs}} tulostustyöstä oli jo lähetetty tulostimelle",
   "engine.printer.printerSpecified": "Tulostinta ei ole määritetty",
   "engine.printer.printJobTimedOut": "Tulostustyö keskeytettiin {{JOB_TIMEOUT_S}} sekunnin jälkeen — tulostinajuri ei vastannut",
   "engine.printer.printingSystemPrinterAvailable": "Tulostaminen järjestelmän tulostimelle ei ole käytettävissä tällä alustalla.",

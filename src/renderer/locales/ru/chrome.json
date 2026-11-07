@@ -2858,6 +2858,7 @@
   "engine.printer.previewDpiMustGot": "DPI предварительного просмотра должно быть 18-300, получено {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Предварительному просмотру нужен размер листа (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Предел страниц предварительного просмотра должен быть 1-{{PREVIEW_MAX_PAGES}}, получено {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Печать отменена: {{done}} из {{jobs}} заданий печати уже отправлены на принтер",
   "engine.printer.printerSpecified": "Принтер не указан",
   "engine.printer.printJobTimedOut": "Задание печати превысило время ожидания {{JOB_TIMEOUT_S}} с — драйвер принтера не ответил",
   "engine.printer.printingSystemPrinterAvailable": "Печать на системный принтер недоступна на этой платформе.",

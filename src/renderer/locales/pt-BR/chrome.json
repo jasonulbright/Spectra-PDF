@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "O DPI da visualização precisa estar entre 18 e 300, veio {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "A visualização precisa do tamanho do papel (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "O limite de páginas da visualização precisa estar entre 1 e {{PREVIEW_MAX_PAGES}}, veio {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Impressão cancelada: {{done}} de {{jobs}} trabalhos de impressão já foram enviados à impressora",
   "engine.printer.printerSpecified": "Nenhuma impressora especificada",
   "engine.printer.printJobTimedOut": "O trabalho de impressão expirou depois de {{JOB_TIMEOUT_S}} s — o driver da impressora não respondeu",
   "engine.printer.printingSystemPrinterAvailable": "A impressão em uma impressora do sistema não está disponível nesta plataforma.",

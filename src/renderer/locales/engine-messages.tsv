@@ -603,6 +603,7 @@ printer.perSheetMustGot	pattern	printer	{{label}} per sheet must be 1-8, got {{v
 printer.previewDpiMustGot	pattern	printer	Preview DPI must be 18-300, got {{dpi}}
 printer.previewNeedsPaperSize	exact	printer	Preview needs the paper size (sheet_width/sheet_height)
 printer.previewPageCapMust	pattern	printer	Preview page cap must be 1-{{PREVIEW_MAX_PAGES}}, got {{max_pages}}
+printer.printCanceledPrintJobs	pattern	printer	Print canceled: {{done}} of {{jobs}} print jobs were already sent to the printer
 printer.printJobTimedOut	pattern	printer	Print job timed out after {{JOB_TIMEOUT_S}}s — the printer driver did not respond
 printer.printerSpecified	exact	printer	No printer specified
 printer.printingSystemPrinterAvailable	exact	printer	Printing to a system printer is not available on this platform.

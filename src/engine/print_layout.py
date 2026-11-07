@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pikepdf
 from engine.credentials import gs_password_argv, open_pdf
+from engine.inplace import atomic_output
 from engine import gs_capability, platform_support
 from engine.pdf_save import save_pdf
 
@@ -1091,7 +1092,10 @@ def _printed_job(
             current = reversed_path
             stages.append("reverse")
 
-        shutil.copyfile(current, output)
+        # The output name keeps its previous bytes until the whole file lands: a
+        # full disk mid-copy must not leave a truncated PDF at the final name.
+        with atomic_output(output) as staged:
+            shutil.copyfile(current, str(staged))
 
     return {
         "output": output,

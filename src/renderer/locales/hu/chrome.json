@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "Az előnézeti DPI 18-300 lehet, érkezett: {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Az előnézethez papírméret szükséges (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Az előnézeti oldalkorlát 1-{{PREVIEW_MAX_PAGES}} lehet, érkezett: {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "A nyomtatás megszakítva: {{jobs}} nyomtatási feladatból {{done}} már el lett küldve a nyomtatóra",
   "engine.printer.printerSpecified": "Nincs megadva nyomtató",
   "engine.printer.printJobTimedOut": "A nyomtatási feladat időtúllépés után leállt: {{JOB_TIMEOUT_S}} mp — a nyomtató-illesztőprogram nem válaszolt",
   "engine.printer.printingSystemPrinterAvailable": "A rendszernyomtatóra történő nyomtatás nem érhető el ezen a platformon.",

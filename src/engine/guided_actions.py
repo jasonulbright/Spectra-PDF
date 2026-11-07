@@ -37,6 +37,7 @@ import shutil
 import pikepdf
 from engine.inplace import finish_staged, reclaim_stale_stages, scratch_path, write_text_staged
 from engine.credentials import open_pdf
+from engine.ipc import RequestCancelled, cancelled
 
 from engine import gs_capability
 from engine.batch_ocr import (
@@ -920,7 +921,12 @@ def run_action(
     # difference between one pass and a full copy of every file in the tree.
     stages = bool(transform_steps)
     reclaimed: set[Path] = set()
+    stopped = False
     for index, (abs_path, rel) in enumerate(entries):
+        # A cancel ends the batch between files too, not only inside a step.
+        if cancelled():
+            stopped = True
+            break
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         # In place: stage beside the original, verify, then swap atomically —
@@ -1013,6 +1019,8 @@ def run_action(
                     row["move_error"] = str(exc)
             results.append(row)
         except Exception as exc:  # noqa: BLE001 — per-file isolation is the contract
+            # A cancel raised inside a step is `RequestCancelled`, an Exception:
+            # it ends the batch and is not one more failed file.
             # Never leave a half-processed file in the mirror (or staging litter),
             # and never leave the partial output of an export that failed.
             for litter in (out_path if stages or in_place else None, export_path):
@@ -1023,6 +1031,9 @@ def run_action(
                         litter.unlink()
                 except OSError:
                     pass
+            if isinstance(exc, RequestCancelled):
+                stopped = True
+                break
             results.append({"rel": rel, "status": "error", "error": str(exc)})
     finished_at = datetime.now()
 
@@ -1040,6 +1051,7 @@ def run_action(
         "duration_ms": (finished_at - started_at).total_seconds() * 1000,
         "steps": [s["op"] for s in clean_steps],
         "in_place": in_place,
+        "cancelled": stopped,
     }
     if write_log and log_dir:
         try:

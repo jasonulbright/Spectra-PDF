@@ -2717,6 +2717,7 @@
   "engine.printer.previewDpiMustGot": "Preview DPI must be 18-300, got {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Preview needs the paper size (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Preview page cap must be 1-{{PREVIEW_MAX_PAGES}}, got {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Print canceled: {{done}} of {{jobs}} print jobs were already sent to the printer",
   "engine.printer.printerSpecified": "No printer specified",
   "engine.printer.printingSystemPrinterAvailable": "Printing to a system printer is not available on this platform.",
   "engine.printer.printJobTimedOut": "Print job timed out after {{JOB_TIMEOUT_S}}s — the printer driver did not respond",

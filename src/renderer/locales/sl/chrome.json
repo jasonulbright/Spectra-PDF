@@ -2858,6 +2858,7 @@
   "engine.printer.previewDpiMustGot": "DPI predogleda mora biti 18-300, dobljen {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Predogled potrebuje velikost papirja (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Omejitev strani predogleda mora biti 1-{{PREVIEW_MAX_PAGES}}, dobljena {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Tiskanje je preklicano: {{done}} od {{jobs}} tiskalnih opravil je bilo že poslanih na tiskalnik",
   "engine.printer.printerSpecified": "Tiskalnik ni določen",
   "engine.printer.printJobTimedOut": "Tiskalno opravilo je poteklo po {{JOB_TIMEOUT_S}} s — gonilnik tiskalnika se ni odzval",
   "engine.printer.printingSystemPrinterAvailable": "Tiskanje na sistemski tiskalnik na tej platformi ni na voljo.",

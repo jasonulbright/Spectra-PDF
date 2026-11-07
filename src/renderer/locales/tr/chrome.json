@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "Önizleme DPI değeri 18-300 olmalıdır, {{dpi}} alındı",
   "engine.printer.previewNeedsPaperSize": "Önizleme kâğıt boyutunu gerektirir (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Önizleme sayfa sınırı 1-{{PREVIEW_MAX_PAGES}} olmalıdır, {{max_pages}} alındı",
+  "engine.printer.printCanceledPrintJobs": "Yazdırma iptal edildi: {{jobs}} yazdırma işinden {{done}} tanesi yazıcıya zaten gönderilmişti",
   "engine.printer.printerSpecified": "Yazıcı belirtilmedi",
   "engine.printer.printJobTimedOut": "Yazdırma işi {{JOB_TIMEOUT_S}} sn sonra zaman aşımına uğradı — yazıcı sürücüsü yanıt vermedi",
   "engine.printer.printingSystemPrinterAvailable": "Bu platformda sistem yazıcısına yazdırma kullanılamıyor.",

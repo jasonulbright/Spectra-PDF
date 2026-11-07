@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "I DPI dell’anteprima devono essere compresi tra 18 e 300, ricevuto {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "L’anteprima richiede il formato del foglio (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Il limite di pagine dell’anteprima deve essere compreso tra 1 e {{PREVIEW_MAX_PAGES}}, ricevuto {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Stampa annullata: {{done}} processi di stampa su {{jobs}} erano già stati inviati alla stampante",
   "engine.printer.printerSpecified": "Nessuna stampante specificata",
   "engine.printer.printJobTimedOut": "Processo di stampa scaduto dopo {{JOB_TIMEOUT_S}} s — il driver della stampante non ha risposto",
   "engine.printer.printingSystemPrinterAvailable": "La stampa su una stampante di sistema non è disponibile su questa piattaforma.",

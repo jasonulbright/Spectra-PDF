@@ -2660,6 +2660,7 @@
   "engine.printer.previewDpiMustGot": "미리 보기 DPI는 18-300 사이여야 하는데 {{dpi}}입니다",
   "engine.printer.previewNeedsPaperSize": "미리 보기에는 용지 크기(sheet_width/sheet_height)가 필요합니다",
   "engine.printer.previewPageCapMust": "미리 보기 페이지 상한은 1-{{PREVIEW_MAX_PAGES}} 사이여야 하는데 {{max_pages}}입니다",
+  "engine.printer.printCanceledPrintJobs": "인쇄가 취소되었습니다. 인쇄 작업 {{jobs}}개 중 {{done}}개는 이미 프린터로 전송되었습니다",
   "engine.printer.printerSpecified": "프린터를 지정하지 않았습니다",
   "engine.printer.printJobTimedOut": "인쇄 작업이 {{JOB_TIMEOUT_S}}초 후 시간 초과되었습니다 — 프린터 드라이버가 응답하지 않았습니다",
   "engine.printer.printingSystemPrinterAvailable": "이 플랫폼에서는 시스템 프린터로 인쇄할 수 없습니다.",

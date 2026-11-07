@@ -640,6 +640,31 @@ def test_print_preview_renders_a_user_opened_copy(readable, gs_path, monkeypatch
     _assert_no_password_in(seen)
 
 
+def test_a_failed_preview_render_removes_its_directory(readable, gs_path, monkeypatch):
+    import tempfile
+
+    import engine.printer as printer_mod
+
+    made = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def recording_mkdtemp(*args, **kwargs):
+        name = real_mkdtemp(*args, **kwargs)
+        if kwargs.get("prefix") == printer_mod.PREVIEW_PREFIX:
+            made.append(name)
+        return name
+
+    def failing_render(*args, **kwargs):
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(printer_mod.tempfile, "mkdtemp", recording_mkdtemp)
+    monkeypatch.setattr(printer_mod, "render_preview", failing_render)
+    with pytest.raises(RuntimeError, match="render failed"):
+        _preview(readable, gs_path)
+    assert made, "the preview made a directory"
+    assert not any(os.path.exists(d) for d in made), "the failed render left it behind"
+
+
 def test_low_resolution_print_spools_page_images(tmp_dir, gs_path, monkeypatch):
     path = _text_protected(tmp_dir, "lowres.pdf", _allow(print_lowres=True))
     try:

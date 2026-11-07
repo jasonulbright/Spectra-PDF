@@ -2858,6 +2858,7 @@
   "engine.printer.previewDpiMustGot": "DPI попереднього перегляду має бути 18-300, отримано {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Попередньому перегляду потрібен розмір аркуша (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Межа сторінок попереднього перегляду має бути 1-{{PREVIEW_MAX_PAGES}}, отримано {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Друк скасовано: {{done}} із {{jobs}} завдань друку вже надіслано на принтер",
   "engine.printer.printerSpecified": "Принтер не вказано",
   "engine.printer.printJobTimedOut": "Завдання друку перевищило час очікування {{JOB_TIMEOUT_S}} с — драйвер принтера не відповів",
   "engine.printer.printingSystemPrinterAvailable": "Друк на системний принтер недоступний на цій платформі.",
