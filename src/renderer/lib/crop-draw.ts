@@ -209,6 +209,12 @@ export function consumeDrawnCrop(): DrawnCrop | null {
   return c;
 }
 
+/** Drop a pending crop whose document's bytes changed. A crop the panel
+ * already took stays: its fields are visible and the user presses Apply. */
+export function discardDrawnCrop(paths: ReadonlySet<string>): void {
+  if (drawn && paths.has(drawn.path)) drawn = null;
+}
+
 export function subscribeDrawnCrop(fn: (crop: DrawnCrop) => void): () => void {
   cropListeners.add(fn);
   return () => cropListeners.delete(fn);

@@ -26,7 +26,13 @@ import { uniqueDocName } from '../../lib/doc-names';
 import { primeSystemFonts } from '../../lib/system-fonts';
 import { provideTextBoxEngine } from '../../lib/text-box-layout';
 import { learnBundledFaces, provideFaceReader, textBoxEngine } from '../../lib/text-box-engine';
-import { insetsFromBand, pageRectFromBand, publishDrawnCrop, roundInsets } from '../../lib/crop-draw';
+import {
+  discardDrawnCrop,
+  insetsFromBand,
+  pageRectFromBand,
+  publishDrawnCrop,
+  roundInsets,
+} from '../../lib/crop-draw';
 import { publishDrawnBead } from '../../lib/article-beads';
 import {
   publishDrawnLink,
@@ -2027,6 +2033,10 @@ export function WorkspaceCanvasView({
       void (async () => {
         const proxy = await getDocumentProxy(page.sourceDocId, buffer);
         const p = await proxy.getPage(page.sourcePageIndex + 1);
+        // The bytes may have changed while the page loaded. The invalidation
+        // effect has already run by then, so a result built from the old
+        // buffer must not be published after it.
+        if (filesRef.current.get(page.sourceDocId)?.buffer !== buffer) return;
         const [vx0, vy0, vx1, vy1] = p.view;
         // The band was drawn on the page AS DISPLAYED, so the conversion
         // measures against the displayed extents — which swap under a
@@ -3872,6 +3882,8 @@ export function WorkspaceCanvasView({
       // Crop placement freezes the same `rotationAtDraw` at draw time, so a
       // buffer change that bakes a rotation makes it stale too.
       setCropPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
+      // A drawn crop not yet taken by the Page Boxes panel is stale too.
+      discardDrawnCrop(invalidated);
       // (Selection shares the positional-id hazard; it lives in the ui slice
       // now and the reducer clears it wherever buffers change.)
     }
