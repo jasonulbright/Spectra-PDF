@@ -2660,6 +2660,7 @@
   "engine.printer.previewDpiMustGot": "プレビューの DPI は 18 〜 300 にしてください（指定値：{{dpi}}）",
   "engine.printer.previewNeedsPaperSize": "プレビューには用紙サイズ（sheet_width/sheet_height）が必要です",
   "engine.printer.previewPageCapMust": "プレビューのページ上限は 1 〜 {{PREVIEW_MAX_PAGES}} にしてください（指定値：{{max_pages}}）",
+  "engine.printer.printCanceledPrintJobs": "印刷を取り消しました。{{jobs}} 件の印刷ジョブのうち {{done}} 件はすでにプリンターへ送信されています",
   "engine.printer.printerSpecified": "プリンターが指定されていません",
   "engine.printer.printJobTimedOut": "印刷ジョブが {{JOB_TIMEOUT_S}} 秒でタイムアウトしました — プリンタードライバーが応答しませんでした",
   "engine.printer.printingSystemPrinterAvailable": "このプラットフォームでは、システム プリンターへの印刷は利用できません。",

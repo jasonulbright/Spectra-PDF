@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "DPI-ul previzualizării trebuie să fie 18-300, s-a găsit {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Previzualizarea are nevoie de dimensiunea hârtiei (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Limita de pagini a previzualizării trebuie să fie 1-{{PREVIEW_MAX_PAGES}}, s-a găsit {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Tipărire anulată: {{done}} din {{jobs}} lucrări de tipărire fuseseră deja trimise la imprimantă",
   "engine.printer.printerSpecified": "Nu s-a specificat nicio imprimantă",
   "engine.printer.printJobTimedOut": "Lucrarea de imprimare a expirat după {{JOB_TIMEOUT_S}} s — driverul imprimantei nu a răspuns",
   "engine.printer.printingSystemPrinterAvailable": "Imprimarea la o imprimantă de sistem nu este disponibilă pe această platformă.",

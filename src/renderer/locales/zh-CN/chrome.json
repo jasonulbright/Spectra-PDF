@@ -2660,6 +2660,7 @@
   "engine.printer.previewDpiMustGot": "预览 DPI 必须在 18 到 300 之间，实际为 {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "预览需要纸张大小（sheet_width/sheet_height）",
   "engine.printer.previewPageCapMust": "预览页数上限必须在 1 到 {{PREVIEW_MAX_PAGES}} 之间，实际为 {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "打印已取消：{{jobs}} 个打印作业中有 {{done}} 个已发送到打印机",
   "engine.printer.printerSpecified": "未指定打印机",
   "engine.printer.printJobTimedOut": "打印作业在 {{JOB_TIMEOUT_S}} 秒后超时 — 打印机驱动程序没有响应",
   "engine.printer.printingSystemPrinterAvailable": "此平台不支持打印到系统打印机。",

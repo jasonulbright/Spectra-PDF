@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "Los PPP de la vista previa deben estar entre 18 y 300, se recibió {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "La vista previa necesita el tamaño del papel (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "El límite de páginas de la vista previa debe estar entre 1 y {{PREVIEW_MAX_PAGES}}, se recibió {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Impresión cancelada: {{done}} de {{jobs}} trabajos de impresión ya se enviaron a la impresora",
   "engine.printer.printerSpecified": "No se ha indicado ninguna impresora",
   "engine.printer.printJobTimedOut": "El trabajo de impresión agotó el tiempo de espera tras {{JOB_TIMEOUT_S}} s: el controlador de la impresora no respondió",
   "engine.printer.printingSystemPrinterAvailable": "La impresión en una impresora del sistema no está disponible en esta plataforma.",

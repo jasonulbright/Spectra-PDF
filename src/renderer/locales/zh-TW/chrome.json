@@ -2660,6 +2660,7 @@
   "engine.printer.previewDpiMustGot": "預覽 DPI 必須介於 18-300，卻得到 {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "預覽需要紙張大小（sheet_width/sheet_height）",
   "engine.printer.previewPageCapMust": "預覽頁數上限必須介於 1-{{PREVIEW_MAX_PAGES}}，卻得到 {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "列印已取消：{{jobs}} 個列印工作中有 {{done}} 個已傳送到印表機",
   "engine.printer.printerSpecified": "未指定印表機",
   "engine.printer.printJobTimedOut": "列印工作在 {{JOB_TIMEOUT_S}} 秒後逾時 — 印表機驅動程式沒有回應",
   "engine.printer.printingSystemPrinterAvailable": "此平台不支援列印至系統印表機。",

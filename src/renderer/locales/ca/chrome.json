@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "Els PPP de la previsualització han de ser 18-300, i s'ha rebut {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "La previsualització necessita la mida del paper (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "El límit de pàgines de la previsualització ha de ser 1-{{PREVIEW_MAX_PAGES}}, i s'ha rebut {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Impressió cancel·lada: {{done}} de {{jobs}} treballs d'impressió ja s'han enviat a la impressora",
   "engine.printer.printerSpecified": "No s'ha especificat cap impressora",
   "engine.printer.printJobTimedOut": "La tasca d'impressió ha excedit el temps després de {{JOB_TIMEOUT_S}} s: el controlador de la impressora no ha respost",
   "engine.printer.printingSystemPrinterAvailable": "La impressió a una impressora del sistema no està disponible en aquesta plataforma.",

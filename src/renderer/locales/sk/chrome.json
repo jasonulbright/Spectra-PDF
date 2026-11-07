@@ -2858,6 +2858,7 @@
   "engine.printer.previewDpiMustGot": "DPI náhľadu musí byť 18-300, prijaté {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Náhľad potrebuje veľkosť hárka (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Limit strán náhľadu musí byť 1-{{PREVIEW_MAX_PAGES}}, prijaté {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Tlač bola zrušená: {{done}} z {{jobs}} tlačových úloh sa už odoslalo do tlačiarne",
   "engine.printer.printerSpecified": "Nie je uvedená tlačiareň",
   "engine.printer.printJobTimedOut": "Tlačová úloha prekročila časový limit {{JOB_TIMEOUT_S}} s — ovládač tlačiarne neodpovedal",
   "engine.printer.printingSystemPrinterAvailable": "Tlač na systémovú tlačiareň nie je na tejto platforme k dispozícii.",

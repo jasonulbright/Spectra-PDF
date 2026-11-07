@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "Die Vorschau-DPI muss zwischen 18 und 300 liegen, erhalten {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Die Vorschau benötigt das Papierformat (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Die Seitenobergrenze der Vorschau muss zwischen 1 und {{PREVIEW_MAX_PAGES}} liegen, erhalten {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Druck abgebrochen: {{done}} von {{jobs}} Druckaufträgen wurden bereits an den Drucker gesendet",
   "engine.printer.printerSpecified": "Kein Drucker angegeben",
   "engine.printer.printJobTimedOut": "Zeitüberschreitung des Druckauftrags nach {{JOB_TIMEOUT_S}} s – der Druckertreiber hat nicht geantwortet",
   "engine.printer.printingSystemPrinterAvailable": "Das Drucken auf einem Systemdrucker ist auf dieser Plattform nicht verfügbar.",

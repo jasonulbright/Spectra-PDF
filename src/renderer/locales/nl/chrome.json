@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "De voorbeeld-DPI moet 18-300 zijn, maar is {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Voor het voorbeeld is het papierformaat nodig (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "De paginalimiet van het voorbeeld moet 1-{{PREVIEW_MAX_PAGES}} zijn, maar is {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Afdrukken geannuleerd: {{done}} van {{jobs}} afdrukopdrachten waren al naar de printer verzonden",
   "engine.printer.printerSpecified": "Geen printer opgegeven",
   "engine.printer.printJobTimedOut": "De afdruktaak is na {{JOB_TIMEOUT_S}}s afgebroken — het printerstuurprogramma reageerde niet",
   "engine.printer.printingSystemPrinterAvailable": "Afdrukken naar een systeemprinter is niet beschikbaar op dit platform.",

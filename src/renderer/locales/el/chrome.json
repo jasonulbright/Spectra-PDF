@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "Το DPI προεπισκόπησης πρέπει να είναι 18-300, βρέθηκε {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Η προεπισκόπηση χρειάζεται το μέγεθος χαρτιού (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Το ανώτατο όριο σελίδων προεπισκόπησης πρέπει να είναι 1-{{PREVIEW_MAX_PAGES}}, βρέθηκε {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Η εκτύπωση ακυρώθηκε: {{done}} από {{jobs}} εργασίες εκτύπωσης είχαν ήδη σταλεί στον εκτυπωτή",
   "engine.printer.printerSpecified": "Δεν καθορίστηκε εκτυπωτής",
   "engine.printer.printJobTimedOut": "Η εργασία εκτύπωσης έληξε χρονικά μετά από {{JOB_TIMEOUT_S}} δευτ. — το πρόγραμμα οδήγησης του εκτυπωτή δεν απάντησε",
   "engine.printer.printingSystemPrinterAvailable": "Η εκτύπωση σε εκτυπωτή συστήματος δεν είναι διαθέσιμη σε αυτή την πλατφόρμα.",

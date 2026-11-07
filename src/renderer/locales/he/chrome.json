@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "ערך ה-DPI של התצוגה המקדימה חייב להיות בין 18 לבין 300 — התקבל {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "התצוגה המקדימה מחייבת את גודל הנייר (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "מגבלת העמודים בתצוגה המקדימה חייבת להיות בין 1 לבין {{PREVIEW_MAX_PAGES}} — התקבל {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "ההדפסה בוטלה: {{done}} מתוך {{jobs}} משימות הדפסה כבר נשלחו למדפסת",
   "engine.printer.printerSpecified": "לא צוינה מדפסת",
   "engine.printer.printJobTimedOut": "עבודת ההדפסה חרגה מהזמן הקצוב לאחר {{JOB_TIMEOUT_S}} שניות — מנהל ההתקן של המדפסת לא הגיב",
   "engine.printer.printingSystemPrinterAvailable": "הדפסה למדפסת מערכת אינה זמינה בפלטפורמה זו.",

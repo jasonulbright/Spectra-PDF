@@ -2792,6 +2792,7 @@
   "engine.printer.previewDpiMustGot": "La résolution d’aperçu doit être comprise entre 18 et 300 ; reçu {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "L’aperçu a besoin du format de papier (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Le plafond de pages de l’aperçu doit être compris entre 1 et {{PREVIEW_MAX_PAGES}} ; reçu {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Impression annulée : {{done}} travaux d'impression sur {{jobs}} avaient déjà été envoyés à l'imprimante",
   "engine.printer.printerSpecified": "Aucune imprimante indiquée",
   "engine.printer.printJobTimedOut": "La tâche d’impression a expiré après {{JOB_TIMEOUT_S}} s — le pilote d’imprimante n’a pas répondu",
   "engine.printer.printingSystemPrinterAvailable": "L’impression sur une imprimante système n’est pas disponible sur cette plateforme.",

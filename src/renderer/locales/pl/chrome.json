@@ -2858,6 +2858,7 @@
   "engine.printer.previewDpiMustGot": "DPI podglądu musi mieścić się w zakresie 18-300, otrzymano {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Podgląd wymaga rozmiaru arkusza (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Limit stron podglądu musi mieścić się w zakresie 1-{{PREVIEW_MAX_PAGES}}, otrzymano {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Drukowanie anulowano: {{done}} z {{jobs}} zadań drukowania zostało już wysłanych do drukarki",
   "engine.printer.printerSpecified": "Nie wskazano drukarki",
   "engine.printer.printJobTimedOut": "Zadanie drukowania przekroczyło limit czasu {{JOB_TIMEOUT_S}} s — sterownik drukarki nie odpowiedział",
   "engine.printer.printingSystemPrinterAvailable": "Drukowanie na drukarce systemowej nie jest dostępne na tej platformie.",

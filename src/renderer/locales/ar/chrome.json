@@ -2990,6 +2990,7 @@
   "engine.printer.previewDpiMustGot": "يجب أن تتراوح دقة المعاينة بين 18 و 300، لكن الوارد هو {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "تحتاج المعاينة إلى حجم الورقة عبر sheet_width و sheet_height",
   "engine.printer.previewPageCapMust": "يجب أن يتراوح حد صفحات المعاينة بين 1 و {{PREVIEW_MAX_PAGES}}، لكن الوارد هو {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "أُلغيت الطباعة: أُرسلت {{done}} من {{jobs}} مهام طباعة إلى الطابعة بالفعل",
   "engine.printer.printerSpecified": "لم تُحدَّد أي طابعة",
   "engine.printer.printJobTimedOut": "انتهت مهلة مهمة الطباعة بعد {{JOB_TIMEOUT_S}} ثانية — لم يستجب برنامج تشغيل الطابعة",
   "engine.printer.printingSystemPrinterAvailable": "الطباعة إلى طابعة النظام غير متاحة على هذا النظام الأساسي.",

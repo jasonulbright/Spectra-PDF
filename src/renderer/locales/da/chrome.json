@@ -2726,6 +2726,7 @@
   "engine.printer.previewDpiMustGot": "Forhåndsvisningens DPI skal være 18-300, men er {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Forhåndsvisningen kræver papirstørrelsen (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Forhåndsvisningens sidegrænse skal være 1-{{PREVIEW_MAX_PAGES}}, men er {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Udskrivningen blev annulleret: {{done}} af {{jobs}} udskriftsjob var allerede sendt til printeren",
   "engine.printer.printerSpecified": "Der er ikke angivet nogen printer",
   "engine.printer.printJobTimedOut": "Udskriftsjobbet fik tidsafbrydelse efter {{JOB_TIMEOUT_S}}s — printerdriveren svarede ikke",
   "engine.printer.printingSystemPrinterAvailable": "Udskrivning til en systemprinter er ikke tilgængelig på denne platform.",

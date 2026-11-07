@@ -2858,6 +2858,7 @@
   "engine.printer.previewDpiMustGot": "DPI náhledu musí být 18-300, přijato {{dpi}}",
   "engine.printer.previewNeedsPaperSize": "Náhled potřebuje velikost listu (sheet_width/sheet_height)",
   "engine.printer.previewPageCapMust": "Limit stránek náhledu musí být 1-{{PREVIEW_MAX_PAGES}}, přijato {{max_pages}}",
+  "engine.printer.printCanceledPrintJobs": "Tisk byl zrušen: {{done}} z {{jobs}} tiskových úloh již bylo odesláno do tiskárny",
   "engine.printer.printerSpecified": "Není uvedena tiskárna",
   "engine.printer.printJobTimedOut": "Tisková úloha překročila časový limit {{JOB_TIMEOUT_S}} s — ovladač tiskárny neodpověděl",
   "engine.printer.printingSystemPrinterAvailable": "Tisk na systémovou tiskárnu není na této platformě k dispozici.",

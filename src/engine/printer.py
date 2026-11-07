@@ -342,7 +342,7 @@ def _run_jobs(args: list[str], jobs: int) -> None:
         # not interrupted. Copies already sent stay in the spooler.
         if cancelled():
             raise RuntimeError(
-                f"Print cancelled: {done} of {jobs} print jobs were already sent to the printer"
+                f"Print canceled: {done} of {jobs} print jobs were already sent to the printer"
             )
         try:
             # build_gs_args puts the input document last.
