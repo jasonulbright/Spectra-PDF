@@ -3708,6 +3708,27 @@ class TestPrintPdf:
         if not printer_exists("Microsoft Print to PDF"):
             pytest.skip("Microsoft Print to PDF not installed")
 
+    def test_a_cancel_between_copies_stops_the_next_job(self, monkeypatch):
+        import engine.printer as printer_mod
+        started = []
+        answers = iter([False, True])
+
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        monkeypatch.setattr(printer_mod, "cancelled", lambda: next(answers))
+        monkeypatch.setattr(
+            printer_mod.platform_support, "run", lambda argv, **kw: started.append(argv) or R()
+        )
+        monkeypatch.setattr(
+            printer_mod.gs_capability, "require", lambda path: type("C", (), {"path": path})()
+        )
+        with pytest.raises(RuntimeError, match=r"1 of 3 print jobs"):
+            printer_mod._run_jobs(["GS", "-q", "doc.pdf"], 3)
+        assert len(started) == 1
+
     def test_one_job_per_copy_with_exact_argv(self, sample_pdf, monkeypatch):
         calls = []
 

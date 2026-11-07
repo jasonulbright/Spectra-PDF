@@ -61,6 +61,7 @@ import pikepdf
 from engine.credentials import PERMISSIONS_HELD, gs_password_argv, open_pdf, print_resolution
 
 from . import gs_capability, platform_support
+from .ipc import cancelled
 from .print_layout import (
     NUP_ORDERS,
     apply_subset,
@@ -336,7 +337,13 @@ def _run_jobs(args: list[str], jobs: int) -> None:
     # first job spawns. Deciding it before the loop means an unusable
     # Ghostscript refuses by name rather than failing `copies` times.
     args = [gs_capability.require(args[0] if args else "").path, *args[1:]]
-    for _ in range(jobs):
+    for done in range(jobs):
+        # Cancel is polled between copies only: a running Ghostscript job is
+        # not interrupted. Copies already sent stay in the spooler.
+        if cancelled():
+            raise RuntimeError(
+                f"Print cancelled: {done} of {jobs} print jobs were already sent to the printer"
+            )
         try:
             # build_gs_args puts the input document last.
             with gs_password_argv(args, args[-1]) as argv:
