@@ -80,7 +80,7 @@ from engine import eutl, msctl, os_trust, stamp_appearance, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification, UnjudgeableModification
-from engine.inplace import finish_staged, is_same_file, write_bytes_staged
+from engine.inplace import finish_staged, is_same_file, staging_target, write_bytes_staged
 from engine.signature_size import raw_signature_size
 from engine.fieldmdp import (
     ACTION_BY_NAME,
@@ -1805,12 +1805,14 @@ def sign_pdf(
     # failure while the working copy is already signed". The returned dict
     # carries NO secret.
     import os
-    import tempfile
 
-    out_dir = output_path.parent
-    fd, tmp_name = tempfile.mkstemp(suffix=".pdf", dir=str(out_dir))
+    # A stage-pattern name, so an engine killed during the self-verify leaves a
+    # file the stale-stage sweep reclaims and the folder walkers skip. A plain
+    # `tmpXXXX.pdf` would hold the signed bytes for good and read as a
+    # document.
+    tmp_name = str(staging_target(output_path))
     try:
-        with os.fdopen(fd, "wb") as f:
+        with open(tmp_name, "wb") as f:
             f.write(signed.getvalue())
         # The temp holds exactly the bytes that will land at output_path, so its
         # verification is the output's — computed while a failure is still fully

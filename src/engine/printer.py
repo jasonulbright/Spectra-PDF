@@ -598,11 +598,17 @@ def print_pdf(
         if resolved_orient == "landscape":
             psw, psh = max(psw, psh), min(psw, psh)
         out_dir = tempfile.mkdtemp(prefix=PREVIEW_PREFIX)
-        images = render_preview(
-            gs_path, src, out_dir, int(_preview.get("dpi", 72)),
-            psw, psh, FIT_SWITCHES[fit_mode],
-            gray=(color == "gray"), pages=page_spec,
-        )
+        try:
+            images = render_preview(
+                gs_path, src, out_dir, int(_preview.get("dpi", 72)),
+                psw, psh, FIT_SWITCHES[fit_mode],
+                gray=(color == "gray"), pages=page_spec,
+            )
+        except BaseException:
+            # The caller never learns this directory's name on a failed render,
+            # so nothing else would remove it before the hourly sweep.
+            shutil.rmtree(out_dir, ignore_errors=True)
+            raise
         return {
             "preview_dir": out_dir,
             "pages": images,

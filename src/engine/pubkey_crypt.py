@@ -308,9 +308,12 @@ def open_pubkey_document(path: str, pfx: str, password: str = "") -> dict:
         shutil.copyfile(path, staged)
     p = flags.as_sint32() if flags is not None else -1
     document_id = _first_id(reader)
-    register_recipient(path, permissions, p, handler, document_id)
     writer = copy_into_new_writer(reader)
     _staged_write(writer, Path(path))
+    # After the decrypted copy has landed: a marker and a credential written
+    # first would describe a recipient copy while the file is still encrypted
+    # if the write failed.
+    register_recipient(path, permissions, p, handler, document_id)
     return {
         "encrypted": True,
         "opener": "recipient",

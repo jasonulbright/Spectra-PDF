@@ -35,6 +35,7 @@ from pathlib import Path
 import pikepdf
 from engine.inplace import finish_staged, reclaim_stale_stages, scratch_path, write_text_staged
 from engine.credentials import open_pdf
+from engine.ipc import RequestCancelled, cancelled
 
 from engine.batch_ocr import (
     _format_duration,
@@ -174,7 +175,12 @@ def run_preflight_sweep(
     entries, skipped_dirs = _list_sources(source_path, False)
     results: list[dict] = []
     reclaimed: set[Path] = set()
+    stopped = False
     for index, (abs_path, rel) in enumerate(entries):
+        # A cancel ends the sweep between files too, not only inside a fix.
+        if cancelled():
+            stopped = True
+            break
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         if in_place and abs_path.parent not in reclaimed:
@@ -233,6 +239,8 @@ def run_preflight_sweep(
                     row["move_error"] = str(exc)
             results.append(row)
         except Exception as exc:  # noqa: BLE001 — per-file isolation is the contract
+            # A cancel raised inside a fix is `RequestCancelled`, an Exception:
+            # it ends the sweep and is not one more failed file.
             if mode == "fix":
                 # Never leave a half-processed document in the mirror.
                 try:
@@ -240,6 +248,9 @@ def run_preflight_sweep(
                         out_path.unlink()
                 except OSError:
                     pass
+            if isinstance(exc, RequestCancelled):
+                stopped = True
+                break
             results.append({"rel": rel, "status": "error", "error": str(exc)})
     finished_at = datetime.now()
 
@@ -265,6 +276,7 @@ def run_preflight_sweep(
         "results": results,
         "duration_ms": (finished_at - started_at).total_seconds() * 1000,
         "in_place": in_place,
+        "cancelled": stopped,
     }
     if write_log and log_dir:
         try:

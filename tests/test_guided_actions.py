@@ -195,6 +195,32 @@ class TestRunAction:
         assert bad["rel"] == "broken.pdf"
         assert not (dest / "broken.pdf").exists()  # no half-processed mirror file
 
+    def test_a_cancel_inside_a_step_ends_the_batch_and_is_not_an_error_row(
+        self, tree, tmp_path, monkeypatch
+    ):
+        # RequestCancelled is an Exception: the per-file isolation used to turn
+        # it into one error row and carry on with the next file.
+        import engine.guided_actions as module
+        from engine.ipc import RequestCancelled
+
+        calls = []
+
+        def cancel_on_second(path, steps, tools, named=""):
+            calls.append(path)
+            if len(calls) == 2:
+                raise RequestCancelled()
+            return len(steps)
+
+        monkeypatch.setattr(module, "_apply_steps", cancel_on_second)
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(tree), dest=str(dest), steps=[{"op": "strip_metadata"}]
+        )
+        assert report["cancelled"] is True
+        assert len(calls) == 2, "the batch stopped at the cancelled file"
+        assert report["failed"] == 0, "a cancel is not a failed file"
+        assert len(report["results"]) == 1
+
     def test_dest_inside_source_refused(self, tree):
         with pytest.raises(ValueError, match="outside the source"):
             run_action(source=str(tree), dest=str(tree / "out"), steps=[{"op": "strip_metadata"}])

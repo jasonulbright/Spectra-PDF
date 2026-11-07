@@ -44,6 +44,34 @@ def _digest(paths) -> dict:
     return {p: pathlib.Path(p).read_bytes() for p in paths}
 
 
+class TestCancel:
+    def test_a_cancel_inside_a_file_ends_the_sweep_and_is_not_an_error_row(
+        self, tmp_path, monkeypatch
+    ):
+        import engine.preflight_sweep as module
+        from engine.ipc import RequestCancelled
+
+        source = tmp_path / "in"
+        _tree(source)
+        real = module.preflight
+        calls = []
+
+        def cancel_on_second(*args, **kwargs):
+            calls.append(args[0])
+            if len(calls) == 2:
+                raise RequestCancelled()
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(module, "preflight", cancel_on_second)
+        report = run_preflight_sweep(
+            str(source), str(tmp_path / "out"),
+            profile=_profile(), mode="check", write_log=False,
+        )
+        assert report["cancelled"] is True
+        assert len(calls) == 2, "the sweep stopped at the cancelled file"
+        assert report["failed"] == 0, "a cancel is not a failed file"
+
+
 class TestCheckMode:
     def test_it_writes_a_report_per_file_and_touches_no_source(self, tmp_path):
         source = tmp_path / "in"

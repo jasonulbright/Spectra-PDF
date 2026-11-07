@@ -121,6 +121,27 @@ def test_certify_defaults_to_form_fill(tmp_dir, pki):
     assert result["certification_level"] == "form-fill"
 
 
+def test_the_signed_temp_file_has_a_stage_name_while_it_is_verified(tmp_dir, pki, monkeypatch):
+    # A kill during the self-verify must leave a file the stale-stage sweep
+    # reclaims and the folder walkers skip, not `tmpXXXX.pdf` holding signed bytes.
+    import engine.signatures as signatures_mod
+    from engine.inplace import is_stage_path
+
+    src = _base_pdf(os.path.join(tmp_dir, "base.pdf"))
+    out = os.path.join(tmp_dir, "signed.pdf")
+    seen = []
+    real = signatures_mod.verify_signatures
+
+    def spying(path, *args, **kwargs):
+        seen.append(path)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(signatures_mod, "verify_signatures", spying)
+    sign_pdf(src, out, pfx_path=pki["pfx"], password="pw")
+    assert seen and is_stage_path(seen[0]), seen
+    assert not any(is_stage_path(f) for f in os.listdir(tmp_dir)), "no stage file is left"
+
+
 def test_approval_signature_writes_no_certification(tmp_dir, pki):
     src = _base_pdf(os.path.join(tmp_dir, "base.pdf"))
     out = os.path.join(tmp_dir, "approval.pdf")
