@@ -179,14 +179,23 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   // render runs cleans only the earlier folder; the folder that render
   // creates is left to the engine's orphan sweep.
   useEffect(() => {
-    if (!gated || !workingPath || !sheet) return;
-    if (rangeMode === 'custom' &&
-        (rangeText.trim() === '' || pageRangeError(rangeText, docPageCount))) return;
-    if (opts.fit === 'scale' && scaleError(scaleText)) return;
-    if (opts.layout === 'poster' &&
-        (posterScaleError(posterScaleText) ||
-         posterOverlapError(overlapText, sheet.w, sheet.h))) return;
+    // Every run of this effect supersedes the render in flight, including a
+    // run that finds the inputs invalid: otherwise that render lands after the
+    // form shows an error and installs a preview for settings no longer on
+    // screen.
     const token = ++previewTokenRef.current;
+    const inputsInvalid =
+      !gated || !workingPath || !sheet ||
+      (rangeMode === 'custom' &&
+        (rangeText.trim() === '' || pageRangeError(rangeText, docPageCount))) ||
+      (opts.fit === 'scale' && !!scaleError(scaleText)) ||
+      (opts.layout === 'poster' &&
+        (!!posterScaleError(posterScaleText) ||
+         !!posterOverlapError(overlapText, sheet.w, sheet.h)));
+    if (inputsInvalid || !workingPath || !sheet) {
+      setPreviewBusy(false); // the superseded render no longer clears it
+      return;
+    }
     const timer = setTimeout(() => {
       void (async () => {
         setPreviewBusy(true);
@@ -245,6 +254,9 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   // Unmount: revoke the blob URLs and delete the engine-side scratch.
   useEffect(() => {
     return () => {
+      // A render still running when the dialog closes must not build blob
+      // URLs nobody will revoke.
+      previewTokenRef.current += 1;
       for (const u of previewUrlsRef.current) URL.revokeObjectURL(u);
       const dir = previewDirRef.current;
       if (dir) void callLocked('print_preview_cleanup', { directory: dir }).catch(() => {});

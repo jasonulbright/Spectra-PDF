@@ -63,29 +63,41 @@ export function useSweepFolders(): SweepFolders {
   // Two-layer conflict guard, the batch one: the string check catches the
   // everyday case synchronously; the filesystem identity check catches
   // aliased spellings of one physical folder that no string comparison sees.
-  const [identityConflict, setIdentityConflict] = useState(false);
+  // The answer is stored WITH the pair it was asked about. A value kept from
+  // the previous pair would leave Run enabled for an aliased destination (or
+  // blocked for a good one) until the new check lands.
+  const [identity, setIdentity] = useState<{
+    source: string;
+    dest: string;
+    same: boolean;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     if (source === null || dest === null || destConflictsWithSource(source, dest)) {
-      setIdentityConflict(false);
+      setIdentity(null);
       return;
     }
     void batch
       .pathsSameFile(source, dest)
       .then((same) => {
-        if (!cancelled) setIdentityConflict(same);
+        if (!cancelled) setIdentity({ source, dest, same });
       })
       .catch(() => {
-        if (!cancelled) setIdentityConflict(false);
+        if (!cancelled) setIdentity({ source, dest, same: false });
       });
     return () => {
       cancelled = true;
     };
   }, [source, dest]);
 
-  const conflict =
-    (source !== null && dest !== null && destConflictsWithSource(source, dest)) ||
-    identityConflict;
+  const stringConflict =
+    source !== null && dest !== null && destConflictsWithSource(source, dest);
+  const identityKnown =
+    identity !== null && identity.source === source && identity.dest === dest;
+  // An answer for a different pair is ignored, so a stale "same folder" never
+  // blocks a good pair. The gap before the new answer lands is one IPC call.
+  const identityConflict = identityKnown && identity.same;
+  const conflict = stringConflict || identityConflict;
 
   return {
     source,

@@ -61,14 +61,16 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
   }, [refresh]);
 
   const act = useCallback(
-    async (fn: () => Promise<unknown>) => {
+    async (fn: () => Promise<unknown>): Promise<boolean> => {
       setBusy(true);
       setError(null);
       try {
         await fn();
         await refresh();
+        return true;
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
+        return false;
       } finally {
         setBusy(false);
       }
@@ -76,8 +78,11 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
     [refresh],
   );
 
+  // Set before the first await: `busy` is set only inside `act`, after the log
+  // directory lookup, so a double click would otherwise make two watchers.
+  const savingRef = useRef(false);
   const save = useCallback(async () => {
-    if (!editing) return;
+    if (!editing || savingRef.current) return;
     const chosen = libraryActions.find((a) => a.id === editing.actionId);
     if (!chosen) {
       setError(tChrome('dialog.watchers.needAction'));
@@ -89,20 +94,26 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
       setError(blocker);
       return;
     }
-    const settings = getSettings();
-    const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
-    const folder: WatchedFolder = {
-      id: crypto.randomUUID(),
-      name: editing.name.trim() || chosen.name,
-      source: editing.source,
-      dest: editing.dest,
-      processedRoot: editing.processedRoot,
-      action: JSON.parse(actionFileJson(chosen)) as unknown,
-      logDir,
-      enabled: true,
-    };
-    await act(() => watchers.upsert(folder));
-    setEditing(null);
+    savingRef.current = true;
+    try {
+      const settings = getSettings();
+      const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
+      const folder: WatchedFolder = {
+        id: crypto.randomUUID(),
+        name: editing.name.trim() || chosen.name,
+        source: editing.source,
+        dest: editing.dest,
+        processedRoot: editing.processedRoot,
+        action: JSON.parse(actionFileJson(chosen)) as unknown,
+        logDir,
+        enabled: true,
+      };
+      // A failed save keeps the form open: the error shows in the list view,
+      // but closing the form would throw away what the user typed.
+      if (await act(() => watchers.upsert(folder))) setEditing(null);
+    } finally {
+      savingRef.current = false;
+    }
   }, [editing, libraryActions, act]);
 
   // Harness: the folder pickers are native — a spec injects a whole entry
