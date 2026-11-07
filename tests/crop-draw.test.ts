@@ -5,6 +5,7 @@ import {
   publishDrawnCrop,
   subscribeDrawnCrop,
   consumeDrawnCrop,
+  discardDrawnCrop,
   __resetDrawnCrop,
   resizeCropBand,
   cropBandChanged,
@@ -127,6 +128,15 @@ describe('the drawn-crop channel', () => {
   });
 
   it('starts empty', () => {
+    expect(consumeDrawnCrop()).toBeNull();
+  });
+
+  it('drops a pending crop whose file changed, and keeps one for another file', () => {
+    publishDrawnCrop(crop);
+    discardDrawnCrop(new Set(['C:/docs/other.pdf']));
+    expect(consumeDrawnCrop()).toEqual(crop);
+    publishDrawnCrop(crop);
+    discardDrawnCrop(new Set([crop.path]));
     expect(consumeDrawnCrop()).toBeNull();
   });
 
