@@ -20,6 +20,9 @@ export interface SweepFolders {
   scanning: boolean;
   /** The destination is the source, inside it, or the same physical folder. */
   conflict: boolean;
+  /** The filesystem identity check for the current pair has not answered yet.
+   * Run stays off meanwhile; this is not a conflict and shows no message. */
+  checking: boolean;
   /** The conflict was found by filesystem identity rather than by the path
    * text — a different sentence, because the paths look unrelated. */
   identityConflict: boolean;
@@ -95,9 +98,13 @@ export function useSweepFolders(): SweepFolders {
   const identityKnown =
     identity !== null && identity.source === source && identity.dest === dest;
   // An answer for a different pair is ignored, so a stale "same folder" never
-  // blocks a good pair. The gap before the new answer lands is one IPC call.
+  // names a conflict for a good pair.
   const identityConflict = identityKnown && identity.same;
   const conflict = stringConflict || identityConflict;
+  // Until the check for THIS pair lands, Run stays off: a stale "different
+  // folders" would let a sweep write into its own source. Kept apart from
+  // `conflict` so the red message is never shown for a check in progress.
+  const checking = source !== null && dest !== null && !stringConflict && !identityKnown;
 
   return {
     source,
@@ -108,6 +115,7 @@ export function useSweepFolders(): SweepFolders {
     skippedDirs,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,

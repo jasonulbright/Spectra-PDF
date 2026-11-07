@@ -98,6 +98,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     skippedDirs,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,
@@ -167,7 +168,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     phase === 'setup' &&
     !scanning &&
     source !== null &&
-    (inPlace || (dest !== null && !conflict)) &&
+    (inPlace || (dest !== null && !conflict && !checking)) &&
     entries !== null &&
     entries.length > 0;
   const canSearch = foldersReady && !requestIsEmpty(request);

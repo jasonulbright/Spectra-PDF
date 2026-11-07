@@ -85,6 +85,7 @@ export function FolderPreflightDialog({
     entries,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,
@@ -167,6 +168,7 @@ export function FolderPreflightDialog({
     phase === 'setup' &&
     !scanning &&
     !conflict &&
+    !checking &&
     problem === null &&
     entries !== null &&
     entries.length > 0;

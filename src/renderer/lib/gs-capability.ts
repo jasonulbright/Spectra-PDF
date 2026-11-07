@@ -77,6 +77,13 @@ let current: GsCapability = UNRESOLVED;
 let inFlight: Promise<GsCapability> | null = null;
 /** Stamps each probe; only the newest probe may publish its answer. */
 let probeSeq = 0;
+
+/** What a superseded probe hands back: the newest probe's answer, so a caller
+ * that asked first is not told "unresolved" while a newer probe is still
+ * running. */
+function newest(): Promise<GsCapability> {
+  return inFlight ?? Promise.resolve(current);
+}
 let pinned: GsCapability | null = null;
 const listeners = new Set<() => void>();
 
@@ -141,12 +148,12 @@ export function ensureGsCapability(): Promise<GsCapability> {
       .gsCapability(configuredPath())
       // A probe started after this one owns the answer: a slow first probe
       // must not land over a newer refresh.
-      .then((answer) => (seq === probeSeq ? publish(settled(answer)) : current))
+      .then((answer) => (seq === probeSeq ? publish(settled(answer)) : newest()))
       .catch(() => {
         // The IPC itself failed. Stay pending so the next ask re-probes
         // rather than reporting an absent Ghostscript that was never asked
         // about.
-        return current;
+        return seq === probeSeq ? current : newest();
       })
       .finally(() => {
         if (inFlight === probe) inFlight = null;
@@ -169,11 +176,11 @@ export function refreshGsCapability(path?: string): Promise<GsCapability> {
   const seq = ++probeSeq;
   const probe = app
     .refreshGsCapability(candidate)
-    .then((answer) => (seq === probeSeq ? publish(settled(answer)) : current))
+    .then((answer) => (seq === probeSeq ? publish(settled(answer)) : newest()))
     .catch(() =>
       seq === probeSeq
         ? publish({ ...UNRESOLVED, pending: false, reason: GS_PROBE_FAILED })
-        : current,
+        : newest(),
     );
   inFlight = probe;
   probe.finally(() => {

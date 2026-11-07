@@ -97,7 +97,15 @@ export function WatchedFoldersDialog({ onClose }: WatchedFoldersDialogProps): Re
     savingRef.current = true;
     try {
       const settings = getSettings();
-      const logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
+      let logDir = '';
+      try {
+        logDir = settings.batchLogEnabled ? await batch.logDir(settings.batchLogDir) : '';
+      } catch (e: unknown) {
+        // Before `act` there is no error handler: without this the form stays
+        // open and says nothing.
+        setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
       const folder: WatchedFolder = {
         id: crypto.randomUUID(),
         name: editing.name.trim() || chosen.name,

@@ -96,6 +96,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     skippedDirs,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,
@@ -188,6 +189,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     source !== null &&
     dest !== null &&
     !conflict &&
+    !checking &&
     entries !== null &&
     entries.length > 0;
 
