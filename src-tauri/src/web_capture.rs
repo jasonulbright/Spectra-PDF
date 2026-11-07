@@ -671,6 +671,15 @@ fn settle_pause() -> bool {
     !cancelled()
 }
 
+/// Clears `CAPTURING` when it drops.
+struct CapturingFlag;
+
+impl Drop for CapturingFlag {
+    fn drop(&mut self) {
+        CAPTURING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Capture one page, or a bounded same-origin crawl from it.
 #[tauri::command]
 pub async fn capture_web_page(
@@ -688,15 +697,12 @@ pub async fn capture_web_page(
     if CAPTURING.swap(true, Ordering::SeqCst) {
         return Err("A capture is already running".to_string());
     }
+    // Released on every exit, a panic in the capture included. Declared before
+    // anything that can fail so no path can leave the flag set.
+    let _capturing = CapturingFlag;
     // A close seen while no capture was running must not cancel this one.
     clear_cancel();
-    let mut scratch = match CaptureScratch::new() {
-        Ok(scratch) => scratch,
-        Err(error) => {
-            CAPTURING.store(false, Ordering::SeqCst);
-            return Err(error);
-        }
-    };
+    let mut scratch = CaptureScratch::new()?;
     let capture_id = scratch.capture_id();
     let result = run_capture(
         &app,
@@ -714,7 +720,6 @@ pub async fn capture_web_page(
     if matches!(&result, Ok(result) if !result.cancelled && !result.pages.is_empty()) {
         scratch.retain();
     }
-    CAPTURING.store(false, Ordering::SeqCst);
     // Every exit path — success, refusal, cancellation, a cancel that raced
     // completion. No interface into this window's browser outlives the
     // dispatch that took it, and a destroy is processed on the same thread as
@@ -722,6 +727,9 @@ pub async fn capture_web_page(
     if let Some(window) = app.get_webview_window(CAPTURE_LABEL) {
         let _ = window.destroy();
     }
+    // `_capturing` drops here, after the window is gone: a capture that starts
+    // the moment the flag clears cannot have its own window destroyed by this
+    // call.
     result
 }
 

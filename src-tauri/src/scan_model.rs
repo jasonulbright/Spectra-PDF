@@ -1284,6 +1284,35 @@ pub(crate) fn discard_scan_scratch_at(path: &Path, scratch_root: &Path) -> Resul
 pub(crate) struct Entry {
     pub(crate) session: Arc<dyn ScanSession>,
     pub(crate) last_used: Instant,
+    /// Runs in flight on this session. The reaper keeps an entry while this is
+    /// above zero: a scan can outlast `IDLE_TIMEOUT`, and a reaped entry would
+    /// leave `cancel` with nothing to cancel and let the next `ensure` open a
+    /// second session on the same device.
+    pub(crate) active: usize,
+}
+
+/// Drop the entries that are idle and not running. The reaper's whole rule.
+pub(crate) fn reap(open: &mut HashMap<String, Entry>, idle: Duration) {
+    open.retain(|_, entry| entry.active > 0 || entry.last_used.elapsed() < idle);
+}
+
+/// Marks one run on a session for as long as it lives, a panic included.
+struct ActiveRun<'a> {
+    store: &'a ScannerSessions,
+    key: String,
+}
+
+impl Drop for ActiveRun<'_> {
+    fn drop(&mut self) {
+        // A poisoned lock ends the run's bookkeeping; the store is unusable
+        // for every caller then, so there is nothing left to keep right.
+        if let Ok(mut open) = self.store.sessions.lock() {
+            if let Some(entry) = open.get_mut(&self.key) {
+                entry.active = entry.active.saturating_sub(1);
+                entry.last_used = Instant::now();
+            }
+        }
+    }
 }
 
 /// The live sessions, one per namespaced device id.
@@ -1324,7 +1353,7 @@ impl ScannerSessions {
                 let Ok(mut open) = sessions.lock() else {
                     return;
                 };
-                open.retain(|_, entry| entry.last_used.elapsed() < IDLE_TIMEOUT);
+                reap(&mut open, IDLE_TIMEOUT);
             });
         });
     }
@@ -1336,6 +1365,16 @@ impl ScannerSessions {
     /// lock across one would make `cancel` and `close` wait for the very call
     /// they are trying to stop.
     fn ensure(&self, id: &DeviceId) -> Result<Arc<dyn ScanSession>, ScanRefusal> {
+        self.ensure_counting(id, false)
+    }
+
+    /// `ensure`, and when `running` is set, count one run on the entry under
+    /// the same lock, so the reaper cannot slip between the open and the count.
+    fn ensure_counting(
+        &self,
+        id: &DeviceId,
+        running: bool,
+    ) -> Result<Arc<dyn ScanSession>, ScanRefusal> {
         let key = id.qualified();
         let mut open = self.sessions.lock().map_err(|_| {
             ScanRefusal::named("scan.failed", "The scanner session store is unusable.")
@@ -1348,11 +1387,15 @@ impl ScannerSessions {
                 Entry {
                     session,
                     last_used: Instant::now(),
+                    active: 0,
                 },
             );
         }
         let entry = open.get_mut(&key).expect("session was just inserted");
         entry.last_used = Instant::now();
+        if running {
+            entry.active += 1;
+        }
         Ok(entry.session.clone())
     }
 
@@ -1421,10 +1464,11 @@ impl ScannerSessions {
     ) -> Result<ScanResult, ScanRefusal> {
         let id = DeviceId::parse(device_id);
         let key = id.qualified();
-        let session = self.ensure(&id)?;
-        let outcome = session.acquire(settings, dir, sink);
-        self.touch(&key);
-        outcome
+        let session = self.ensure_counting(&id, true)?;
+        // Dropped after the run, a panic included: stamps `last_used` and
+        // lets the reaper see the entry again.
+        let _run = ActiveRun { store: self, key };
+        session.acquire(settings, dir, sink)
     }
 
     /// Ask the run in flight to stop at the driver's next callback tick.
