@@ -69,6 +69,14 @@ on:
 permissions:
   contents: write
 
+# One publisher per tag. A second run for the same tag (a re-pushed tag, or a
+# redo started while the first run is still going) waits instead of editing the
+# same draft release at the same time. A running release is never cancelled.
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+  queue: max
+
 env:
   # Non-secret signing coordinates, kept in step with release.yml.
   SPECTRAPDF_SIGN_ENDPOINT: https://eus.codesigning.azure.net

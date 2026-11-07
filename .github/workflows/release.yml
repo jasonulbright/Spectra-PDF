@@ -17,6 +17,14 @@ on:
 permissions:
   contents: write
 
+# One publisher per tag. A second run for the same tag (a re-pushed tag, or a
+# redo started while the first run is still going) waits instead of editing the
+# same draft release at the same time. A running release is never cancelled.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+  queue: max
+
 env:
   # Non-secret signing coordinates. The account and profile name what signs;
   # the subject is what the publish gate requires to have signed.
