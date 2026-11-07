@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.1107.166
+
+**Late events no longer overwrite newer state**
+
+### Fixed
+- Keep a finished update check from overwriting a download in progress or a restored staged update. This covers a failed check too.
+- Reset the Linux scanner's busy state on every exit from a scan, even after an error.
+- Ignore a late answer when you load certificates from the certificate store for a signature. Only the newest load sets the list.
+- Clear the crop box you drew when the page bytes change, and reject a crop draw that finishes after the change.
+- Resume a paused read-aloud when you step to another sentence.
+- Stop a multi-copy print job between copies when you cancel. The error tells you how many print jobs were already sent.
+
+### Changed
+- Run one release publisher at a time for each tag, and keep a waiting run in the queue.
+
 ## 2026.1106.165
 
 **Duplex edge follows the sheet on landscape pages**
