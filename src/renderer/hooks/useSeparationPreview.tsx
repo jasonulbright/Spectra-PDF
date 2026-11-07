@@ -432,7 +432,11 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   // and overprint, so an ink toggle re-composites and never re-runs the
   // device.
   useEffect(() => {
-    if (!armed || wanted.length === 0) return;
+    if (!armed || wanted.length === 0) {
+      // The run this replaces is cancelled and will not clear it.
+      setBusy(false);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       setBusy(true);

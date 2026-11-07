@@ -144,6 +144,9 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
   useEffect(() => {
     const q = debounced.trim();
     if (scope !== 'disk' || !folder || q.length === 0) {
+      // Supersede a search still in flight, or its late answer lands under an
+      // empty query.
+      diskToken.current += 1;
       setDisk(null);
       setSearching(false);
       return;

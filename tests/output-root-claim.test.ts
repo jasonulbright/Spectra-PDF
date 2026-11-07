@@ -247,7 +247,7 @@ describe('the folder runs claim what they write', () => {
 
   it('the mirror-only folder tools claim their destination', () => {
     for (const dialog of ['components/FolderExportDialog.tsx', 'components/FolderCreatePdfDialog.tsx']) {
-      expect(source(dialog), dialog).toContain('const root = await claimOutputRoots([dest]);');
+      expect(source(dialog), dialog).toContain('root = await claimOutputRoots([dest]);');
     }
   });
 

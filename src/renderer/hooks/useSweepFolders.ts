@@ -20,6 +20,9 @@ export interface SweepFolders {
   scanning: boolean;
   /** The destination is the source, inside it, or the same physical folder. */
   conflict: boolean;
+  /** The filesystem identity check for the current pair has not answered yet.
+   * Run stays off meanwhile; this is not a conflict and shows no message. */
+  checking: boolean;
   /** The conflict was found by filesystem identity rather than by the path
    * text — a different sentence, because the paths look unrelated. */
   identityConflict: boolean;
@@ -63,29 +66,45 @@ export function useSweepFolders(): SweepFolders {
   // Two-layer conflict guard, the batch one: the string check catches the
   // everyday case synchronously; the filesystem identity check catches
   // aliased spellings of one physical folder that no string comparison sees.
-  const [identityConflict, setIdentityConflict] = useState(false);
+  // The answer is stored WITH the pair it was asked about. A value kept from
+  // the previous pair would leave Run enabled for an aliased destination (or
+  // blocked for a good one) until the new check lands.
+  const [identity, setIdentity] = useState<{
+    source: string;
+    dest: string;
+    same: boolean;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     if (source === null || dest === null || destConflictsWithSource(source, dest)) {
-      setIdentityConflict(false);
+      setIdentity(null);
       return;
     }
     void batch
       .pathsSameFile(source, dest)
       .then((same) => {
-        if (!cancelled) setIdentityConflict(same);
+        if (!cancelled) setIdentity({ source, dest, same });
       })
       .catch(() => {
-        if (!cancelled) setIdentityConflict(false);
+        if (!cancelled) setIdentity({ source, dest, same: false });
       });
     return () => {
       cancelled = true;
     };
   }, [source, dest]);
 
-  const conflict =
-    (source !== null && dest !== null && destConflictsWithSource(source, dest)) ||
-    identityConflict;
+  const stringConflict =
+    source !== null && dest !== null && destConflictsWithSource(source, dest);
+  const identityKnown =
+    identity !== null && identity.source === source && identity.dest === dest;
+  // An answer for a different pair is ignored, so a stale "same folder" never
+  // names a conflict for a good pair.
+  const identityConflict = identityKnown && identity.same;
+  const conflict = stringConflict || identityConflict;
+  // Until the check for THIS pair lands, Run stays off: a stale "different
+  // folders" would let a sweep write into its own source. Kept apart from
+  // `conflict` so the red message is never shown for a check in progress.
+  const checking = source !== null && dest !== null && !stringConflict && !identityKnown;
 
   return {
     source,
@@ -96,6 +115,7 @@ export function useSweepFolders(): SweepFolders {
     skippedDirs,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,

@@ -75,6 +75,15 @@ type BridgeAnswer = Omit<GsCapability, 'pending' | 'source'> & { source?: string
 
 let current: GsCapability = UNRESOLVED;
 let inFlight: Promise<GsCapability> | null = null;
+/** Stamps each probe; only the newest probe may publish its answer. */
+let probeSeq = 0;
+
+/** What a superseded probe hands back: the newest probe's answer, so a caller
+ * that asked first is not told "unresolved" while a newer probe is still
+ * running. */
+function newest(): Promise<GsCapability> {
+  return inFlight ?? Promise.resolve(current);
+}
 let pinned: GsCapability | null = null;
 const listeners = new Set<() => void>();
 
@@ -134,18 +143,22 @@ export function ensureGsCapability(): Promise<GsCapability> {
   if (pinned) return Promise.resolve(pinned);
   if (!current.pending) return Promise.resolve(current);
   if (!inFlight) {
-    inFlight = app
+    const seq = ++probeSeq;
+    const probe: Promise<GsCapability> = app
       .gsCapability(configuredPath())
-      .then((answer) => publish(settled(answer)))
+      // A probe started after this one owns the answer: a slow first probe
+      // must not land over a newer refresh.
+      .then((answer) => (seq === probeSeq ? publish(settled(answer)) : newest()))
       .catch(() => {
         // The IPC itself failed. Stay pending so the next ask re-probes
         // rather than reporting an absent Ghostscript that was never asked
         // about.
-        return current;
+        return seq === probeSeq ? current : newest();
       })
       .finally(() => {
-        inFlight = null;
+        if (inFlight === probe) inFlight = null;
       });
+    inFlight = probe;
   }
   return inFlight;
 }
@@ -160,10 +173,15 @@ export function ensureGsCapability(): Promise<GsCapability> {
 export function refreshGsCapability(path?: string): Promise<GsCapability> {
   if (pinned) return Promise.resolve(pinned);
   const candidate = path === undefined ? configuredPath() : (path.trim() || undefined);
+  const seq = ++probeSeq;
   const probe = app
     .refreshGsCapability(candidate)
-    .then((answer) => publish(settled(answer)))
-    .catch(() => publish({ ...UNRESOLVED, pending: false, reason: GS_PROBE_FAILED }));
+    .then((answer) => (seq === probeSeq ? publish(settled(answer)) : newest()))
+    .catch(() =>
+      seq === probeSeq
+        ? publish({ ...UNRESOLVED, pending: false, reason: GS_PROBE_FAILED })
+        : newest(),
+    );
   inFlight = probe;
   probe.finally(() => {
     if (inFlight === probe) inFlight = null;

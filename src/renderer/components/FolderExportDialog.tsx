@@ -96,6 +96,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     skippedDirs,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,
@@ -129,6 +130,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
   const { logPath, logError, write: writeSweepLog, reset: resetLog } = useSweepLog();
 
   const cancelledRef = useRef(false);
+  const claimingRef = useRef(false);
   const phaseRef = useRef<Phase>('setup');
   phaseRef.current = phase;
 
@@ -187,6 +189,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     source !== null &&
     dest !== null &&
     !conflict &&
+    !checking &&
     entries !== null &&
     entries.length > 0;
 
@@ -194,7 +197,16 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     if (!entries || entries.length === 0 || source === null || dest === null) return;
     // Two windows sweeping into one output tree overwrite each other file by
     // file, and neither the commit gate nor the per-file lock spans windows.
-    const root = await claimOutputRoots([dest]);
+    // A second click while the claim is in flight would re-enter `run` and
+    // show a false "folder busy" error over the healthy first run.
+    if (claimingRef.current) return;
+    claimingRef.current = true;
+    let root: Awaited<ReturnType<typeof claimOutputRoots>>;
+    try {
+      root = await claimOutputRoots([dest]);
+    } finally {
+      claimingRef.current = false;
+    }
     if (!root.granted) {
       setError(root.message);
       return;

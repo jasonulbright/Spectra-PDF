@@ -111,6 +111,7 @@ export function FolderFormPrepDialog({
     skippedDirs,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,
@@ -160,7 +161,7 @@ export function FolderFormPrepDialog({
     phase === 'setup' &&
     !scanning &&
     source !== null &&
-    (inPlace || (dest !== null && !conflict)) &&
+    (inPlace || (dest !== null && !conflict && !checking)) &&
     entries !== null &&
     entries.length > 0;
 

@@ -76,6 +76,7 @@ export function FolderPreflightDialog({
 
   const gs = useGsCapability();
   const [phase, setPhase] = useState<Phase>('setup');
+  const claimingRef = useRef(false);
   const {
     source,
     dest,
@@ -84,6 +85,7 @@ export function FolderPreflightDialog({
     entries,
     scanning,
     conflict,
+    checking,
     identityConflict,
     error,
     setError,
@@ -166,6 +168,7 @@ export function FolderPreflightDialog({
     phase === 'setup' &&
     !scanning &&
     !conflict &&
+    !checking &&
     problem === null &&
     entries !== null &&
     entries.length > 0;
@@ -217,15 +220,24 @@ export function FolderPreflightDialog({
     // writes only its reports into the destination; only a fix moves
     // processed originals out of the source tree.
     const moving = settings.mode === 'fix' && !settings.inPlace && settings.movedRoot !== '';
-    const root = await claimOutputRoots(
-      writtenRoots({
-        source: settings.source,
-        dest: settings.dest,
-        inPlace: settings.inPlace,
-        filing: moving ? [settings.movedRoot] : [],
-        changesSource: moving,
-      }),
-    );
+    // A second click while the claim is in flight would re-enter `run` and
+    // show a false "folder busy" error over the healthy first run.
+    if (claimingRef.current) return;
+    claimingRef.current = true;
+    let root: Awaited<ReturnType<typeof claimOutputRoots>>;
+    try {
+      root = await claimOutputRoots(
+        writtenRoots({
+          source: settings.source,
+          dest: settings.dest,
+          inPlace: settings.inPlace,
+          filing: moving ? [settings.movedRoot] : [],
+          changesSource: moving,
+        }),
+      );
+    } finally {
+      claimingRef.current = false;
+    }
     if (!root.granted) {
       setError(root.message);
       return;

@@ -136,6 +136,8 @@ export function FlattenerPreviewProvider({
   useEffect(() => {
     if (!open || !sourcePath) {
       setReport(null);
+      // The run this replaces is cancelled and will not clear it.
+      setBusy(false);
       return;
     }
     let cancelled = false;

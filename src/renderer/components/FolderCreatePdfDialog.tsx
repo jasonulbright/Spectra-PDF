@@ -86,6 +86,7 @@ export function FolderCreatePdfDialog({
   const { callRaw } = useEngine();
 
   const [phase, setPhase] = useState<Phase>('setup');
+  const claimingRef = useRef(false);
   const [source, setSource] = useState<string | null>(null);
   const [dest, setDest] = useState<string | null>(null);
   const [listing, setListing] = useState<FolderListing | null>(null);
@@ -222,7 +223,16 @@ export function FolderCreatePdfDialog({
     if (!listing || listing.groups.length === 0 || source === null || dest === null) return;
     // Two windows sweeping into one output tree overwrite each other file by
     // file, and neither the commit gate nor the per-file lock spans windows.
-    const root = await claimOutputRoots([dest]);
+    // A second click while the claim is in flight would re-enter `run` and
+    // show a false "folder busy" error over the healthy first run.
+    if (claimingRef.current) return;
+    claimingRef.current = true;
+    let root: Awaited<ReturnType<typeof claimOutputRoots>>;
+    try {
+      root = await claimOutputRoots([dest]);
+    } finally {
+      claimingRef.current = false;
+    }
     if (!root.granted) {
       setError(root.message);
       return;

@@ -66,6 +66,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+describe('a slow earlier probe', () => {
+  it('does not overwrite the answer of a refresh that started after it', async () => {
+    let finishSlow: (v: typeof absent) => void = () => {};
+    probe.mockReturnValue(new Promise((resolve) => (finishSlow = resolve)));
+    reprobe.mockResolvedValue(ready);
+
+    const slow = ensureGsCapability();
+    await refreshGsCapability();
+    expect(gsCapability().available).toBe(true);
+
+    finishSlow(absent);
+    await slow;
+    expect(gsCapability().available).toBe(true);
+    expect(gsCapability().path).toBe(ready.path);
+  });
+});
+
 describe('the session answer', () => {
   it('starts UNRESOLVED, and unresolved is not a refusal', () => {
     // A surface disabled on a pending answer flashes disabled on every
