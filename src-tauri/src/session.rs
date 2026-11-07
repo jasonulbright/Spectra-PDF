@@ -1158,7 +1158,11 @@ fn schedule_write(app: &AppHandle) {
         if state.revision.load(Ordering::SeqCst) != seen {
             continue;
         }
-        let _ = write_now(&app, None);
+        // A panic in the snapshot or the sink must not leave `scheduled` set:
+        // every later `schedule_write` would return early and window geometry
+        // and tab order would stop saving for the rest of the run. A failed
+        // write is already ignored here, so a panicked one is treated the same.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| write_now(&app, None)));
         state.scheduled.store(false, Ordering::SeqCst);
         if state.revision.load(Ordering::SeqCst) == seen {
             return;

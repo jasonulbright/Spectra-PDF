@@ -3296,6 +3296,54 @@ mod tests {
     }
 
     #[test]
+    fn the_reaper_keeps_a_session_that_is_running_and_drops_an_idle_one() {
+        // A scan can outlast the idle timeout. Reaping its entry would leave
+        // cancel with nothing to cancel and let the next ensure open a second
+        // session on the same device.
+        let entry = |active: usize| Entry {
+            session: Arc::new(FakeSession {
+                runs: Mutex::new(Vec::new()),
+                cancelled: Arc::new(AtomicBool::new(false)),
+            }),
+            last_used: Instant::now(),
+            active,
+        };
+        let mut open = std::collections::HashMap::new();
+        open.insert("wia:running".to_string(), entry(1));
+        open.insert("wia:idle".to_string(), entry(0));
+        // A zero timeout makes every entry "idle" by the clock.
+        crate::scan_model::reap(&mut open, Duration::ZERO);
+        assert!(open.contains_key("wia:running"), "a running session is kept");
+        assert!(!open.contains_key("wia:idle"), "an idle session is dropped");
+    }
+
+    #[test]
+    fn a_finished_run_makes_its_session_reapable_again() {
+        let sessions = ScannerSessions::new();
+        sessions.sessions.lock().expect("test lock").insert(
+            "wia:fake".to_string(),
+            Entry {
+                session: Arc::new(FakeSession {
+                    runs: Mutex::new(Vec::new()),
+                    cancelled: Arc::new(AtomicBool::new(false)),
+                }),
+                last_used: Instant::now(),
+                active: 0,
+            },
+        );
+        sessions
+            .acquire(
+                "wia:fake",
+                ScanSettings::default(),
+                PathBuf::from("run"),
+                Box::new(|_| {}),
+            )
+            .expect("the fake session answers");
+        let open = sessions.sessions.lock().expect("test lock");
+        assert_eq!(open["wia:fake"].active, 0, "the run count returns to zero");
+    }
+
+    #[test]
     fn the_store_routes_both_spellings_of_one_id_to_the_same_session() {
         // Slice A's whole point: the store holds sessions by namespaced id,
         // and a caller holding either spelling reaches the one session — no
@@ -3311,6 +3359,7 @@ mod tests {
             Entry {
                 session: fake.clone(),
                 last_used: Instant::now(),
+                active: 0,
             },
         );
 
