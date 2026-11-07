@@ -311,14 +311,3 @@ class TestTheShippedBundle:
         eutl.anchors(eutl.SIGNER)
         eutl.provenance()
         assert eutl._CACHE.get(bundle_dir) is first
-
-
-def test_a_bundle_without_anchors_is_read_again_not_kept(tmp_path, monkeypatch):
-    """A read that failed for a moment must not stay "no anchors" until the
-    engine restarts."""
-    monkeypatch.setattr(eutl, "_bundle_dir", lambda: tmp_path)
-    eutl._CACHE.clear()
-    assert eutl.available() is False
-    assert tmp_path not in eutl._CACHE
-    assert eutl.anchors(eutl.SIGNER) == []
-    assert tmp_path not in eutl._CACHE

@@ -3725,7 +3725,7 @@ class TestPrintPdf:
         monkeypatch.setattr(
             printer_mod.gs_capability, "require", lambda path: type("C", (), {"path": path})()
         )
-        with pytest.raises(RuntimeError, match=r"1 of 3 copies"):
+        with pytest.raises(RuntimeError, match=r"1 of 3 print jobs"):
             printer_mod._run_jobs(["GS", "-q", "doc.pdf"], 3)
         assert len(started) == 1
 
