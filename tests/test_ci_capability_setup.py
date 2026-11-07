@@ -4655,3 +4655,4 @@ def test_one_release_publisher_runs_per_tag(workflow, tag_expression):
     block = text.split("\nconcurrency:\n", 1)[1].split("\n\n", 1)[0]
     assert "group: release-${{ " + tag_expression + " }}" in block
     assert "cancel-in-progress: false" in block
+    assert "queue: max" in block  # a waiting redo is kept, not replaced by a later run

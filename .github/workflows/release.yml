@@ -23,6 +23,7 @@ permissions:
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
+  queue: max
 
 env:
   # Non-secret signing coordinates. The account and profile name what signs;

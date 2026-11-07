@@ -75,6 +75,7 @@ permissions:
 concurrency:
   group: release-${{ inputs.tag }}
   cancel-in-progress: false
+  queue: max
 
 env:
   # Non-secret signing coordinates, kept in step with release.yml.
