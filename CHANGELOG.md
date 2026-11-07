@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.1107.167
+
+**A scan over 90 seconds keeps its session**
+
+### Fixed
+- Keep a scanner session alive while a scan runs for more than 90 seconds.
+- Stop guided-action and preflight batches when you cancel.
+- Ignore a late preview, disk search, or Ghostscript check that a newer one replaced.
+- Block a second click on watched-folder buttons while the first one runs.
+- Hold Run in folder dialogs until the check of the two folders finishes.
+- Remove the half-made folder when a print preview fails.
+- Write a printed layout in one step, so a failed write leaves no partial file.
+- Clear the web capture and session-save flags after an internal error.
+
 ## 2026.1107.166
 
 **Late events no longer overwrite newer state**
