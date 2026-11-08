@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.1108.168
+
+**A failed trust list read no longer lasts until restart**
+
+### Fixed
+- Read the bundled trust lists again after a failed read. They no longer stay empty until restart.
+- Use none of the bundled trust anchors when a read of one of their files fails.
+
+### Changed
+- Refuse a release tag that already has a published release before the build starts.
+
 ## 2026.1107.167
 
 **A scan over 90 seconds keeps its session**
