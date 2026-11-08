@@ -562,6 +562,29 @@ def test_the_rust_toolchain_precedes_the_draft_verifier(workflow: str, job: str)
     assert toolchain and max(toolchain) < names.index(RELEASE_VERIFY_DRAFT_STEP), (workflow, job)
 
 
+#: The first job of each publisher, where a published tag is refused before
+#: any build starts.
+FIRST_JOBS = (("release.yml", "verify"), ("release-redo.yml", "regime"))
+REFUSE_PUBLISHED_STEP = "Refuse a tag that already has a published release"
+
+
+@pytest.mark.parametrize("workflow,job", FIRST_JOBS)
+def test_a_tag_with_a_published_release_is_refused_before_any_build(workflow: str, job: str) -> None:
+    steps = _job_steps(workflow, job)
+    names = [name for name, _ in steps]
+    assert REFUSE_PUBLISHED_STEP in names, (workflow, job)
+    text = dict(steps)[REFUSE_PUBLISHED_STEP]
+    # The tags endpoint lists published releases only, so a draft is a 404 and
+    # passes. Any other failure to read it refuses too: an unreadable list is
+    # never taken as "no release".
+    assert "releases/tags/$TAG" in text
+    assert "HTTP 404" in text
+    assert text.count("exit 1") == 2
+    # The refusal sits in the first job, so every later job needs it.
+    release_text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+    assert release_text.index(REFUSE_PUBLISHED_STEP) < release_text.index("tauri-apps/tauri-action@v1")
+
+
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
 def test_the_release_is_a_draft_until_the_publish_step(workflow: str, job: str) -> None:
     steps = dict(_job_steps(workflow, job))
