@@ -178,15 +178,21 @@ class _TrustSources:
         self.system_requested = bool(system_trust)
         self.system_available = os_trust.available() if system_trust else False
         self.system_anchor_count = 0
+        # One snapshot of each bundle for this whole verification. The anchors,
+        # the cutoffs and the provenance below all come from it, so a read that
+        # failed and is retried by the next verification can never hand this
+        # one a full anchor list with an empty cutoff map.
+        eutl_bundle = eutl.snapshot() if eutl_trust else None
+        msctl_bundle = msctl.snapshot() if msctl_trust else None
         self.eutl_requested = bool(eutl_trust)
-        self.eutl_available = eutl.available() if eutl_trust else False
-        self.eutl_provenance = eutl.provenance() if eutl_trust else {}
+        self.eutl_available = eutl.available(eutl_bundle) if eutl_trust else False
+        self.eutl_provenance = eutl.provenance(eutl_bundle) if eutl_trust else {}
         self.msctl_requested = bool(msctl_trust)
-        self.msctl_available = msctl.available() if msctl_trust else False
-        self.msctl_provenance = msctl.provenance() if msctl_trust else {}
+        self.msctl_available = msctl.available(msctl_bundle) if msctl_trust else False
+        self.msctl_provenance = msctl.provenance(msctl_bundle) if msctl_trust else {}
         # Read only under the opt-in, like every other read of this bundle: with
         # the source off there are no constraints because there are no anchors.
-        self.msctl_constraints: dict = msctl.constraints() if msctl_trust else {}
+        self.msctl_constraints: dict = msctl.constraints(msctl_bundle) if msctl_trust else {}
         if not system_trust and not eutl_trust and not msctl_trust:
             ctx = _trust_context(trust_roots) if trust_roots else None
             self.signer_context = ctx
@@ -207,8 +213,8 @@ class _TrustSources:
             signer_anchors += store_signers
             timestamp_anchors += store_timestampers
         if eutl_trust:
-            list_signers = eutl.anchors(eutl.SIGNER)
-            list_timestampers = eutl.anchors(eutl.TIMESTAMP)
+            list_signers = eutl.anchors(eutl.SIGNER, eutl_bundle)
+            list_timestampers = eutl.anchors(eutl.TIMESTAMP, eutl_bundle)
             self.eutl_prints = _fingerprints(list_signers) | _fingerprints(list_timestampers)
             signer_anchors += list_signers
             timestamp_anchors += list_timestampers
@@ -217,8 +223,8 @@ class _TrustSources:
             # subject under the chain kinds its list grants, so a subject
             # granted only timestamping is absent from the signer anchors and
             # cannot terminate a signer chain.
-            program_signers = msctl.anchors(msctl.SIGNER)
-            program_timestampers = msctl.anchors(msctl.TIMESTAMP)
+            program_signers = msctl.anchors(msctl.SIGNER, msctl_bundle)
+            program_timestampers = msctl.anchors(msctl.TIMESTAMP, msctl_bundle)
             self.msctl_prints = (
                 _fingerprints(program_signers) | _fingerprints(program_timestampers)
             )
