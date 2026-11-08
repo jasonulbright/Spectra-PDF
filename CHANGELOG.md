@@ -9,7 +9,7 @@
 - Stop guided-action and preflight batches when you cancel.
 - Ignore a late preview, disk search, or Ghostscript check that a newer one replaced.
 - Block a second click on watched-folder buttons while the first one runs.
-- Hold Run in folder dialogs until the check of the two folders finishes.
+- Hold Run in the export, preflight, redact, and form-prep dialogs until the folder check ends.
 - Remove the half-made folder when a print preview fails.
 - Write a printed layout in one step, so a failed write leaves no partial file.
 - Clear the web capture and session-save flags after an internal error.
