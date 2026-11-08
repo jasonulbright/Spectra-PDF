@@ -580,9 +580,18 @@ def test_a_tag_with_a_published_release_is_refused_before_any_build(workflow: st
     assert "releases/tags/$TAG" in text
     assert "HTTP 404" in text
     assert text.count("exit 1") == 2
-    # The refusal sits in the first job, so every later job needs it.
+    # The refusal sits in the first job, and the Linux build waits for that job
+    # directly, so a refused tag builds nothing. The publisher job needs the
+    # Linux jobs, and so needs the first job through them.
     release_text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
     assert release_text.index(REFUSE_PUBLISHED_STEP) < release_text.index("tauri-apps/tauri-action@v1")
+    lines = release_text.splitlines()
+    linux_at = lines.index("  linux:")
+    linux_head = "\n".join(lines[linux_at + 1: linux_at + 8])
+    assert f"    needs: {job}" in linux_head, (workflow, "the Linux build must need " + job)
+    release_at = lines.index("  release:")
+    release_head = "\n".join(lines[release_at + 1: release_at + 8])
+    assert "linux," in release_head or "linux]" in release_head, workflow
 
 
 @pytest.mark.parametrize("workflow,job", PUBLISHER_JOBS)
