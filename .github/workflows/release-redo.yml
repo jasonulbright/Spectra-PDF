@@ -114,6 +114,29 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
 
+      # tauri-action with releaseDraft never writes into a published release,
+      # but it would build for hours and then fail or open a second draft for
+      # the same tag. A published release is refused here, in seconds. The
+      # tags endpoint returns published releases only; a draft is a 404.
+      - name: Refuse a tag that already has a published release
+        shell: bash
+        run: |
+          set +e
+          out="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>&1)"
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::$TAG already has a published release; this workflow never rewrites one"
+            exit 1
+          fi
+          case "$out" in
+            *"HTTP 404"*) echo "no published release for $TAG" ;;
+            *) echo "::error::could not read the release list: $out"; exit 1 ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+
       - name: Release platforms from the tag's tree
         id: platforms
         run: python3 verifier/scripts/release_platforms.py --rev HEAD --github-output
