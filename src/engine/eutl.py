@@ -125,7 +125,7 @@ def snapshot() -> _Bundle:
 
 def available(bundle: _Bundle | None = None) -> bool:
     """Whether the shipped bundle was readable and holds any anchor at all."""
-    bundle = bundle or _bundle()
+    bundle = _bundle() if bundle is None else bundle
     if bundle.transient:
         return False
     certificates = bundle.certificates
@@ -135,7 +135,7 @@ def available(bundle: _Bundle | None = None) -> bool:
 def anchors(purpose: str, bundle: _Bundle | None = None) -> list:
     """The bundle's anchors for one chain kind, as the objects
     ``ValidationContext(trust_roots=…)`` takes."""
-    bundle = bundle or _bundle()
+    bundle = _bundle() if bundle is None else bundle
     if bundle.transient:
         # Fail closed. A bundle some of whose files could not be read has
         # anchors without everything that goes with them (for the root program,
@@ -155,7 +155,7 @@ def provenance(bundle: _Bundle | None = None) -> dict:
     unreadable, so a caller never has to distinguish "no manifest" from "no
     answer".
     """
-    manifest = (bundle or _bundle()).provenance or {}
+    manifest = (_bundle() if bundle is None else bundle).provenance or {}
     lists = manifest.get("lists") or {}
     lotl = manifest.get("lotl") or {}
     return {

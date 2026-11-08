@@ -199,7 +199,7 @@ def snapshot() -> _Bundle:
 
 def available(bundle: _Bundle | None = None) -> bool:
     """Whether the shipped bundle was readable and holds any anchor at all."""
-    bundle = bundle or _bundle()
+    bundle = _bundle() if bundle is None else bundle
     if bundle.transient:
         return False
     certificates = bundle.certificates
@@ -213,7 +213,7 @@ def anchors(purpose: str, bundle: _Bundle | None = None) -> list:
     An unknown purpose yields nothing rather than everything: a caller that
     misnames a chain kind must lose the anchors, never gain the other kind's.
     """
-    bundle = bundle or _bundle()
+    bundle = _bundle() if bundle is None else bundle
     if bundle.transient:
         # Fail closed. A bundle some of whose files could not be read has
         # anchors without everything that goes with them (for the root program,
@@ -231,7 +231,7 @@ def constraint_for(anchor_sha256: str, bundle: _Bundle | None = None):
     decides what a chain's purpose is; this module only says what the list
     states.
     """
-    return (bundle or _bundle()).constraints.get((anchor_sha256 or "").lower())
+    return (_bundle() if bundle is None else bundle).constraints.get((anchor_sha256 or "").lower())
 
 
 def constraints(bundle: _Bundle | None = None) -> dict:
@@ -243,7 +243,7 @@ def constraints(bundle: _Bundle | None = None) -> dict:
     checks one chain's anchor against it many times and an empty map is also the
     caller's cheapest "nothing to enforce".
     """
-    return dict((bundle or _bundle()).constraints)
+    return dict((_bundle() if bundle is None else bundle).constraints)
 
 
 def provenance(bundle: _Bundle | None = None) -> dict:
@@ -256,7 +256,7 @@ def provenance(bundle: _Bundle | None = None) -> dict:
     unreadable, so a caller never has to distinguish "no manifest" from "no
     answer".
     """
-    manifest = (bundle or _bundle()).provenance or {}
+    manifest = (_bundle() if bundle is None else bundle).provenance or {}
     listing = manifest.get("list") or {}
     return {
         "fetched": manifest.get("fetched"),
