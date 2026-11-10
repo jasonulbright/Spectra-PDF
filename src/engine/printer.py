@@ -590,6 +590,13 @@ def print_pdf(
         doc_name,
     )
     media: tuple[float, float] | None = None
+    if not imposition and sheet_width is not None and sheet_height is not None:
+        # A single-page job still opens the device at the real paper size, so a
+        # /Paper that differs from the default buffer cannot clip the page. The
+        # size is the portrait paper, however the caller ordered the two sides.
+        side_a = _num("Sheet width", sheet_width, MIN_SHEET_PT, MAX_SHEET_PT)
+        side_b = _num("Sheet height", sheet_height, MIN_SHEET_PT, MAX_SHEET_PT)
+        media = (min(side_a, side_b), max(side_a, side_b))
 
     def _spool(job_file: str, job_pages: str, job_fit: str, jobs: int) -> None:
         if _SPOOL_THROUGH_CUPS:

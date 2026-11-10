@@ -4485,6 +4485,15 @@ class TestPrintPipeline:
             assert int(out.pages[0].obj["/Rotate"]) == 90
         assert "/Orientation 1" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
 
+    def test_single_page_job_opens_the_device_at_the_paper_size(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300])
+        r = print_pdf(file=src, printer="P", gs_path="GS", orientation="landscape",
+                      paper=9, sheet_width=842, sheet_height=595)
+        assert r["prepass"] == []
+        argv = cap["argv"][0]
+        assert "-dDEVICEWIDTHPOINTS=595" in argv and "-dDEVICEHEIGHTPOINTS=842" in argv
+
     def test_single_landscape_fit_needs_no_turn(self, tmp_dir, monkeypatch):
         cap = self._capture(monkeypatch, tmp_dir)
         src = self._sized(tmp_dir, [300])

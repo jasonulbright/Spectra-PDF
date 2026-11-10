@@ -228,9 +228,9 @@ export function buildPrintParams(opts: PrintOptions): PrintParams {
     p.poster_cut_marks = opts.posterCutMarks;
     p.poster_labels = opts.posterLabels;
   }
-  if (opts.layout !== 'single' || opts.fit === 'scale') {
-    if (opts.sheetWidth !== null) p.sheet_width = opts.sheetWidth;
-    if (opts.sheetHeight !== null) p.sheet_height = opts.sheetHeight;
-  }
+  // Every layout sends the paper size when it is known: the Windows device
+  // opens its page buffer at that size, so a single page needs it too.
+  if (opts.sheetWidth !== null) p.sheet_width = opts.sheetWidth;
+  if (opts.sheetHeight !== null) p.sheet_height = opts.sheetHeight;
   return p;
 }

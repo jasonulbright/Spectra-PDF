@@ -307,8 +307,8 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
         scalePercent: Number(scaleText.trim()),
         posterScale: Number(posterScaleText.trim()),
         posterOverlap: Number(overlapText.trim()),
-        sheetWidth: needsSheet ? (sheet?.w ?? null) : null,
-        sheetHeight: needsSheet ? (sheet?.h ?? null) : null,
+        sheetWidth: sheet?.w ?? null,
+        sheetHeight: sheet?.h ?? null,
         // Booklet is always duplexed onto landscape sheets; short-edge
         // flipping is what makes consecutive sides face correctly on a
         // portrait-fed duplexer. Overridable via the duplex control.
