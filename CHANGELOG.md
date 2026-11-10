@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.1110.169
+
+**Pages per sheet and booklets print upright on landscape sheets**
+
+### Fixed
+- Print landscape sheets (pages per sheet, booklets) in full, not rotated and cut off.
+- Send the short or long edge you pick the same way on every sheet.
+- Open the printer at the paper size for single-page jobs too.
+
 ## 2026.1108.168
 
 **A failed trust list read no longer lasts until restart**
