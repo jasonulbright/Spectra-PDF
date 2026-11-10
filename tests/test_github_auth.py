@@ -743,7 +743,7 @@ UNEXPORT_BOUNDARIES = [
     ("ci-parity-linux.sh", "github_token_unexport", "cargo check"),
     ("build-appimage.sh", "github_token_unexport", "pacman -Syu"),
     ("build-appimage.sh", "github_token_unexport", "appimage-extract"),
-    ("appimage-catalog-gate.sh", "github_token_unexport", "apt-get install"),
+    ("appimage-catalog-gate.sh", "github_token_unexport", "apt_run update"),
     ("cargo-audit.sh", "github_token_unexport", "exec cargo audit"),
     ("cargo-audit.sh", "unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0",
      "exec cargo audit"),
