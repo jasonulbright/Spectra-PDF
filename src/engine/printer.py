@@ -75,6 +75,7 @@ from .print_layout import (
     page_geometry,
     rasterize_pdf,
     render_preview,
+    rotate_pages,
     strip_annotations,
 )
 from .validate import validate_pdf
@@ -118,21 +119,25 @@ DUPLEX_SWITCHES: dict[str, list[str]] = {
     "short": ["-dDuplex=true", "-dTumble=true"],
 }
 
-def windows_duplex(duplex: str, orientation: str) -> str:
-    """The duplex mode to hand the Windows driver so the user's edge is the sheet's edge.
-
-    The dialog names the edge of the SHEET: "long" flips on the long edge of the
-    paper, "short" on the short edge. dmDuplex is not read that way. DMDUP_VERTICAL
-    (Tumble=false) binds along the vertical edge of the PAGE as the driver lays it
-    out, and DMDUP_HORIZONTAL (Tumble=true) along the horizontal edge. On a
-    landscape page the vertical edge is the short edge of the sheet, so the two
-    modes swap: "short" must send Tumble=false. Reported in issue 67:
-    a 1x2 grid on landscape paper flipped on the long edge for both
-    choices. A portrait or unset orientation is unchanged.
-    """
-    if orientation == "landscape":
-        return {"long": "short", "short": "long"}.get(duplex, duplex)
-    return duplex
+# The Windows spool prints every sheet in the PAPER's own frame: the driver is
+# always asked for a portrait sheet, and a landscape sheet is turned a quarter
+# turn in the prepared PDF instead (print_layout.rotate_pages). Two defects of
+# asking the driver for landscape forced this (both reproduced, issue 67):
+#
+# - mswinpr2 opens its page buffer at the default portrait size BEFORE the
+#   /UserSettings orientation arrives (win_pr2_open runs before the setpagedevice
+#   prolog is applied), then applies the new orientation with ResetDC and never
+#   resizes the buffer. A landscape sheet drawn into the portrait buffer prints
+#   rotated and cut off. Handing gs the sheet size on the command line is what
+#   its own getdc() matches the paper and orientation against; a portrait sheet
+#   needs no orientation change at all.
+# - dmDuplex is only unambiguous on a portrait page. DMDUP_HORIZONTAL is
+#   "short-edge binding, the long edge of the page is horizontal" (Microsoft's
+#   DEVMODE reference), which names the same edge of the paper whether the
+#   driver reads it against the page or the paper only while the page is
+#   portrait. Chromium sends DMDUP_HORIZONTAL for a short edge on every sheet,
+#   unswapped (printing/printing_context_win.cc). So "short" is Tumble=true and
+#   "long" is Tumble=false here, always, and the sheet is turned instead.
 
 
 # UserSettings integer values (DEVMODE constants).
@@ -270,6 +275,11 @@ def build_setpagedevice_ps(
     return "<< /UserSettings << " + " ".join(parts) + " >> >> setpagedevice"
 
 
+def _points(value: float) -> str:
+    """A point size as gs reads it: no trailing zeros, no exponent."""
+    return f"{float(value):.2f}".rstrip("0").rstrip(".")
+
+
 def build_gs_args(
     file: str,
     printer: str,
@@ -278,12 +288,18 @@ def build_gs_args(
     gs_path: str,
     duplex: str = "printer",
     setpagedevice_ps: str | None = None,
+    media: tuple[float, float] | None = None,
 ) -> list[str]:
     """The exact Ghostscript argv for one print job (pure; unit-tested).
 
     `pages` must already be validated/normalized by parse_page_spec, and
     `fit` must be a FIT_SWITCHES key (the scale/layout modes bake their
     geometry into the prepared file and print it "fit" or "actual").
+
+    `media` is the sheet's (width, height) in points as the driver is asked to
+    feed it. mswinpr2 opens its page buffer before any /UserSettings arrives,
+    and matches the printer's paper list against the size the device holds at
+    that moment, so the size must ride the command line.
     """
     args = [
         gs_path,
@@ -298,6 +314,11 @@ def build_gs_args(
         f"-sOutputFile=%printer%{printer}",
         # Print what the viewer shows: the CropBox, not the MediaBox.
         "-dUseCropBox",
+        *(
+            [f"-dDEVICEWIDTHPOINTS={_points(media[0])}", f"-dDEVICEHEIGHTPOINTS={_points(media[1])}"]
+            if media
+            else []
+        ),
         *FIT_SWITCHES[fit],
         *DUPLEX_SWITCHES[duplex],
     ]
@@ -545,12 +566,30 @@ def print_pdf(
         if rotate_prepass:
             plain = False
 
+    # Windows prints in the paper's frame (see the note by DUPLEX_SWITCHES): a
+    # sheet the user wants landscape is turned a quarter turn in the prepared
+    # file, and the driver is asked for portrait. A single-page layout under
+    # "fit" needs no turn: Ghostscript's FitPage already lays a page onto the
+    # sheet either way up, and on portrait media that is the same print.
+    # Actual size draws the page as it is, so there the pages are turned.
+    # CUPS takes the orientation as a job attribute and is unchanged.
+    turn_to_paper = (
+        not _SPOOL_THROUGH_CUPS
+        and resolved_orient == "landscape"
+        and (imposition or fit == "actual")
+    )
+    if turn_to_paper and not imposition:
+        plain = False
+    driver_orient = (
+        "portrait" if resolved_orient in ("portrait", "landscape") else resolved_orient
+    )
     us_ps = None if _SPOOL_THROUGH_CUPS else build_setpagedevice_ps(
         paper,
-        _ORIENT_VALUES.get(resolved_orient),
+        _ORIENT_VALUES.get(driver_orient),
         _COLOR_VALUES.get(color),
         doc_name,
     )
+    media: tuple[float, float] | None = None
 
     def _spool(job_file: str, job_pages: str, job_fit: str, jobs: int) -> None:
         if _SPOOL_THROUGH_CUPS:
@@ -564,7 +603,7 @@ def print_pdf(
             _run_jobs(
                 build_gs_args(
                     job_file, printer, job_pages, job_fit, gs_path,
-                    windows_duplex(duplex, resolved_orient), us_ps,
+                    duplex, us_ps, media,
                 ),
                 jobs,
             )
@@ -723,6 +762,7 @@ def print_pdf(
                     )
                     stages.append(f"scale@{scale_percent:g}%")
                 current = imposed
+                media = (sh, sw) if turn_to_paper else (sw, sh)
             elif order != list(range(len(order) if as_image else page_count)) or rotate_prepass:
                 # Pure reorder / rotate normalization (no imposition).
                 seq = str(tdp / "sequence.pdf")
@@ -747,6 +787,12 @@ def print_pdf(
                 # Renders while the TemporaryDirectory (and `current` in
                 # it) is still alive; the PNGs land in their own dir.
                 return _emit_preview(current, final_fit, spec, total)
+
+            if turn_to_paper:
+                turned = str(tdp / "paper-frame.pdf")
+                rotate_pages(current, turned, 90)
+                current = turned
+                stages.append("turn-to-paper")
 
             if uncollated_dup:
                 with open_pdf(current) as prepared:

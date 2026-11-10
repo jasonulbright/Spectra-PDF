@@ -28,7 +28,6 @@ from engine.printer import (
     build_setpagedevice_ps,
     parse_page_spec,
     print_pdf,
-    windows_duplex,
 )
 from engine.print_layout import (
     apply_subset,
@@ -4409,12 +4408,12 @@ class TestPrintPipeline:
                       color="gray")
         assert r["prepass"] == []
         argv = cap["argv"][0]
-        # Landscape swaps the edge: the driver reads dmDuplex against the
-        # landscape page, so "long" (the sheet's long edge) is Tumble=true.
-        assert "-dDuplex=true" in argv and "-dTumble=true" in argv
+        # The driver is always asked for a portrait sheet, so "long" is
+        # Tumble=false as on any sheet, and landscape rides the content.
+        assert "-dDuplex=true" in argv and "-dTumble=false" in argv
         ps = argv[argv.index("-c") + 1]
         assert ps == (
-            "<< /UserSettings << /Paper 9 /Orientation 2 /Color 1 "
+            "<< /UserSettings << /Paper 9 /Orientation 1 /Color 1 "
             "/DocumentName (brief.pdf) >> >> setpagedevice"
         )
         assert argv[-1] == src  # plain path prints the original file
@@ -4445,36 +4444,60 @@ class TestPrintPipeline:
         assert r["orientation"] == "landscape"
         with pikepdf.open(cap["files"][0]) as out:
             assert [float(v) for v in out.pages[0].mediabox] == [0, 0, 842, 595]
-        assert "/Orientation 2" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+        # Issue #67: Windows never asks the driver for landscape. The sheet is
+        # turned in the file and the device opens at the paper's own size.
+        argv = cap["argv"][0]
+        assert "/Orientation 1" in argv[argv.index("-c") + 1]
+        assert "-dDEVICEWIDTHPOINTS=595" in argv and "-dDEVICEHEIGHTPOINTS=842" in argv
+        assert r["prepass"][-1] == "turn-to-paper"
+        with pikepdf.open(cap["files"][0]) as out:
+            page = out.pages[0]
+            assert [float(v) for v in page.mediabox] == [0, 0, 842, 595]
+            assert int(page.obj["/Rotate"]) == 90
 
-    def test_windows_duplex_swaps_edges_only_on_landscape(self):
-        # Issue #67: dmDuplex is read against the page, so a landscape page
-        # needs the opposite switch for the same sheet edge.
-        assert windows_duplex("short", "landscape") == "long"
-        assert windows_duplex("long", "landscape") == "short"
-        for orient in ("portrait", "auto"):
-            assert windows_duplex("short", orient) == "short"
-            assert windows_duplex("long", orient) == "long"
-        for mode in ("printer", "simplex"):
-            assert windows_duplex(mode, "landscape") == mode
-
-    def test_nup_wide_grid_short_edge_sends_untumbled_duplex(self, tmp_dir, monkeypatch, gs_path):
+    def test_nup_wide_grid_short_edge_sends_tumble_on_the_turned_sheet(
+        self, tmp_dir, monkeypatch, gs_path
+    ):
         # Issue #67: 1x2 on landscape paper, flip on the SHORT edge. The sheet
-        # is landscape, so the short edge is the page's vertical edge:
-        # DMDUP_VERTICAL = Tumble=false.
+        # is fed portrait, where short-edge binding is DMDUP_HORIZONTAL
+        # (Tumble=true) under either reading of dmDuplex, as Chromium sends it.
         cap = self._capture(monkeypatch, tmp_dir)
         src = self._sized(tmp_dir, [300, 300, 300, 300])
         print_pdf(file=src, printer="P", gs_path=gs_path, duplex="short",
                   layout="nup", nup_rows=1, nup_cols=2,
                   sheet_width=595, sheet_height=842)
         argv = cap["argv"][0]
-        assert "-dDuplex=true" in argv and "-dTumble=false" in argv
-        assert "/Orientation 2" in argv[argv.index("-c") + 1]
+        assert "-dDuplex=true" in argv and "-dTumble=true" in argv
+        assert "/Orientation 1" in argv[argv.index("-c") + 1]
         cap["argv"].clear()
         print_pdf(file=src, printer="P", gs_path=gs_path, duplex="long",
                   layout="nup", nup_rows=1, nup_cols=2,
                   sheet_width=595, sheet_height=842)
-        assert "-dTumble=true" in cap["argv"][0]
+        assert "-dTumble=false" in cap["argv"][0]
+
+    def test_single_landscape_actual_size_turns_the_pages(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300])
+        r = print_pdf(file=src, printer="P", gs_path="GS", fit="actual",
+                      orientation="landscape")
+        assert r["prepass"] == ["turn-to-paper"]
+        with pikepdf.open(cap["files"][0]) as out:
+            assert int(out.pages[0].obj["/Rotate"]) == 90
+        assert "/Orientation 1" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+
+    def test_single_landscape_fit_needs_no_turn(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300])
+        r = print_pdf(file=src, printer="P", gs_path="GS", orientation="landscape")
+        assert r["prepass"] == []
+        assert "/Orientation 1" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+
+    def test_gs_argv_carries_the_media_size_before_the_device_opens(self):
+        args = build_gs_args("in.pdf", "P", "", "fit", "gs", media=(595.28, 841.89))
+        assert "-dDEVICEWIDTHPOINTS=595.28" in args
+        assert "-dDEVICEHEIGHTPOINTS=841.89" in args
+        assert args.index("-dDEVICEWIDTHPOINTS=595.28") < args.index("-dFIXEDMEDIA")
+        assert not any(a.startswith("-dDEVICEWIDTH") for a in build_gs_args("in.pdf", "P", "", "fit", "gs"))
 
     def test_nup_portrait_sheet_keeps_driver_edge(self, tmp_dir, monkeypatch, gs_path):
         cap = self._capture(monkeypatch, tmp_dir)
@@ -4502,7 +4525,8 @@ class TestPrintPipeline:
         with pikepdf.open(cap["files"][0]) as out:
             assert len(out.pages) == 2
             assert [float(v) for v in out.pages[0].mediabox] == [0, 0, 792, 612]
-        assert "/Orientation 2" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+        assert "/Orientation 1" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+        assert "-dDEVICEWIDTHPOINTS=612" in cap["argv"][0]
 
     def test_booklet_front_subset(self, tmp_dir, monkeypatch, gs_path):
         cap = self._capture(monkeypatch, tmp_dir)
