@@ -768,7 +768,11 @@ def test_engine_start_removes_stale_gs_argfile_folders(monkeypatch, tmp_dir):
     assert not os.path.exists(stale)
     assert os.path.exists(legacy_active) and os.path.exists(fresh)
     main = open(os.path.join(os.path.dirname(credentials.__file__), "__main__.py"), encoding="utf-8").read()
-    assert "    remove_stale_gs_argfiles()\n    server = JsonRpcServer()" in main
+    sweep_body = main.split("def _sweep_stale_temp() -> None:", 1)[1].split("\ndef main()", 1)[0]
+    assert "    remove_stale_gs_argfiles()" in sweep_body
+    start = main.split("def main() -> None:", 1)[1]
+    assert "target=_sweep_stale_temp" in start
+    assert start.index("sweep.start()") < start.index("server = JsonRpcServer()")
 
 
 def test_engine_start_keeps_an_old_argfile_folder_owned_by_a_live_engine(monkeypatch, tmp_dir):
