@@ -336,6 +336,23 @@ def build_sequence(
         save_pdf(pdf, dst)
 
 
+def rotate_pages(src: str, dst: str, degrees: int = 90) -> None:
+    """Write ``dst`` = ``src`` with every page turned ``degrees`` clockwise.
+
+    Used to present a landscape sheet in the PAPER's own (portrait) frame. The
+    Windows spool never asks the driver for a landscape sheet (see
+    ``printer.py``): the page is turned here instead, so the page the driver
+    lays out is the sheet it feeds. Pages are distinct dicts after sequencing,
+    so the turn does not alias between occurrences.
+    """
+    if degrees % 90 != 0:
+        raise ValueError(f"Rotation must be a multiple of 90 degrees, got {degrees}")
+    with open_pdf(src) as pdf:
+        for page in pdf.pages:
+            page.obj["/Rotate"] = (_page_rotate(page) + degrees) % 360
+        save_pdf(pdf, dst)
+
+
 def _xobject_for(dst_pdf, src_pdf, index: int, cache: dict):
     """Form XObject for source page ``index``, copied into ``dst_pdf``.
 
