@@ -10,10 +10,15 @@ paper size, orientation, color, comments modes, print-as-image, and the
 layout modes (multiple-per-sheet, booklet, poster, custom scale). Two
 mechanism families implement it:
 
-- DRIVER (DEVMODE) options ride the job's Ghostscript switches. Duplex is
-  the standard page-device pair (-dDuplex/-dTumble -> dmDuplex; documented
-  for mswinpr2). Paper / orientation / color / document name go through the
-  device's /UserSettings dictionary via a setpagedevice prolog — the old
+- DRIVER (DEVMODE) options ride a setpagedevice prolog. Duplex is the
+  standard page-device pair (/Duplex and /Tumble -> dmDuplex; documented for
+  mswinpr2). It must NOT ride the command line: mswinpr2 ignores a
+  -dTumble=true switch, so every short-edge job went out as DMDUP_VERTICAL
+  (long edge) while setpagedevice /Tumble true sent DMDUP_HORIZONTAL (issue 67,
+  reproduced against the Brother class driver: PCL &l1S for both edges from the
+  switches, &l2S for short from setpagedevice). Paper / orientation / color /
+  document name go through the
+  device's /UserSettings dictionary via the same prolog — the old
   ``finddevice putdeviceprops`` incantation is REMOVED in gs 10.x
   (probe-verified); setpagedevice forwards because mswinpr2 exports
   /UserSettings. The key->DEVMODE mapping (Paper->dmPaperSize,
@@ -108,15 +113,16 @@ FIT_SWITCHES: dict[str, list[str]] = {
     "actual": ["-dFIXEDMEDIA"],
 }
 
-# Duplex -> standard gs page-device params (mswinpr2: dev->Duplex/tumble ->
-# dmDuplex, DMDUP_VERTICAL = flip on the long edge). "printer" omits the
-# pair entirely so the driver's default (or the user's printer preferences)
-# stays in charge.
-DUPLEX_SWITCHES: dict[str, list[str]] = {
-    "printer": [],
-    "simplex": ["-dDuplex=false"],
-    "long": ["-dDuplex=true", "-dTumble=false"],
-    "short": ["-dDuplex=true", "-dTumble=true"],
+# Duplex -> standard gs page-device entries (mswinpr2: dev->Duplex/tumble ->
+# dmDuplex, DMDUP_VERTICAL = flip on the long edge). They go in the
+# setpagedevice prolog, never on the command line (see the module note).
+# "printer" omits the pair entirely so the driver's default (or the user's
+# printer preferences) stays in charge.
+DUPLEX_PAGEDEVICE: dict[str, str] = {
+    "printer": "",
+    "simplex": "/Duplex false",
+    "long": "/Duplex true /Tumble false",
+    "short": "/Duplex true /Tumble true",
 }
 
 # The Windows spool prints every sheet in the PAPER's own frame: the driver is
@@ -251,8 +257,9 @@ def build_setpagedevice_ps(
     orientation_value: int | None,
     color_value: int | None,
     document_name: str | None,
+    duplex: str = "printer",
 ) -> str | None:
-    """The -c setpagedevice prolog carrying mswinpr2 /UserSettings.
+    """The -c setpagedevice prolog carrying mswinpr2 /UserSettings and duplex.
 
     Returns None when every entry is defaulted (no prolog — the argv stays
     switch-only, byte-identical to the original contract). DocumentName is
@@ -270,9 +277,14 @@ def build_setpagedevice_ps(
         name = document_name[:200]
         if all(32 <= ord(c) < 127 for c in name):
             parts.append(f"/DocumentName ({_ps_escape(name)})")
-    if not parts:
+    entries: list[str] = []
+    if DUPLEX_PAGEDEVICE[duplex]:
+        entries.append(DUPLEX_PAGEDEVICE[duplex])
+    if parts:
+        entries.append("/UserSettings << " + " ".join(parts) + " >>")
+    if not entries:
         return None
-    return "<< /UserSettings << " + " ".join(parts) + " >> >> setpagedevice"
+    return "<< " + " ".join(entries) + " >> setpagedevice"
 
 
 def _points(value: float) -> str:
@@ -286,7 +298,6 @@ def build_gs_args(
     pages: str,
     fit: str,
     gs_path: str,
-    duplex: str = "printer",
     setpagedevice_ps: str | None = None,
     media: tuple[float, float] | None = None,
 ) -> list[str]:
@@ -320,7 +331,6 @@ def build_gs_args(
             else []
         ),
         *FIT_SWITCHES[fit],
-        *DUPLEX_SWITCHES[duplex],
     ]
     if pages:
         args.append(f"-sPageList={pages}")
@@ -461,7 +471,7 @@ def print_pdf(
         raise ValueError(f"Copies must be between 1 and {MAX_COPIES}, got {copies}")
     _choice("fit mode", fit, ("fit", "actual", "scale"))
     _choice("subset", subset, _SUBSETS)
-    _choice("duplex mode", duplex, tuple(DUPLEX_SWITCHES))
+    _choice("duplex mode", duplex, tuple(DUPLEX_PAGEDEVICE))
     _choice("orientation", orientation, ("auto", "portrait", "landscape"))
     _choice("color mode", color, ("printer", "color", "gray"))
     _choice("comments mode", annots, _ANNOT_MODES)
@@ -566,7 +576,7 @@ def print_pdf(
         if rotate_prepass:
             plain = False
 
-    # Windows prints in the paper's frame (see the note by DUPLEX_SWITCHES): a
+    # Windows prints in the paper's frame (see the note by DUPLEX_PAGEDEVICE): a
     # sheet the user wants landscape is turned a quarter turn in the prepared
     # file, and the driver is asked for portrait. A single-page layout under
     # "fit" needs no turn: Ghostscript's FitPage already lays a page onto the
@@ -588,6 +598,7 @@ def print_pdf(
         _ORIENT_VALUES.get(driver_orient),
         _COLOR_VALUES.get(color),
         doc_name,
+        duplex,
     )
     media: tuple[float, float] | None = None
     if not imposition and sheet_width is not None and sheet_height is not None:
@@ -610,7 +621,7 @@ def print_pdf(
             _run_jobs(
                 build_gs_args(
                     job_file, printer, job_pages, job_fit, gs_path,
-                    duplex, us_ps, media,
+                    us_ps, media,
                 ),
                 jobs,
             )

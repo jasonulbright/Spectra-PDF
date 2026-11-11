@@ -21,7 +21,7 @@ from engine.extract_text import extract_text
 from engine.grayscale import grayscale
 from engine.metadata import get_metadata, set_metadata, strip_metadata
 from engine.printer import (
-    DUPLEX_SWITCHES,
+    DUPLEX_PAGEDEVICE,
     FIT_SWITCHES,
     MAX_COPIES,
     build_gs_args,
@@ -3591,7 +3591,7 @@ class TestPrintArgs:
             "<< /UserSettings << /Paper 9 /Orientation 2 /Color 1 "
             "/DocumentName (report \\(final\\).pdf) >> >> setpagedevice"
         )
-        args = build_gs_args("in.pdf", "P", "", "actual", "gs", "short", ps)
+        args = build_gs_args("in.pdf", "P", "", "actual", "gs", ps)
         assert args == [
             "gs",
             "-dNOPAUSE",
@@ -3603,21 +3603,37 @@ class TestPrintArgs:
             "-sOutputFile=%printer%P",
             "-dUseCropBox",
             "-dFIXEDMEDIA",
-            "-dDuplex=true",
-            "-dTumble=true",
             "-c",
             ps,
             "-f",
             "in.pdf",
         ]
 
-    def test_duplex_switch_table(self):
-        assert DUPLEX_SWITCHES == {
-            "printer": [],
-            "simplex": ["-dDuplex=false"],
-            "long": ["-dDuplex=true", "-dTumble=false"],
-            "short": ["-dDuplex=true", "-dTumble=true"],
+    def test_duplex_page_device_table(self):
+        assert DUPLEX_PAGEDEVICE == {
+            "printer": "",
+            "simplex": "/Duplex false",
+            "long": "/Duplex true /Tumble false",
+            "short": "/Duplex true /Tumble true",
         }
+
+    def test_duplex_rides_the_prolog_never_the_command_line(self):
+        # mswinpr2 ignores -dTumble=true on the command line, so a short-edge
+        # job went out as a long-edge one (issue 67). Only setpagedevice works.
+        ps = build_setpagedevice_ps(9, 1, None, "a.pdf", "short")
+        assert ps == (
+            "<< /Duplex true /Tumble true /UserSettings << /Paper 9 "
+            "/Orientation 1 /DocumentName (a.pdf) >> >> setpagedevice"
+        )
+        assert build_setpagedevice_ps(None, None, None, None, "long") == (
+            "<< /Duplex true /Tumble false >> setpagedevice"
+        )
+        assert build_setpagedevice_ps(None, None, None, None, "simplex") == (
+            "<< /Duplex false >> setpagedevice"
+        )
+        assert build_setpagedevice_ps(None, None, None, None, "printer") is None
+        args = build_gs_args("in.pdf", "P", "", "fit", "gs", ps)
+        assert not any(a.startswith(("-dDuplex", "-dTumble")) for a in args)
 
     def test_setpagedevice_ps_defaults_to_name_only_and_none(self):
         # Only the document name -> prolog carries just that; a non-ASCII
@@ -3757,7 +3773,7 @@ class TestPrintPdf:
         # The defaulted job is switch-only PLUS the DocumentName prolog (the
         # spooler shows the real file name) — the plain fast path, no temp.
         expected = build_gs_args(
-            sample_pdf, "My Printer", "1-2,4", "actual", "GS", "printer",
+            sample_pdf, "My Printer", "1-2,4", "actual", "GS",
             build_setpagedevice_ps(None, None, None, "sample.pdf"),
         )
         for args, kwargs in calls:
@@ -4410,11 +4426,11 @@ class TestPrintPipeline:
         argv = cap["argv"][0]
         # The driver is always asked for a portrait sheet, so "long" is
         # Tumble=false as on any sheet, and landscape rides the content.
-        assert "-dDuplex=true" in argv and "-dTumble=false" in argv
+        assert not any(a.startswith(("-dDuplex", "-dTumble")) for a in argv)
         ps = argv[argv.index("-c") + 1]
         assert ps == (
-            "<< /UserSettings << /Paper 9 /Orientation 1 /Color 1 "
-            "/DocumentName (brief.pdf) >> >> setpagedevice"
+            "<< /Duplex true /Tumble false /UserSettings << /Paper 9 "
+            "/Orientation 1 /Color 1 /DocumentName (brief.pdf) >> >> setpagedevice"
         )
         assert argv[-1] == src  # plain path prints the original file
 
@@ -4467,13 +4483,14 @@ class TestPrintPipeline:
                   layout="nup", nup_rows=1, nup_cols=2,
                   sheet_width=595, sheet_height=842)
         argv = cap["argv"][0]
-        assert "-dDuplex=true" in argv and "-dTumble=true" in argv
-        assert "/Orientation 1" in argv[argv.index("-c") + 1]
+        ps = argv[argv.index("-c") + 1]
+        assert "/Duplex true /Tumble true" in ps and "/Orientation 1" in ps
         cap["argv"].clear()
         print_pdf(file=src, printer="P", gs_path=gs_path, duplex="long",
                   layout="nup", nup_rows=1, nup_cols=2,
                   sheet_width=595, sheet_height=842)
-        assert "-dTumble=false" in cap["argv"][0]
+        argv = cap["argv"][0]
+        assert "/Duplex true /Tumble false" in argv[argv.index("-c") + 1]
 
     def test_single_landscape_actual_size_turns_the_pages(self, tmp_dir, monkeypatch):
         cap = self._capture(monkeypatch, tmp_dir)
@@ -4514,7 +4531,8 @@ class TestPrintPipeline:
         print_pdf(file=src, printer="P", gs_path=gs_path, duplex="short",
                   layout="nup", nup_rows=2, nup_cols=1,
                   sheet_width=595, sheet_height=842)
-        assert "-dTumble=true" in cap["argv"][0]
+        argv = cap["argv"][0]
+        assert "/Duplex true /Tumble true" in argv[argv.index("-c") + 1]
 
     def test_nup_tall_grid_auto_stays_portrait(self, tmp_dir, monkeypatch, gs_path):
         cap = self._capture(monkeypatch, tmp_dir)

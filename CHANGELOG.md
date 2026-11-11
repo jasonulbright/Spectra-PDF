@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.1111.170
+
+**Flip on the short edge now reaches the printer**
+
+### Fixed
+- Send the short-edge choice to the printer. It went out as the long edge before.
+- Add the rotation error to the message table.
+
 ## 2026.1110.169
 
 **Pages per sheet and booklets print upright on landscape sheets**
