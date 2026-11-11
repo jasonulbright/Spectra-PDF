@@ -28,6 +28,7 @@
   "overrides": {
     "serialize-javascript": "^7.0.4",
     "@puppeteer/browsers": "^3.0.2",
-    "glob@^10": "^14.0.3"
+    "glob@^10": "^14.0.3",
+    "fast-xml-parser": "^5.12.0"
   }
 }
