@@ -579,6 +579,7 @@ print_layout.pageRangePageNumber	pattern	print_layout	the page range {{token}} i
 print_layout.pageRangeSelectsPage	pattern	print_layout	the page range {{token}} selects no page
 print_layout.pagesPerSheetLayout	pattern	print_layout	{{number_up}} pages per sheet is not a layout this printer offers ({{v1}})
 print_layout.posterOverlapMustSmaller	exact	print_layout	Poster overlap must be smaller than the paper
+print_layout.rotationMustMultipleDegrees	pattern	print_layout	Rotation must be a multiple of 90 degrees, got {{degrees}}
 print_layout.timedOutAfterS	pattern	print_layout	{{what}} timed out after {{RENDER_TIMEOUT_S}}s
 print_layout.unknownPageOrder	pattern	print_layout	unknown page order {{layout}} ({{v1}})
 print_layout.unknownPageSet	pattern	print_layout	unknown page set {{page_set}} ({{v1}})
