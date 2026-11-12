@@ -279,16 +279,39 @@ def duplex_from_devmode(devmode: bytes) -> str | None:
     return _DUPLEX_BY_DEVMODE.get(value)
 
 
+_DEFAULT_DUPLEX_CACHE: dict[str, tuple[float, str | None]] = {}
+_DEFAULT_DUPLEX_TTL_S = 5.0
+
+
 def printer_default_duplex(name: str) -> str | None:
     """The two-sided mode the printer's own default settings hold, if any.
 
     "Printer default" must mean that. mswinpr2 writes dmDuplex whenever the
     driver reports a duplex unit, and writes SIMPLEX when the job names no
-    duplex, so a printer whose default is two-sided printed one-sided.
+    duplex, so a printer whose default is two-sided printed one-sided. The
+    preview asks too, so it shows the sheet order the job will print; the
+    answer is kept for a few seconds because the preview asks on every change
+    and an offline network printer can be slow to answer.
     Returns "long" or "short" only; one-sided, unknown and every failure
-    return None, and the job then names no duplex, as before. Windows only.
+    return None, and the job then names no duplex, as before.
     """
-    if _SPOOL_THROUGH_CUPS or sys.platform != "win32":
+    if not name or not name.strip():
+        return None
+    now = time.monotonic()
+    cached = _DEFAULT_DUPLEX_CACHE.get(name)
+    if cached is not None and now - cached[0] < _DEFAULT_DUPLEX_TTL_S:
+        return cached[1]
+    value = _read_default_duplex(name)
+    _DEFAULT_DUPLEX_CACHE[name] = (now, value)
+    return value
+
+
+def _read_default_duplex(name: str) -> str | None:
+    if _SPOOL_THROUGH_CUPS:
+        from . import cups_print
+
+        return cups_print.default_duplex(name)
+    if sys.platform != "win32":
         return None
     import ctypes
     from ctypes import wintypes
@@ -630,7 +653,7 @@ def print_pdf(
     # "Printer default" resolves to the printer's own two-sided setting (see
     # printer_default_duplex); an explicit choice is never looked up.
     driver_duplex = duplex
-    if duplex == "printer" and not _SPOOL_THROUGH_CUPS and not _preview:
+    if duplex == "printer":
         driver_duplex = printer_default_duplex(printer) or "printer"
     # A two-sided job prints the final sides in pairs, front and back. Reverse
     # and uncollated copies then work on whole sheets (see sheet_sequence), after
