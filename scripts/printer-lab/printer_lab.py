@@ -84,7 +84,7 @@ def _ps(command: str) -> str:
 
 _SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
 _DRIVER_NAME = re.compile(r"[\w .()/+-]{1,120}")
-_PATH_TEXT = re.compile(r"[\w :\\/.()-]{1,200}")
+_PATH_TEXT = re.compile(r"[\w :\\/.()~-]{1,200}")
 
 
 def _quote(text: str) -> str:

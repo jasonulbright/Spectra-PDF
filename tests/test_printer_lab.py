@@ -288,3 +288,7 @@ class TestMatrixStopsWhenNoJobIsWritten:
         assert len(rows) == 1 and engine.jobs == 1
         assert rows[0]["status"] == "ERROR" and "event 372" in rows[0]["note"]
         assert printer_lab.exit_code(rows) == 1
+
+
+def test_a_short_8_3_folder_name_is_accepted():
+    assert printer_lab._require_plain("folder", "C:\Users\RUNNER~1\Temp", printer_lab._PATH_TEXT)
