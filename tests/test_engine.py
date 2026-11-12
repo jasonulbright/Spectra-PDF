@@ -4374,6 +4374,8 @@ class TestPrintPipeline:
         monkeypatch.setattr(printer_mod, "_run_jobs", fake_jobs)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
         monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
+        # No printer default is read in these tests unless a test sets one.
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: None)
         return captured
 
     def _sized(self, tmp_dir, widths, name="in.pdf"):
@@ -4415,6 +4417,85 @@ class TestPrintPipeline:
         assert [a for a in cap["argv"][0] if a.startswith("-sPageList")] == [
             "-sPageList=2,4"
         ]
+
+    def _widths(self, path):
+        with pikepdf.open(path) as out:
+            return [float(p.mediabox[2]) for p in out.pages]
+
+    def test_two_sided_reverse_reverses_sheets_and_pads_the_last_back(self, tmp_dir, monkeypatch):
+        # Sheets are (1,2) (3,4) (5,blank). Reversed they are (5,blank) (3,4)
+        # (1,2): front and back stay together. Reversing the sides would put
+        # page 4 on the back of page 5. The blank is the size of page 1.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104, 105])
+        r = print_pdf(file=src, printer="P", gs_path="GS", duplex="long", reverse=True)
+        assert r["prepass"] == ["sheet-order"]
+        assert self._widths(cap["files"][0]) == [105, 101, 103, 104, 101, 102]
+
+    def test_two_sided_reverse_of_an_even_count_has_no_blank(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104])
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="short", reverse=True)
+        assert self._widths(cap["files"][0]) == [103, 104, 101, 102]
+
+    def test_two_sided_uncollated_copies_repeat_whole_sheets(self, tmp_dir, monkeypatch):
+        # (1,2) (3,blank) twice each: 1,2,1,2,3,_,3,_. Repeating sides would put
+        # page 1 on both faces, and a copy would start on the back of a sheet.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103])
+        r = print_pdf(file=src, printer="P", gs_path="GS", duplex="long",
+                      copies=2, collate=False)
+        assert r["jobs"] == 1 and r["prepass"] == ["sheet-order"]
+        assert self._widths(cap["files"][0]) == [101, 102, 101, 102, 103, 101, 103, 101]
+
+    def test_two_sided_reverse_with_uncollated_copies(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104])
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="long",
+                  reverse=True, copies=2, collate=False)
+        assert self._widths(cap["files"][0]) == [
+            103, 104, 103, 104, 101, 102, 101, 102,
+        ]
+
+    def test_one_sided_reverse_and_copies_are_unchanged(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103])
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="simplex", reverse=True)
+        assert self._widths(cap["files"][0]) == [103, 102, 101]
+        cap["files"].clear()
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="simplex",
+                  copies=2, collate=False)
+        assert self._widths(cap["files"][0]) == [101, 101, 102, 102, 103, 103]
+
+    def test_a_two_sided_printer_default_gets_the_sheet_order_too(self, tmp_dir, monkeypatch):
+        import engine.printer as printer_mod
+
+        cap = self._capture(monkeypatch, tmp_dir)
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: "long")
+        src = self._sized(tmp_dir, [101, 102, 103])
+        print_pdf(file=src, printer="P", gs_path="GS", reverse=True)
+        assert self._widths(cap["files"][0]) == [103, 101, 101, 102]
+
+    def test_two_sided_reverse_works_on_the_imposed_sides(self, tmp_dir, monkeypatch, gs_path):
+        # Six pages 1x2 make three sides; with the blank back that is two sheets.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300] * 6)
+        r = print_pdf(file=src, printer="P", gs_path=gs_path, duplex="short",
+                      reverse=True, layout="nup", nup_rows=1, nup_cols=2,
+                      sheet_width=595, sheet_height=842)
+        assert "sheet-order" in r["prepass"]
+        assert r["prepass"].index("sheet-order") < r["prepass"].index("turn-to-paper")
+        assert len(self._widths(cap["files"][0])) == 4
+
+    def test_sheet_sequence(self):
+        from engine.print_layout import sheet_sequence
+
+        assert sheet_sequence(4) == [0, 1, 2, 3]
+        assert sheet_sequence(5) == [0, 1, 2, 3, 4, None]
+        assert sheet_sequence(5, reverse=True) == [4, None, 2, 3, 0, 1]
+        assert sheet_sequence(3, copies=2) == [0, 1, 0, 1, 2, None, 2, None]
+        assert sheet_sequence(4, reverse=True, copies=2) == [2, 3, 2, 3, 0, 1, 0, 1]
+        assert sheet_sequence(1) == [0, None]
 
     def test_uncollated_copies_duplicate_into_one_job(self, tmp_dir, monkeypatch):
         cap = self._capture(monkeypatch, tmp_dir)

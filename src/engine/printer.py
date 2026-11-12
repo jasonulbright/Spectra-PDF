@@ -85,6 +85,7 @@ from .print_layout import (
     rasterize_pdf,
     render_preview,
     rotate_pages,
+    sheet_sequence,
     strip_annotations,
 )
 from .validate import validate_pdf
@@ -625,7 +626,18 @@ def print_pdf(
     order = apply_subset(expand_page_spec(page_list, page_count), subset)
     if not order:
         raise ValueError("The page selection is empty (no pages match)")
-    if reverse:
+
+    # "Printer default" resolves to the printer's own two-sided setting (see
+    # printer_default_duplex); an explicit choice is never looked up.
+    driver_duplex = duplex
+    if duplex == "printer" and not _SPOOL_THROUGH_CUPS and not _preview:
+        driver_duplex = printer_default_duplex(printer) or "printer"
+    # A two-sided job prints the final sides in pairs, front and back. Reverse
+    # and uncollated copies then work on whole sheets (see sheet_sequence), after
+    # the layout has made the sides, not on source pages.
+    two_sided = driver_duplex in ("long", "short")
+    sheet_reverse = reverse and two_sided
+    if reverse and not sheet_reverse:
         order = list(reversed(order))
 
     doc_name = Path(file).name
@@ -651,7 +663,7 @@ def print_pdf(
     # The plain fast path — byte-stable with the original contract when the
     # new options are defaulted (plus any pure-switch options the driver
     # applies): no temp file, -sPageList carries the (ascending) selection.
-    needs_reorder = order != sorted(set(order)) or uncollated_dup
+    needs_reorder = order != sorted(set(order)) or uncollated_dup or sheet_reverse
     plain = (
         annots == "all"
         and not as_image
@@ -692,12 +704,6 @@ def print_pdf(
         side_a = _num("Sheet width", sheet_width, MIN_SHEET_PT, MAX_SHEET_PT)
         side_b = _num("Sheet height", sheet_height, MIN_SHEET_PT, MAX_SHEET_PT)
         media = (min(side_a, side_b), max(side_a, side_b))
-
-    # "Printer default" resolves to the printer's own two-sided setting (see
-    # printer_default_duplex); an explicit choice is never looked up.
-    driver_duplex = duplex
-    if duplex == "printer" and not _SPOOL_THROUGH_CUPS and not _preview:
-        driver_duplex = printer_default_duplex(printer) or "printer"
 
     def _spool(job_file: str, job_pages: str, job_fit: str, jobs: int) -> None:
         if _SPOOL_THROUGH_CUPS:
@@ -740,11 +746,13 @@ def print_pdf(
             raise ValueError("Preview needs the paper size (sheet_width/sheet_height)")
         sheet_width = _num("Sheet width", sheet_width, MIN_SHEET_PT, MAX_SHEET_PT)
         sheet_height = _num("Sheet height", sheet_height, MIN_SHEET_PT, MAX_SHEET_PT)
-        if layout == "single":
+        # A reversed two-sided job shows its LAST sheets first, so the whole
+        # selection is read and the cap is applied when the pages are rendered.
+        if layout == "single" and not sheet_reverse:
             total_sheets_hint = len(order)
             if not plain:
                 order = order[:preview_max]
-        elif layout == "nup":
+        elif layout == "nup" and not sheet_reverse:
             per = nup_rows * nup_cols
             total_sheets_hint = -(-len(order) // per)
             order = order[: preview_max * per]
@@ -896,8 +904,22 @@ def print_pdf(
                 else fit
             )
 
+            # Two-sided: reverse the order of the sheets (preview shows it too)
+            # and repeat whole sheets for uncollated copies; an odd count gets a
+            # blank back so no copy starts on the back of a sheet.
+            sides_total: int | None = None
+            if two_sided and (sheet_reverse or uncollated_dup):
+                with open_pdf(current) as prepared:
+                    n_sides = len(prepared.pages)
+                paired = sheet_sequence(n_sides, sheet_reverse, copies if uncollated_dup else 1)
+                paired_pdf = str(tdp / "sheets.pdf")
+                build_sequence(current, paired_pdf, paired)
+                current = paired_pdf
+                sides_total = len(paired)
+                stages.append("sheet-order")
+
             if _preview:
-                total = sheets_out if sheets_out is not None else (
+                total = sides_total if sides_total is not None else sheets_out if sheets_out is not None else (
                     total_sheets_hint if total_sheets_hint is not None else len(order)
                 )
                 spec = f"1-{preview_max}" if total > preview_max else ""
@@ -911,7 +933,7 @@ def print_pdf(
                 current = turned
                 stages.append("turn-to-paper")
 
-            if uncollated_dup:
+            if uncollated_dup and not two_sided:
                 with open_pdf(current) as prepared:
                     n_prepared = len(prepared.pages)
                 dup_order = [p for p in range(n_prepared) for _ in range(copies)]

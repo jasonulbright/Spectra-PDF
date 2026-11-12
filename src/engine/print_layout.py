@@ -294,6 +294,28 @@ def strip_annotations(src: str, dst: str, mode: str) -> int:
     return removed
 
 
+def sheet_sequence(count: int, reverse: bool = False, copies: int = 1) -> list[int | None]:
+    """The side order of a two-sided job, paired by sheet (None -> blank side).
+
+    A two-sided job prints sides 1 and 2 on one sheet, 3 and 4 on the next.
+    The ``count`` sides are therefore grouped in pairs, an odd count gets a
+    blank back on its last sheet, and every reorder works on whole sheets:
+
+    - ``reverse`` reverses the order of the sheets and keeps front and back
+      together. (Reversing sides would put page 4 on the back of page 5.)
+    - ``copies`` repeats each SHEET, so an uncollated job prints sheet 1 as
+      many times as asked, then sheet 2. (Repeating sides would print 1 on
+      both faces.)
+    """
+    sides: list[int | None] = list(range(count))
+    if count % 2:
+        sides.append(None)
+    sheets = [sides[i : i + 2] for i in range(0, len(sides), 2)]
+    if reverse:
+        sheets.reverse()
+    return [side for sheet in sheets for _ in range(copies) for side in sheet]
+
+
 def build_sequence(
     src: str,
     dst: str,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.1112.172
+
+**Two-sided jobs keep each sheet together**
+
+### Fixed
+- Reverse the order of whole sheets in a two-sided job, so front and back stay together.
+- Print uncollated copies of a two-sided job sheet by sheet, so no page lands on both faces.
+
 ## 2026.1111.171
 
 **Two-sided printing follows your choice on every printer**
