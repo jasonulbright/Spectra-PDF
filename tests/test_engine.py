@@ -3555,16 +3555,18 @@ class TestPrintArgs:
         args = build_gs_args("C:\\in.pdf", "My Printer", "", "fit", "C:\\gs.exe")
         assert args == [
             "C:\\gs.exe",
+            "--permit-devices=mswinpr2",
             "-dNOPAUSE",
             "-dBATCH",
             "-dQUIET",
             "-dSAFER",
-            "-sDEVICE=mswinpr2",
-            "-dNoCancel",
-            "-sOutputFile=%printer%My Printer",
+            "-sDEVICE=nullpage",
             "-dUseCropBox",
             "-dFIXEDMEDIA",
             "-dFitPage",
+            "-c",
+            "<< /OutputDevice /mswinpr2 /OutputFile (%printer%My Printer) /NoCancel true >> setpagedevice",
+            "-f",
             "C:\\in.pdf",
         ]
 
@@ -3572,35 +3574,37 @@ class TestPrintArgs:
         args = build_gs_args("in.pdf", "P", "1-3,5", "actual", "gs")
         assert args == [
             "gs",
+            "--permit-devices=mswinpr2",
             "-dNOPAUSE",
             "-dBATCH",
             "-dQUIET",
             "-dSAFER",
-            "-sDEVICE=mswinpr2",
-            "-dNoCancel",
-            "-sOutputFile=%printer%P",
+            "-sDEVICE=nullpage",
             "-dUseCropBox",
             "-dFIXEDMEDIA",
             "-sPageList=1-3,5",
+            "-c",
+            "<< /OutputDevice /mswinpr2 /OutputFile (%printer%P) /NoCancel true >> setpagedevice",
+            "-f",
             "in.pdf",
         ]
 
     def test_exact_argv_duplex_and_setpagedevice(self):
-        ps = build_setpagedevice_ps(9, 2, 1, "report (final).pdf")
+        ps = build_setpagedevice_ps(9, 2, 1, "report (final).pdf", "short", "P")
         assert ps == (
-            "<< /UserSettings << /Paper 9 /Orientation 2 /Color 1 "
-            "/DocumentName (report \\(final\\).pdf) >> >> setpagedevice"
+            "<< /OutputDevice /mswinpr2 /OutputFile (%printer%P) /NoCancel true "
+            "/Duplex true /Tumble true /UserSettings << /Paper 9 /Orientation 2 "
+            "/Color 1 /DocumentName (report \\(final\\).pdf) >> >> setpagedevice"
         )
         args = build_gs_args("in.pdf", "P", "", "actual", "gs", ps)
         assert args == [
             "gs",
+            "--permit-devices=mswinpr2",
             "-dNOPAUSE",
             "-dBATCH",
             "-dQUIET",
             "-dSAFER",
-            "-sDEVICE=mswinpr2",
-            "-dNoCancel",
-            "-sOutputFile=%printer%P",
+            "-sDEVICE=nullpage",
             "-dUseCropBox",
             "-dFIXEDMEDIA",
             "-c",
@@ -3616,6 +3620,32 @@ class TestPrintArgs:
             "long": "/Duplex true /Tumble false",
             "short": "/Duplex true /Tumble true",
         }
+
+    def test_device_is_chosen_by_the_prolog_so_duplex_is_set_before_it_opens(self):
+        # mswinpr2 builds its printer DC when it opens. A -dTumble switch never
+        # reaches that DC, and a setpagedevice AFTER the open only ResetDCs,
+        # which the Brother MFC-L8690CDW series driver ignores for duplex (the
+        # job went out single-sided). So gs starts on nullpage and ONE
+        # setpagedevice selects mswinpr2 with the duplex and sheet entries in
+        # the same dictionary (issue 67).
+        args = build_gs_args("in.pdf", "P", "", "fit", "gs", media=(595, 842))
+        assert args[1] == "--permit-devices=mswinpr2"
+        assert "-sDEVICE=nullpage" in args
+        assert not any(a.startswith(("-sDEVICE=mswinpr2", "-sOutputFile", "-dNoCancel")) for a in args)
+        prolog = args[args.index("-c") + 1]
+        assert prolog == (
+            "<< /OutputDevice /mswinpr2 /OutputFile (%printer%P) /NoCancel true "
+            "/PageSize [595 842] >> setpagedevice"
+        )
+        ps = build_setpagedevice_ps(None, 1, None, None, "short", "P", (595, 842))
+        assert ps.index("/OutputDevice") < ps.index("/PageSize") < ps.index("/Duplex true /Tumble true")
+        assert ps.count("setpagedevice") == 1
+
+    def test_printer_name_is_escaped_in_the_prolog(self):
+        shared = "\\\\server\\Br (2nd)"
+        ps = build_setpagedevice_ps(None, None, None, None, "printer", shared)
+        assert "(%printer%\\\\\\\\server\\\\Br \\(2nd\\))" in ps
+        assert "(%printer%Drücker)" in build_setpagedevice_ps(None, None, None, None, "printer", "Drücker")
 
     def test_duplex_rides_the_prolog_never_the_command_line(self):
         # mswinpr2 ignores -dTumble=true on the command line, so a short-edge
@@ -3774,7 +3804,7 @@ class TestPrintPdf:
         # spooler shows the real file name) — the plain fast path, no temp.
         expected = build_gs_args(
             sample_pdf, "My Printer", "1-2,4", "actual", "GS",
-            build_setpagedevice_ps(None, None, None, "sample.pdf"),
+            build_setpagedevice_ps(None, None, None, "sample.pdf", "printer", "My Printer"),
         )
         for args, kwargs in calls:
             assert args == expected
@@ -4429,7 +4459,8 @@ class TestPrintPipeline:
         assert not any(a.startswith(("-dDuplex", "-dTumble")) for a in argv)
         ps = argv[argv.index("-c") + 1]
         assert ps == (
-            "<< /Duplex true /Tumble false /UserSettings << /Paper 9 "
+            "<< /OutputDevice /mswinpr2 /OutputFile (%printer%P) /NoCancel true "
+            "/Duplex true /Tumble false /UserSettings << /Paper 9 "
             "/Orientation 1 /Color 1 /DocumentName (brief.pdf) >> >> setpagedevice"
         )
         assert argv[-1] == src  # plain path prints the original file
@@ -4524,6 +4555,52 @@ class TestPrintPipeline:
         assert "-dDEVICEHEIGHTPOINTS=841.89" in args
         assert args.index("-dDEVICEWIDTHPOINTS=595.28") < args.index("-dFIXEDMEDIA")
         assert not any(a.startswith("-dDEVICEWIDTH") for a in build_gs_args("in.pdf", "P", "", "fit", "gs"))
+
+    def test_printer_default_duplex_reads_the_devmode(self):
+        import struct
+
+        def devmode(fields, duplex, size=220):
+            buf = bytearray(size)
+            struct.pack_into("<I", buf, 72, fields)
+            struct.pack_into("<h", buf, 94, duplex)
+            return bytes(buf)
+
+        from engine.printer import duplex_from_devmode
+
+        assert duplex_from_devmode(devmode(0x1000, 2)) == "long"
+        assert duplex_from_devmode(devmode(0x1000, 3)) == "short"
+        assert duplex_from_devmode(devmode(0x1000, 1)) is None
+        assert duplex_from_devmode(devmode(0x0000, 2)) is None  # field not carried
+        assert duplex_from_devmode(bytes(90)) is None  # too short to hold it
+
+    def test_printer_default_means_the_printers_own_two_sided_setting(
+        self, tmp_dir, monkeypatch, gs_path
+    ):
+        # mswinpr2 writes dmDuplex SIMPLEX when the job names none, so a printer
+        # whose default is two-sided printed one-sided.
+        import engine.printer as printer_mod
+
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300])
+        looked_up = []
+        monkeypatch.setattr(
+            printer_mod, "printer_default_duplex",
+            lambda name: looked_up.append(name) or "short",
+        )
+        r = print_pdf(file=src, printer="P", gs_path=gs_path)
+        prolog = cap["argv"][0][cap["argv"][0].index("-c") + 1]
+        assert "/Duplex true /Tumble true" in prolog
+        assert looked_up == ["P"]
+        assert r["duplex"] == "printer"  # the caller's choice is reported as given
+        cap["argv"].clear()
+        looked_up.clear()
+        print_pdf(file=src, printer="P", gs_path=gs_path, duplex="simplex")
+        assert looked_up == []
+        assert "/Duplex false" in cap["argv"][0][cap["argv"][0].index("-c") + 1]
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: None)
+        cap["argv"].clear()
+        print_pdf(file=src, printer="P", gs_path=gs_path)
+        assert "/Duplex" not in cap["argv"][0][cap["argv"][0].index("-c") + 1]
 
     def test_nup_portrait_sheet_keeps_driver_edge(self, tmp_dir, monkeypatch, gs_path):
         cap = self._capture(monkeypatch, tmp_dir)
