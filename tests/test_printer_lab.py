@@ -250,3 +250,14 @@ class TestDecoderLimits:
             archive.writestr("big.xml", b"a" * (lab_decode._XPS_ENTRY_LIMIT + 1))
         decoded = lab_decode.decode(buffer.getvalue())
         assert not decoded.complete and not decoded.decodable and "not read" in decoded.notes[0]
+
+
+class TestRelativeFolder:
+    def test_a_relative_folder_becomes_an_absolute_port(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(printer_lab, "_ps", lambda command: calls.append(command) or "")
+        monkeypatch.setattr(printer_lab, "has_duplex_unit", lambda name: True)
+        printer_lab.setup("SpectraLabRel", "Some Driver", Path("labdir"), False)
+        port = next(c for c in calls if c.startswith("Add-PrinterPort"))
+        assert str((tmp_path / "labdir").resolve()) in port

@@ -125,6 +125,7 @@ def setup(name: str, driver: str, directory: Path, duplex_unit: bool) -> None:
     require_lab_name(name)
     _require_plain("driver name", driver, _DRIVER_NAME)
     _require_plain("folder", str(directory), _PATH_TEXT)
+    directory = directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     port = str(directory / f"{name}.prn")
     _ps(f"Add-PrinterPort -Name {_quote(port)} -ErrorAction Stop")
@@ -151,7 +152,7 @@ def teardown(name: str, directory: Path) -> None:
     """Remove the printer if it exists, then the one port `setup` made for it in `directory`."""
     require_lab_name(name)
     _require_plain("folder", str(directory), _PATH_TEXT)
-    expected = directory / f"{name}.prn"
+    expected = directory.resolve() / f"{name}.prn"
     if _ps(f"@(Get-Printer -Name {_quote(name)} -ErrorAction SilentlyContinue).Count") == "1":
         if port_file(name) != expected:
             raise SystemExit(f"Refused: '{name}' is not on the port {expected}.")
