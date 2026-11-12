@@ -426,6 +426,26 @@ def decode_ipp(record: dict, document: bytes | None = None) -> Decoded:
 # --- entry point -----------------------------------------------------------
 
 
+def _only_prescribe(prefix: bytes) -> bool:
+    """True when ``prefix`` is only PRESCRIBE commands, each ending in "EXIT;".
+
+    One pass over the bytes (no backtracking), so a crafted prefix cannot stall
+    the decoder."""
+    pos = 0
+    while pos < len(prefix):
+        if not prefix.startswith(b"!R!", pos):
+            return False
+        end = prefix.find(b"EXIT;", pos)
+        if end < 0:
+            return False
+        if any(b < 0x20 or b > 0x7E for b in prefix[pos:end]):
+            return False
+        pos = end + len(b"EXIT;")
+        while pos < len(prefix) and prefix[pos] in b" \t\r\n":
+            pos += 1
+    return pos == len(prefix)
+
+
 def decode(data: bytes) -> Decoded:
     """Decode one job. The language comes from the bytes, not from a name."""
     if data.startswith(b"PK\x03\x04"):
@@ -443,7 +463,7 @@ def decode(data: bytes) -> Decoded:
         # A Kyocera driver opens the job with a PRESCRIBE command ("!R!SEM6;EXIT;")
         # before the UEL; what follows is PJL and an ordinary page language.
         uel = data.find(_UEL, 0, 4096)
-        if uel > 0 and re.fullmatch(rb"(?:!R![ -~]{0,200}?EXIT;\s*)+", data[:uel]):
+        if uel > 0 and _only_prescribe(data[:uel]):
             prefix_note = "PRESCRIBE prefix skipped: " + data[:uel].decode("ascii")
             data = data[uel:]
     pjl, offset = _pjl_lines(data)

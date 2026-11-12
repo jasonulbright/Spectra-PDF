@@ -110,6 +110,18 @@ class TestPcl5AndPjl:
         assert not any("PRESCRIBE" in note for note in decoded.notes)
 
 
+    def test_a_crafted_prefix_cannot_stall_the_decoder(self):
+        import time
+
+        data = b"!R!EXIT;" * 400 + b"X" + UEL + b"@PJL ENTER LANGUAGE=PCL\n\x1bE\x1b&l2S"
+        began = time.monotonic()
+        decoded = lab_decode.decode(data)
+        assert time.monotonic() - began < 1.0
+        assert not any("PRESCRIBE" in note for note in decoded.notes)
+        two = b"!R!SEM6;EXIT;\n!R! CMNT x; EXIT;" + UEL + b"@PJL ENTER LANGUAGE=PCL\n\x1bE\x1b&l1S"
+        assert lab_decode.decode(two).edges() == {"long"}
+
+
 class TestOtherLanguages:
     def test_postscript_portrait_and_landscape(self):
         portrait = b"%!PS-Adobe-3.0\n%%Orientation: Portrait\n<< /Duplex true /Tumble false >> setpagedevice\n"
