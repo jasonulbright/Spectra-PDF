@@ -782,3 +782,294 @@ class TestAllModes:
         rows = self.run(monkeypatch, tmp_path, True)
         assert len(rows) == 12 and {r["status"] for r in rows} == {"NO DUPLEX UNIT"}
         assert {r["found"] for r in rows} == {"undecodable (PCL)"}
+
+
+# --- hostile and broken clients -----------------------------------------------------
+
+
+def raw_exchange(port, payload, wait=5.0):
+    """Send raw bytes, return (everything received, seconds taken); stops at close or `wait`."""
+    started = time.monotonic()
+    received = b""
+    with socket.create_connection(("127.0.0.1", port), timeout=wait) as connection:
+        connection.sendall(payload)
+        try:
+            while True:
+                piece = connection.recv(65536)
+                if not piece:
+                    break
+                received += piece
+        except socket.timeout:
+            received += b"<timed out>"
+    return received, time.monotonic() - started
+
+
+HEAD = b"POST /ipp/print HTTP/1.1\r\nHost: x\r\nContent-Type: application/ipp\r\n"
+
+
+class TestBindingAndPorts:
+    def test_both_servers_bind_the_loopback_address_only(self, tmp_path):
+        server = ipp.IppCapture(tmp_path / "i", port=0)
+        listener = tcp_capture.TcpCapture(tmp_path / "t", port=0)
+        try:
+            assert server.httpd.server_address[0] == "127.0.0.1"
+            assert listener.sock.getsockname()[0] == "127.0.0.1"
+        finally:
+            server.httpd.server_close()
+            listener.stop()
+        with pytest.raises(ValueError):
+            ipp.IppCapture(tmp_path / "i2", host="0.0.0.0", port=0)
+        with pytest.raises(ValueError):
+            tcp_capture.TcpCapture(tmp_path / "t2", host="0.0.0.0", port=0)
+
+    def test_a_second_ipp_server_cannot_take_a_used_port(self, tmp_path, server):
+        with pytest.raises(OSError):
+            ipp.IppCapture(tmp_path / "again", port=server.port)
+
+    def test_a_second_tcp_listener_cannot_take_a_used_port(self, tmp_path):
+        first = tcp_capture.TcpCapture(tmp_path / "a", port=0).start()
+        try:
+            with pytest.raises(OSError):
+                tcp_capture.TcpCapture(tmp_path / "b", port=first.port)
+        finally:
+            first.stop()
+
+
+class TestIppBadClients:
+    def test_a_huge_content_length_with_no_body_gets_a_clean_error_at_once(self, server):
+        reply, took = raw_exchange(server.port, HEAD + b"Content-Length: 99999999999\r\n\r\n")
+        assert reply.startswith(b"HTTP/1.1 400") and took < 3
+
+    def test_a_length_above_the_cap_is_refused_before_it_is_read(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, max_body=1000).start()
+        try:
+            reply, took = raw_exchange(capture.port, HEAD + b"Content-Length: 1001\r\n\r\n")
+            assert reply.startswith(b"HTTP/1.1 400") and took < 3
+        finally:
+            capture.stop()
+
+    @pytest.mark.parametrize("length", [b"-5", b"abc", b"1e3"])
+    def test_a_bad_content_length_is_refused(self, server, length):
+        reply, _ = raw_exchange(server.port, HEAD + b"Content-Length: " + length + b"\r\n\r\n")
+        assert reply.startswith(b"HTTP/1.1 400")
+
+    def test_a_stalled_body_is_dropped_after_the_timeout(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, io_timeout=0.5).start()
+        try:
+            reply, took = raw_exchange(capture.port, HEAD + b"Content-Length: 1000\r\n\r\n" + b"x" * 10)
+            assert b"<timed out>" not in reply and took < 4
+        finally:
+            capture.stop()
+
+    def test_a_stalled_chunked_body_is_dropped_after_the_timeout(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, io_timeout=0.5).start()
+        try:
+            reply, took = raw_exchange(capture.port, HEAD + b"Transfer-Encoding: chunked\r\n\r\n10\r\nabc")
+            assert b"<timed out>" not in reply and took < 4
+        finally:
+            capture.stop()
+
+    @pytest.mark.parametrize("size", [b"-1", b"-8000000000", b"zz", b"", b"FFFFFFFFF", b"100000000"])
+    def test_a_bad_or_oversized_chunk_size_is_refused(self, server, size):
+        reply, took = raw_exchange(server.port, HEAD + b"Transfer-Encoding: chunked\r\n\r\n" + size + b"\r\nabc\r\n")
+        assert reply.startswith(b"HTTP/1.1 400") and took < 3
+
+    def test_a_chunk_size_line_with_no_end_is_cut_off(self, server):
+        reply, took = raw_exchange(server.port, HEAD + b"Transfer-Encoding: chunked\r\n\r\n" + b"a" * 5000)
+        assert reply.startswith(b"HTTP/1.1 400") and took < 3
+
+    def test_the_chunk_total_is_capped(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, max_body=100).start()
+        try:
+            payload = HEAD + b"Transfer-Encoding: chunked\r\n\r\n" + (b"40\r\n" + b"x" * 64 + b"\r\n") * 2 + b"0\r\n\r\n"
+            reply, _ = raw_exchange(capture.port, payload)
+            assert reply.startswith(b"HTTP/1.1 400")
+        finally:
+            capture.stop()
+
+    def test_a_truncated_text_with_language_gets_a_bad_request_reply(self, server):
+        broken = attr(0x35, "job-name", b"\x00\x05ab")  # a 5 byte language, 2 bytes present
+        reply = post(server, request(ipp.OP_PRINT_JOB, operation=[broken], body=b"x"))
+        assert reply.code == ipp.STATUS_BAD_REQUEST
+        assert not list(server.directory.glob("job-*.json"))
+        short_text = attr(0x35, "job-name", struct.pack(">H", 0) + struct.pack(">H", 9) + b"ab")
+        assert post(server, request(ipp.OP_PRINT_JOB, operation=[short_text])).code == ipp.STATUS_BAD_REQUEST
+        with pytest.raises(ipp.IppError):
+            ipp.parse_message(request(ipp.OP_PRINT_JOB, operation=[attr(0x35, "x", b"\x00")]))
+
+    def test_a_wrong_sized_number_is_an_ipp_error_not_a_crash(self):
+        bad = attr(0x33, "span", b"\x00\x00")  # a range value must be 8 bytes; it stays raw bytes
+        assert ipp.parse_message(request(ipp.OP_VALIDATE_JOB, operation=[bad])).group(ipp.TAG_OPERATION)["span"]
+        with pytest.raises(ipp.IppError):
+            ipp.parse_message(struct.pack(">BBHI", 2, 0, 2, 1)[:6])
+
+
+class TestJobStore:
+    def jobs(self, capture, **extra):
+        operation = [keyword("which-jobs", extra["which"])] if "which" in extra else []
+        if "limit" in extra:
+            operation.append(integer("limit", extra["limit"]))
+        reply = post(capture, request(ipp.OP_GET_JOBS, operation=operation))
+        return reply, [g[1]["job-id"][0] for g in reply.groups if g[0] == ipp.TAG_JOB]
+
+    def test_get_jobs_honors_which_jobs_and_limit(self, server):
+        for _ in range(3):
+            post(server, request(ipp.OP_PRINT_JOB, job=JOB_ATTRIBUTES, body=b"x"))
+        pending = post(server, request(ipp.OP_CREATE_JOB, job=JOB_ATTRIBUTES)).group(ipp.TAG_JOB)["job-id"][0]
+        assert self.jobs(server)[1] == [1, 2, 3, 4]
+        assert self.jobs(server, which="completed")[1] == [1, 2, 3]
+        assert self.jobs(server, which="not-completed")[1] == [pending]
+        assert self.jobs(server, limit=2)[1] == [1, 2]
+        assert self.jobs(server, which="completed", limit=1)[1] == [1]
+        assert self.jobs(server, which="sideways")[0].code == ipp.STATUS_ATTRIBUTES_NOT_SUPPORTED
+        assert self.jobs(server, limit=0)[0].code == ipp.STATUS_BAD_REQUEST
+
+    def test_memory_keeps_only_the_last_jobs_while_the_disk_keeps_all(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, max_jobs=3).start()
+        try:
+            for _ in range(6):
+                post(capture, request(ipp.OP_PRINT_JOB, job=JOB_ATTRIBUTES, body=b"x"))
+            assert sorted(capture.records) == [4, 5, 6] and capture.documents == {}
+            assert len(list(tmp_path.glob("job-*.json"))) == 6
+            assert self.jobs(capture)[1] == [4, 5, 6]
+        finally:
+            capture.stop()
+
+    def test_pending_documents_are_evicted_with_their_jobs(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, max_jobs=2).start()
+        try:
+            for _ in range(5):
+                post(capture, request(ipp.OP_CREATE_JOB, job=JOB_ATTRIBUTES))
+            assert len(capture.records) == 2 and len(capture.documents) == 2
+        finally:
+            capture.stop()
+
+    def test_a_document_cannot_grow_past_the_cap_or_be_sent_twice(self, tmp_path):
+        capture = ipp.IppCapture(tmp_path, port=0, max_body=1000).start()
+        try:
+            job_id = post(capture, request(ipp.OP_CREATE_JOB, job=JOB_ATTRIBUTES)).group(ipp.TAG_JOB)["job-id"][0]
+            more = [integer("job-id", job_id), attr(0x22, "last-document", b"\x00")]
+            assert post(capture, request(ipp.OP_SEND_DOCUMENT, operation=more, body=b"x" * 600)).code == ipp.STATUS_OK
+            assert post(capture, request(ipp.OP_SEND_DOCUMENT, operation=more, body=b"x" * 600)).code == ipp.STATUS_BAD_REQUEST
+            last = [integer("job-id", job_id), attr(0x22, "last-document", b"\x01")]
+            assert post(capture, request(ipp.OP_SEND_DOCUMENT, operation=last, body=b"y")).code == ipp.STATUS_OK
+            assert post(capture, request(ipp.OP_SEND_DOCUMENT, operation=last, body=b"z")).code == ipp.STATUS_NOT_FOUND
+        finally:
+            capture.stop()
+
+
+class TestTcpBadSenders:
+    def wait_for(self, folder, name, seconds=5.0):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if (folder / name).exists():
+                return folder / name
+            time.sleep(0.05)
+        raise AssertionError(f"{name} not written")
+
+    def test_an_endless_fast_sender_is_cut_at_the_byte_cap(self, tmp_path):
+        capture = tcp_capture.TcpCapture(tmp_path, port=0, idle=5, max_bytes=1000, deadline=30).start()
+        try:
+            connection = socket.create_connection(("127.0.0.1", capture.port))
+            try:
+                connection.sendall(b"A" * 200_000)
+            except OSError:
+                pass  # the listener closed first
+            job = self.wait_for(tmp_path, "job-0001.bin")
+            assert job.stat().st_size == 1000
+            assert "byte cap" in (tmp_path / "job-0001.cut").read_text()
+            connection.close()
+        finally:
+            capture.stop()
+
+    def test_a_slow_sender_that_never_stops_is_cut_at_the_deadline(self, tmp_path):
+        capture = tcp_capture.TcpCapture(tmp_path, port=0, idle=2, max_bytes=10**6, deadline=0.6).start()
+        stop = False
+        connection = socket.create_connection(("127.0.0.1", capture.port))
+
+        def drip():
+            while not stop:
+                try:
+                    connection.sendall(b".")
+                except OSError:
+                    return
+                time.sleep(0.1)
+
+        thread = __import__("threading").Thread(target=drip, daemon=True)
+        thread.start()
+        try:
+            started = time.monotonic()
+            job = self.wait_for(tmp_path, "job-0001.bin", 4)
+            assert time.monotonic() - started < 3 and 0 < job.stat().st_size < 50
+            assert "deadline" in (tmp_path / "job-0001.cut").read_text()
+        finally:
+            stop = True
+            connection.close()
+            capture.stop()
+
+    def test_a_job_under_both_limits_is_not_marked_cut(self, tmp_path):
+        capture = tcp_capture.TcpCapture(tmp_path, port=0, idle=1, max_bytes=1000, deadline=5).start()
+        try:
+            with socket.create_connection(("127.0.0.1", capture.port)) as connection:
+                connection.sendall(b"small job")
+            assert self.wait_for(tmp_path, "job-0001.bin").read_bytes() == b"small job"
+            assert not (tmp_path / "job-0001.cut").exists()
+        finally:
+            capture.stop()
+
+
+class TestIppSetupRollback:
+    def test_a_queue_made_before_add_printer_threw_is_removed_with_its_port(self, monkeypatch, tmp_path):
+        calls, state = [], {"made": False, "gone": False}
+        guid_port = "WSD-8745ecf7-c31f-474e-aa39-3a2e2ea8db9d"
+
+        def fake(command):
+            calls.append(command)
+            if command.startswith("Add-Printer "):
+                state["made"] = True
+                raise RuntimeError("Add-Printer threw after it made the queue")
+            if command.startswith("Remove-Printer "):
+                state["gone"] = True
+            if "Count" in command:
+                return "1" if state["made"] and not state["gone"] else "0"
+            if "PortName" in command:
+                return guid_port
+            if command.startswith("Get-PrinterPort"):
+                return guid_port if not any(c.startswith("Remove-PrinterPort") for c in calls) else ""
+            return ""
+
+        stopped = []
+        monkeypatch.setattr(printer_lab, "_ps", fake)
+        monkeypatch.setattr(printer_lab, "_is_admin", lambda: True)
+        monkeypatch.setattr(printer_lab, "_listening", lambda port: False)
+        monkeypatch.setattr(printer_lab, "start_listener", lambda *a: 4246)
+        monkeypatch.setattr(printer_lab, "stop_listener", lambda s: stopped.append(s["pid"]))
+        with pytest.raises(SystemExit, match="was undone"):
+            printer_lab.setup_network("SpectraLabIpp", "ipp", None, tmp_path, True, 6310)
+        assert any(c.startswith("Remove-Printer ") for c in calls)
+        assert any(c.startswith("Remove-PrinterPort") and guid_port in c for c in calls)
+        assert stopped == [4246] and printer_lab.read_state(tmp_path, "SpectraLabIpp") is None
+        assert not (tmp_path / "SpectraLabIpp-capture").exists()
+
+    def test_a_queue_on_a_port_that_is_not_a_lab_port_is_left_and_reported(self, monkeypatch, tmp_path):
+        made = {"yes": False}
+
+        def fake(command):
+            if command.startswith("Add-Printer "):
+                made["yes"] = True
+                raise RuntimeError("threw")
+            if "Count" in command:
+                return "1" if made["yes"] else "0"
+            if "PortName" in command:
+                return "USB001"
+            if command.startswith(("Remove-Printer", "Remove-PrinterPort")):
+                pytest.fail("a command touched a port that is not a lab port: " + command)
+            return ""
+
+        monkeypatch.setattr(printer_lab, "_ps", fake)
+        monkeypatch.setattr(printer_lab, "_is_admin", lambda: True)
+        monkeypatch.setattr(printer_lab, "_listening", lambda port: False)
+        monkeypatch.setattr(printer_lab, "start_listener", lambda *a: 4247)
+        monkeypatch.setattr(printer_lab, "stop_listener", lambda s: None)
+        with pytest.raises(SystemExit, match="could not be undone"):
+            printer_lab.setup_network("SpectraLabIpp", "ipp", None, tmp_path, True, 6310)

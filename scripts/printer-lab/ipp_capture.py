@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import struct
 import sys
 import threading
@@ -53,6 +54,7 @@ SUPPORTED_OPERATIONS = sorted(OPERATION_NAMES)
 STATUS_OK = 0x0000
 STATUS_BAD_REQUEST = 0x0400
 STATUS_NOT_FOUND = 0x0406
+STATUS_ATTRIBUTES_NOT_SUPPORTED = 0x040B
 STATUS_OPERATION_NOT_SUPPORTED = 0x0501
 STATUS_VERSION_NOT_SUPPORTED = 0x0503
 
@@ -68,7 +70,11 @@ TEXT, NAME, KEYWORD, URI, URI_SCHEME, CHARSET, NATURAL_LANG, MIME_TYPE, MEMBER_N
 _STRING_TAGS = {TEXT, NAME, KEYWORD, URI, URI_SCHEME, CHARSET, NATURAL_LANG, MIME_TYPE, MEMBER_NAME}
 
 JOB_STATE_COMPLETED = 9
-MAX_BODY = 512 * 1024 * 1024
+MAX_BODY = 64 * 1024 * 1024  # the largest request body (or document) the server accepts
+MAX_JOBS = 50  # finished and pending jobs kept in memory; older ones stay on disk only
+IO_TIMEOUT_S = 30.0  # per socket read; a stalled client is dropped
+READ_STEP = 64 * 1024
+MAX_LINE = 1024  # an HTTP chunk-size or trailer line
 
 
 class IppError(ValueError):
@@ -133,9 +139,14 @@ def _decode_value(tag: int, raw: bytes):
     if tag in (TEXT_LANG, NAME_LANG):
         if len(raw) < 4:
             raise IppError("a text with language is too short")
-        lang_len = struct.unpack(">H", raw[:2])[0]
-        start = 2 + lang_len
-        text_len = struct.unpack(">H", raw[start:start + 2])[0]
+        try:
+            lang_len = struct.unpack(">H", raw[:2])[0]
+            start = 2 + lang_len
+            text_len = struct.unpack(">H", raw[start:start + 2])[0]
+        except struct.error:
+            raise IppError("a text with language is cut short") from None
+        if start + 2 + text_len > len(raw):
+            raise IppError("a text with language is cut short")
         return raw[start + 2:start + 2 + text_len].decode("utf-8", "replace")
     if tag == RANGE and len(raw) == 8:
         return struct.unpack(">ii", raw)
@@ -179,6 +190,13 @@ def _read_collection(reader: _Reader, depth: int) -> dict:
 
 def parse_message(data: bytes) -> Message:
     """Parse an IPP message. Raises IppError for anything malformed."""
+    try:
+        return _parse_message(data)
+    except struct.error:
+        raise IppError("a value has the wrong size") from None
+
+
+def _parse_message(data: bytes) -> Message:
     reader = _Reader(data)
     major, minor, code, request_id = struct.unpack(">BBHI", reader.take(8))
     groups: list = []
@@ -441,6 +459,7 @@ def summarize(record: dict) -> dict:
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = False  # on Windows SO_REUSEADDR lets a second process bind the same port
 
     def handle_error(self, request, client_address) -> None:
         """A client that drops the connection is normal for a print client; show any other error."""
@@ -454,7 +473,11 @@ class IppCapture:
     def __init__(
         self, directory: Path, host: str = "127.0.0.1", port: int = 0, sides_default: str = "one-sided",
         printer_name: str = "SpectraLab IPP Capture", formats=DEFAULT_FORMATS,
+        io_timeout: float = IO_TIMEOUT_S, max_body: int = MAX_BODY, max_jobs: int = MAX_JOBS,
     ) -> None:
+        if host != "127.0.0.1":
+            raise ValueError("the capture server binds 127.0.0.1 only")
+        self.max_body, self.max_jobs = max_body, max_jobs
         self.printer_name = printer_name
         self.formats = tuple(formats)
         self.directory = Path(directory)
@@ -464,7 +487,7 @@ class IppCapture:
         self.records: dict[int, dict] = {}
         self.documents: dict[int, bytearray] = {}
         self.next_job = 1
-        handler = type("Handler", (_Handler,), {"capture": self})
+        handler = type("Handler", (_Handler,), {"capture": self, "timeout": io_timeout})
         self.httpd = _Server((host, port), handler)
         self.thread: threading.Thread | None = None
 
@@ -499,8 +522,13 @@ class IppCapture:
             "document_file": None,
             "document_bytes": 0,
         }
-        self.records[job_id] = record
-        self.documents[job_id] = bytearray()
+        with self.lock:
+            self.records[job_id] = record
+            self.documents[job_id] = bytearray()
+            while len(self.records) > self.max_jobs:  # the files on disk stay; only memory is bounded
+                oldest = next(iter(self.records))
+                del self.records[oldest]
+                self.documents.pop(oldest, None)
         return record
 
     def _finish(self, record: dict, document: bytes) -> None:
@@ -510,6 +538,7 @@ class IppCapture:
         doc_path.write_bytes(document)
         record.update(state="completed", document_file=doc_path.name, document_bytes=len(document))
         record["summary"] = summarize(record)
+        self.documents.pop(job_id, None)
         temp = self.directory / f"job-{job_id:04d}.json.part"
         temp.write_text(json.dumps(record, indent=2), encoding="utf-8")
         os.replace(temp, self.directory / f"job-{job_id:04d}.json")
@@ -545,12 +574,17 @@ class IppCapture:
             record = self._job_of(request)
             if record is None:
                 return STATUS_NOT_FOUND, [], 0
-            self.documents[record["job-id"]].extend(request.body)
+            buffer = self.documents.get(record["job-id"])
+            if buffer is None or record["state"] == "completed":
+                return STATUS_NOT_FOUND, [], 0  # the document of this job is already complete
+            if len(buffer) + len(request.body) > self.max_body:
+                return STATUS_BAD_REQUEST, [], 0
+            buffer.extend(request.body)
             for name, values in request.group(TAG_OPERATION).items():
                 if name in ("document-format", "document-name"):
                     record["operation_attributes"][name] = _plain_group({name: values})[name]
             if request.first("last-document", default=True):
-                self._finish(record, bytes(self.documents[record["job-id"]]))
+                self._finish(record, bytes(buffer))
             return STATUS_OK, [(TAG_JOB, self._job_attributes(record, printer_uri))], record["job-id"]
         if code == OP_GET_JOB_ATTRIBUTES:
             record = self._job_of(request)
@@ -558,7 +592,17 @@ class IppCapture:
                 return STATUS_NOT_FOUND, [], 0
             return STATUS_OK, [(TAG_JOB, self._job_attributes(record, printer_uri))], record["job-id"]
         if code == OP_GET_JOBS:
-            groups = [(TAG_JOB, self._job_attributes(r, printer_uri)) for r in self.records.values()]
+            which = request.first("which-jobs", default="all")
+            if which not in ("all", "completed", "not-completed"):
+                return STATUS_ATTRIBUTES_NOT_SUPPORTED, [], 0
+            limit = request.first("limit")
+            if limit is not None and (not isinstance(limit, int) or limit < 1):
+                return STATUS_BAD_REQUEST, [], 0
+            with self.lock:
+                records = list(self.records.values())
+            if which != "all":  # no which-jobs means every job here (RFC 8011 says not-completed)
+                records = [r for r in records if (r["state"] == "completed") == (which == "completed")]
+            groups = [(TAG_JOB, self._job_attributes(r, printer_uri)) for r in records[:limit]]
             return STATUS_OK, groups, 0
         if code == OP_CANCEL_JOB:
             return (STATUS_OK, [], 0) if self._job_of(request) else (STATUS_NOT_FOUND, [], 0)
@@ -604,23 +648,49 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args) -> None:  # noqa: A002
         pass
 
+    def _line(self) -> bytes:
+        """One short line; a longer line or a closed connection is an error."""
+        line = self.rfile.readline(MAX_LINE + 1)
+        if not line.endswith(b"\n"):
+            raise IppError("a chunk header line is too long or the connection ended")
+        return line
+
+    def _read_exact(self, count: int) -> bytes:
+        """`count` bytes in 64 KB steps, so a false length allocates nothing up front."""
+        out = bytearray()
+        while len(out) < count:
+            piece = self.rfile.read(min(READ_STEP, count - len(out)))
+            if not piece:
+                raise IppError("the connection ended before the body was complete")
+            out.extend(piece)
+        return bytes(out)
+
     def _read_body(self) -> bytes:
+        limit = self.capture.max_body
         if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
             body = bytearray()
             while True:
-                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                size_text = self._line().split(b";")[0].strip()
+                if not re.fullmatch(rb"[0-9a-fA-F]{1,8}", size_text):
+                    raise IppError("a chunk size is not a plain hexadecimal number")
+                size = int(size_text, 16)
                 if size == 0:
-                    while self.rfile.readline().strip():
-                        pass
-                    return bytes(body)
-                body.extend(self.rfile.read(size))
-                self.rfile.readline()
-                if len(body) > MAX_BODY:
+                    for _ in range(100):  # trailer lines
+                        if not self._line().strip():
+                            return bytes(body)
+                    raise IppError("too many trailer lines")
+                if len(body) + size > limit:
                     raise IppError("the request is larger than the lab accepts")
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > MAX_BODY:
+                body.extend(self._read_exact(size))
+                if self._line().strip():
+                    raise IppError("a chunk does not end with a line break")
+        text = (self.headers.get("Content-Length") or "0").strip()
+        if not text.isdigit():
+            raise IppError("the Content-Length is not a number")
+        length = int(text)
+        if length > limit:
             raise IppError("the request is larger than the lab accepts")
-        return self.rfile.read(length)
+        return self._read_exact(length)
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -638,6 +708,9 @@ class _Handler(BaseHTTPRequestHandler):
         except (IppError, ValueError):
             self.close_connection = True
             self._send(400, b"bad request\n", "text/plain")
+            return
+        except OSError:  # the read timed out or the client left: nothing to answer
+            self.close_connection = True
             return
         host = self.headers.get("Host", "127.0.0.1")
         request_uri = f"http://{host}{self.path}"

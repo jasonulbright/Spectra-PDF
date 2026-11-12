@@ -347,6 +347,16 @@ def setup_network(
                 if duplex_unit:
                     _enable_duplex_unit(name)
     except RuntimeError as exc:
+        # Add-Printer can create the queue and then throw: record the port the queue really has,
+        # but only when it has the shape of a lab port, so the rollback can remove it.
+        try:
+            if state["port_name"] is None and _printer_exists(name):
+                actual = _printer_port(name)
+                if _NETWORK_PORT[kind].fullmatch(actual):
+                    state["port_name"] = actual
+                    write_state(directory, name, state)
+        except (RuntimeError, OSError):
+            pass
         undone = "was undone"
         try:
             teardown_network(name, directory)

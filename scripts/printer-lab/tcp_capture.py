@@ -14,18 +14,30 @@ import argparse
 import os
 import socket
 import threading
+import time
 from pathlib import Path
 
 
+MAX_BYTES = 64 * 1024 * 1024  # one job; more ends the job
+DEADLINE_S = 120.0  # one connection, from accept to the end of the job
+
+
 class TcpCapture:
-    def __init__(self, directory: Path, host: str = "127.0.0.1", port: int = 0, idle: float = 5.0) -> None:
+    def __init__(
+        self, directory: Path, host: str = "127.0.0.1", port: int = 0, idle: float = 5.0,
+        max_bytes: int = MAX_BYTES, deadline: float = DEADLINE_S,
+    ) -> None:
+        if host != "127.0.0.1":
+            raise ValueError("the capture listener binds 127.0.0.1 only")
+        self.max_bytes, self.deadline = max_bytes, deadline
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.idle = idle
         self.lock = threading.Lock()
         self.next_job = 1
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if os.name != "nt":  # on Windows SO_REUSEADDR lets a second process bind the same port
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((host, port))
         self.sock.listen(8)
         self.closed = False
@@ -54,15 +66,26 @@ class TcpCapture:
 
     def _receive(self, connection: socket.socket) -> None:
         data = bytearray()
-        connection.settimeout(self.idle)
+        started = time.monotonic()
+        cut = ""
         try:
             while True:
+                left = self.deadline - (time.monotonic() - started)
+                if left <= 0:
+                    cut = "deadline"
+                    break
+                connection.settimeout(min(self.idle, left))
                 chunk = connection.recv(65536)
                 if not chunk:
                     break
                 data.extend(chunk)
+                if len(data) >= self.max_bytes:
+                    del data[self.max_bytes:]
+                    cut = "byte cap"
+                    break
         except (socket.timeout, OSError):
-            pass
+            if time.monotonic() - started >= self.deadline:
+                cut = "deadline"
         finally:
             connection.close()
         if not data:
@@ -72,6 +95,8 @@ class TcpCapture:
             self.next_job += 1
         temp = self.directory / f"job-{job_id:04d}.bin.part"
         temp.write_bytes(bytes(data))
+        if cut:
+            (self.directory / f"job-{job_id:04d}.cut").write_text(f"the job was cut at the {cut}")
         os.replace(temp, self.directory / f"job-{job_id:04d}.bin")
 
 
