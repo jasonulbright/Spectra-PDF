@@ -6,8 +6,8 @@ cannot read. Every decoder returns the raw value it found next to the paper
 edge it means; a job whose language is not decoded here is reported as
 undecodable, never guessed.
 
-The paper edge is "simplex", "long" or "short". PCL 5 and the XPS print ticket
-name the edge of the paper. PCL XL and PostScript name the binding against the
+The paper edge is "simplex", "long" or "short". PCL 5, the XPS print ticket, the
+IPP `sides` attribute, PWG raster and URF name the edge of the paper. PCL XL and PostScript name the binding against the
 page, so the edge also needs the page orientation, which is decoded with it.
 """
 
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import re
+import struct
 import zipfile
 import zlib
 from dataclasses import dataclass, field
@@ -282,6 +283,146 @@ def _decode_xps(data: bytes) -> Decoded:
     return out
 
 
+# --- PWG raster and URF ----------------------------------------------------
+
+_PWG_SYNC, _PWG_HEADER = b"RaS2", 1796
+_PWG_DUPLEX_AT, _PWG_TUMBLE_AT, _PWG_WIDTH_AT, _PWG_HEIGHT_AT, _PWG_BPP_AT = 272, 368, 372, 376, 388
+_URF_SYNC, _URF_HEADER = b"UNIRAST\x00", 32
+_URF_EDGE = {1: SIMPLEX, 2: LONG, 3: SHORT}
+
+
+def _skip_raster(data: bytes, pos: int, width: int, height: int, pixel: int) -> int:
+    """The offset after one page of PWG raster / URF pixel data (line repeat plus packed pixels)."""
+    if width <= 0 or height <= 0 or pixel <= 0:
+        raise ValueError("the page header holds no usable size")
+    rows = 0
+    while rows < height:
+        repeat = data[pos] + 1
+        pos += 1
+        filled = 0
+        while filled < width:
+            count = data[pos]
+            pos += 1
+            if count <= 127:
+                filled += count + 1
+                pos += pixel
+            elif count == 128:
+                filled = width
+            else:
+                run = 257 - count
+                filled += run
+                pos += run * pixel
+        if filled != width or pos > len(data):
+            raise ValueError("a raster line does not end at the page width")
+        rows += repeat
+    if rows != height:
+        raise ValueError("the raster has more lines than the page height")
+    return pos
+
+
+def _decode_pwg_raster(data: bytes) -> Decoded:
+    out = Decoded("PWG raster")
+    seen: set[tuple[str, str | None]] = set()
+    pos, pages = len(_PWG_SYNC), 0
+    try:
+        while pos < len(data):
+            header = data[pos : pos + _PWG_HEADER]
+            if len(header) < _PWG_HEADER or not header.startswith(b"PwgRaster\x00"):
+                raise ValueError("a page header is missing or damaged")
+            duplex = struct.unpack_from(">I", header, _PWG_DUPLEX_AT)[0]
+            tumble = struct.unpack_from(">I", header, _PWG_TUMBLE_AT)[0]
+            width = struct.unpack_from(">I", header, _PWG_WIDTH_AT)[0]
+            height = struct.unpack_from(">I", header, _PWG_HEIGHT_AT)[0]
+            bits = struct.unpack_from(">I", header, _PWG_BPP_AT)[0]
+            if duplex == 0:
+                seen.add(("Duplex=0", SIMPLEX))
+            elif duplex == 1 and tumble in (0, 1):
+                seen.add((f"Duplex=1 Tumble={tumble}", SHORT if tumble else LONG))
+            else:
+                seen.add((f"Duplex={duplex} Tumble={tumble}", None))
+            pages += 1
+            pos = _skip_raster(data, pos + _PWG_HEADER, width, height, bits // 8)
+    except (IndexError, ValueError, struct.error) as exc:
+        out.complete = False
+        out.notes.append(f"the raster stream was not read to the end: {exc}")
+    for name, edge in sorted(seen, key=lambda item: item[0]):
+        out.sources.append(Source("PWG raster header", name, edge))
+    out.pages = pages or None
+    return out
+
+
+def _decode_urf(data: bytes) -> Decoded:
+    out = Decoded("URF")
+    seen: set[tuple[str, str | None]] = set()
+    pos, pages = len(_URF_SYNC) + 4, 0
+    try:
+        declared = struct.unpack_from(">I", data, len(_URF_SYNC))[0]
+        while pos < len(data):
+            header = data[pos : pos + _URF_HEADER]
+            if len(header) < _URF_HEADER:
+                raise ValueError("a page header is cut short")
+            bits, _color, duplex = header[0], header[1], header[2]
+            width, height = struct.unpack_from(">II", header, 12)
+            seen.add((f"DuplexMode={duplex}", _URF_EDGE.get(duplex)))
+            pages += 1
+            pos = _skip_raster(data, pos + _URF_HEADER, width, height, bits // 8)
+        if pages != declared:
+            out.complete = False
+            out.notes.append(f"the file header names {declared} pages, {pages} were read")
+    except (IndexError, ValueError, struct.error) as exc:
+        out.complete = False
+        out.notes.append(f"the raster stream was not read to the end: {exc}")
+    for name, edge in sorted(seen, key=lambda item: item[0]):
+        out.sources.append(Source("URF page header", name, edge))
+    out.pages = pages or None
+    return out
+
+
+# --- IPP job attributes ----------------------------------------------------
+
+_IPP_SIDES = {"one-sided": SIMPLEX, "two-sided-long-edge": LONG, "two-sided-short-edge": SHORT}
+_IPP_ORIENTATION = {3: "portrait", 4: "landscape", 5: "landscape", 6: "portrait"}
+_IPP_SHOWN = ("orientation-requested", "media", "copies", "print-color-mode", "document-format")
+
+
+def decode_ipp(record: dict, document: bytes | None = None) -> Decoded:
+    """Read the duplex mode of an IPP job: the `sides` attribute the client sent.
+
+    `record` is a job as `ipp_capture` saves it. A job with no `sides` attribute is
+    undecodable: an absent attribute does not mean one-sided. A PWG raster or URF
+    document states the mode in its page headers; those count as a source only
+    when the job has no `sides`, and are otherwise shown in the notes."""
+    from ipp_capture import summarize  # noqa: PLC0415  (the lab folder is on sys.path)
+
+    out = Decoded("IPP")
+    job = record.get("job_attributes", {})
+    operation = record.get("operation_attributes", {})
+    sides = job.get("sides") or operation.get("sides") or []
+    for value in sides:
+        out.sources.append(Source("IPP sides", str(value), _IPP_SIDES.get(value)))
+    if not sides:
+        out.notes.append("the job names no sides attribute")
+    shown = summarize(record)
+    orientation = shown.get("orientation-requested")
+    out.orientation = _IPP_ORIENTATION.get(orientation) if isinstance(orientation, int) else None
+    out.notes.append(" ".join(f"{k}={shown[k]}" for k in _IPP_SHOWN if shown.get(k) is not None))
+    if document and document.startswith((_PWG_SYNC, _URF_SYNC)):
+        nested = decode(document)
+        out.pages = nested.pages
+        out.complete = nested.complete
+        out.notes.extend(nested.notes)
+        header = "; ".join(f"{s.name} {s.raw}" for s in nested.sources)
+        if sides:
+            differs = nested.edges() and nested.edges() != out.edges()
+            out.notes.append(
+                f"document {nested.language}: {header}"
+                + ("; the header names a different edge than sides, which the lab compares" if differs else "")
+            )
+        else:
+            out.sources.extend(nested.sources)
+    return out
+
+
 # --- entry point -----------------------------------------------------------
 
 
@@ -289,6 +430,10 @@ def decode(data: bytes) -> Decoded:
     """Decode one job. The language comes from the bytes, not from a name."""
     if data.startswith(b"PK\x03\x04"):
         return _decode_xps(data)
+    if data.startswith(_PWG_SYNC):
+        return _decode_pwg_raster(data)
+    if data.startswith(_URF_SYNC):
+        return _decode_urf(data)
     if data.startswith(b"%PDF"):
         d = Decoded("PDF")
         d.notes.append("a PDF carries no printer duplex setting")
