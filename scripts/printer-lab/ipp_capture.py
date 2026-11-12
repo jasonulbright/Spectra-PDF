@@ -70,7 +70,7 @@ TEXT, NAME, KEYWORD, URI, URI_SCHEME, CHARSET, NATURAL_LANG, MIME_TYPE, MEMBER_N
 _STRING_TAGS = {TEXT, NAME, KEYWORD, URI, URI_SCHEME, CHARSET, NATURAL_LANG, MIME_TYPE, MEMBER_NAME}
 
 JOB_STATE_COMPLETED = 9
-MAX_BODY = 64 * 1024 * 1024  # the largest request body (or document) the server accepts
+MAX_BODY = 256 * 1024 * 1024  # the largest request body (or document) the server accepts
 MAX_JOBS = 50  # finished and pending jobs kept in memory; older ones stay on disk only
 IO_TIMEOUT_S = 30.0  # per socket read; a stalled client is dropped
 READ_STEP = 64 * 1024

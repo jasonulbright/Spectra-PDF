@@ -1018,6 +1018,25 @@ class TestTcpBadSenders:
             capture.stop()
 
 
+class TestCutJobsAndCaps:
+    def test_a_cut_tcp_job_is_not_complete(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(printer_lab, "_printer_port", lambda name: "PORT")
+        monkeypatch.setattr(printer_lab, "_listening", lambda port: True)
+        (tmp_path / "job-0001.bin").write_bytes(b"\x1bE\x1b&l1S text \x0c")
+        state = {"kind": "tcp", "capture_dir": str(tmp_path), "port_name": "PORT", "port": 1}
+        target = printer_lab.CaptureTarget("SpectraLabX", state, timeout=2)
+        whole = target._decode(tmp_path / "job-0001.bin")
+        assert whole.complete and printer_lab.row_status(whole, "long", True) == "PASS"
+        (tmp_path / "job-0001.cut").write_text("the job was cut at the byte cap")
+        cut = target._decode(tmp_path / "job-0001.bin")
+        assert not cut.complete and any(n.startswith("cut:") for n in cut.notes)
+        assert printer_lab.row_status(cut, "long", True) == "INCOMPLETE"
+
+    def test_the_default_caps_hold_a_large_raster_job(self):
+        assert ipp.MAX_BODY == tcp_capture.MAX_BYTES == 256 * 1024 * 1024
+        assert ipp.READ_STEP == 64 * 1024
+
+
 class TestIppSetupRollback:
     def test_a_queue_made_before_add_printer_threw_is_removed_with_its_port(self, monkeypatch, tmp_path):
         calls, state = [], {"made": False, "gone": False}

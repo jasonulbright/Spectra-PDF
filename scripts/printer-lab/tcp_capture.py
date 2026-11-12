@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 
-MAX_BYTES = 64 * 1024 * 1024  # one job; more ends the job
+MAX_BYTES = 256 * 1024 * 1024  # one job; more ends the job
 DEADLINE_S = 120.0  # one connection, from accept to the end of the job
 
 

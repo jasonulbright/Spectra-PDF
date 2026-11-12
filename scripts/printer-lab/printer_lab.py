@@ -470,7 +470,12 @@ class CaptureTarget:
 
     def _decode(self, path: Path) -> lab_decode.Decoded:
         if self.kind == "tcp":
-            return lab_decode.decode(path.read_bytes())
+            decoded = lab_decode.decode(path.read_bytes())
+            cut = path.with_suffix(".cut")
+            if cut.exists():
+                decoded.complete = False
+                decoded.notes.append("cut: " + cut.read_text(encoding="utf-8", errors="replace").strip())
+            return decoded
         record = json.loads(path.read_text(encoding="utf-8"))
         document = path.with_name(record["document_file"]).read_bytes() if record.get("document_file") else None
         return lab_decode.decode_ipp(record, document)
