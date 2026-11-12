@@ -396,7 +396,8 @@ def build_gs_args(
     `media` is the sheet's (width, height) in points as the driver is asked to
     feed it. mswinpr2 opens its page buffer before any /UserSettings arrives,
     and matches the printer's paper list against the size the device holds at
-    that moment, so the size must ride the command line.
+    that moment, so the size rides both the command line and the prolog's
+    /PageSize (the device the prolog selects does not inherit the switches).
     """
     prolog = setpagedevice_ps or build_setpagedevice_ps(
         None, None, None, None, "printer", printer, media
