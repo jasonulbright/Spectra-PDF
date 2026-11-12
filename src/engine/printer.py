@@ -297,12 +297,12 @@ def printer_default_duplex(name: str) -> str | None:
     """
     if not name or not name.strip():
         return None
-    now = time.monotonic()
     cached = _DEFAULT_DUPLEX_CACHE.get(name)
-    if cached is not None and now - cached[0] < _DEFAULT_DUPLEX_TTL_S:
+    if cached is not None and time.monotonic() - cached[0] < _DEFAULT_DUPLEX_TTL_S:
         return cached[1]
     value = _read_default_duplex(name)
-    _DEFAULT_DUPLEX_CACHE[name] = (now, value)
+    # Stamped after the read: a slow answer is still kept for the full time.
+    _DEFAULT_DUPLEX_CACHE[name] = (time.monotonic(), value)
     return value
 
 

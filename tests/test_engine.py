@@ -3550,6 +3550,18 @@ class TestPrintPageSpec:
         )
 
 
+@pytest.fixture(autouse=True)
+def _no_real_printer_default(monkeypatch):
+    """No test reads a real printer's default settings or a real CUPS queue.
+
+    A machine with a queue named like a test printer and a two-sided default
+    would change the expected prolog."""
+    import engine.printer as printer_mod
+
+    monkeypatch.setattr(printer_mod, "_DEFAULT_DUPLEX_CACHE", {})
+    monkeypatch.setattr(printer_mod, "_read_default_duplex", lambda name: None)
+
+
 class TestPrintArgs:
     def test_exact_argv_fit_all_pages(self):
         args = build_gs_args("C:\\in.pdf", "My Printer", "", "fit", "C:\\gs.exe")
@@ -4527,16 +4539,24 @@ class TestPrintPipeline:
         import engine.printer as printer_mod
 
         calls = []
-        monkeypatch.setattr(printer_mod, "_DEFAULT_DUPLEX_CACHE", {})
-        monkeypatch.setattr(
-            printer_mod, "_read_default_duplex", lambda name: calls.append(name) or "short"
-        )
+        now = [100.0]
+        monkeypatch.setattr(printer_mod.time, "monotonic", lambda: now[0])
+
+        def read(name):
+            calls.append(name)
+            now[0] += 8.0  # a slow answer: longer than the time it is kept
+            return "short"
+
+        monkeypatch.setattr(printer_mod, "_read_default_duplex", read)
         assert printer_mod.printer_default_duplex("Q") == "short"
+        # Stamped when the read ENDED (108), so this ask at 108 is still served.
         assert printer_mod.printer_default_duplex("Q") == "short"
         assert calls == ["Q"]
+        now[0] += printer_mod._DEFAULT_DUPLEX_TTL_S + 1
+        assert printer_mod.printer_default_duplex("Q") == "short"
+        assert calls == ["Q", "Q"]
         assert printer_mod.printer_default_duplex("") is None
-        monkeypatch.setattr(printer_mod, "_DEFAULT_DUPLEX_TTL_S", 0.0)
-        printer_mod.printer_default_duplex("Q")
+        assert printer_mod.printer_default_duplex("   ") is None
         assert calls == ["Q", "Q"]
 
     def test_cups_default_duplex_reads_the_destination_sides(self):
