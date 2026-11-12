@@ -167,7 +167,6 @@ class TestFrameComparison:
         assert printer_lab.compare_frame(now, self.base) == []
 
     def test_a_shrunk_page_is_reported(self):
-        # The size regression this guards: an imposed sheet printed 8% small.
         now = {"case": [{"page_pt": [595.3, 841.9], "content_px": [104, 134, 1549, 2206]}]}
         problems = printer_lab.compare_frame(now, self.base)
         assert problems and "content box" in problems[0]
@@ -176,3 +175,78 @@ class TestFrameComparison:
         now = {"case": [{"page_pt": [612.0, 792.0], "content_px": [37, 38, 1616, 2302]}], "other": []}
         problems = printer_lab.compare_frame(now, self.base)
         assert any("page size" in p for p in problems) and any("not in the baseline" in p for p in problems)
+
+
+class TestStatusAndExit:
+    def decoded(self, edge="long", complete=True):
+        d = lab_decode.Decoded("PCL XL", complete=complete)
+        if edge:
+            d.sources.append(lab_decode.Source("x", "x", edge))
+        return d
+
+    def test_row_status(self):
+        status = printer_lab.row_status
+        assert status(self.decoded("long"), "long", True) == "PASS"
+        assert status(self.decoded("short"), "long", True) == "FAIL"
+        assert status(self.decoded(None), "long", True) == "UNDECODABLE"
+        assert status(self.decoded("long", complete=False), "long", True) == "INCOMPLETE"
+        assert status(self.decoded("short", complete=False), "long", True) == "FAIL"
+        assert status(self.decoded("long"), "long", False) == "NO DUPLEX UNIT"
+
+    def test_exit_code(self):
+        code = printer_lab.exit_code
+        assert code([{"status": "PASS"}, {"status": "NO DUPLEX UNIT"}]) == 0
+        assert code([{"status": "PASS"}, {"status": "UNDECODABLE"}]) == 2
+        assert code([{"status": "INCOMPLETE"}]) == 2
+        assert code([{"status": "UNDECODABLE"}, {"status": "FAIL"}]) == 1
+        assert code([{"status": "ERROR"}]) == 1
+
+
+class TestInjectionAndTeardown:
+    def test_every_quote_character_powershell_accepts_is_doubled(self):
+        for quote in ("'", "\u2018", "\u2019", "\u201a", "\u201b"):
+            assert printer_lab._quote("a" + quote + "b") == "'a" + quote + quote + "b'"
+
+    def test_driver_and_folder_text_is_limited(self):
+        for bad in ("x\u2019; Remove-Printer -Name 'Real'; \u2019", "a;b", "a`b", "$(x)"):
+            with pytest.raises(SystemExit):
+                printer_lab._require_plain("driver name", bad, printer_lab._DRIVER_NAME)
+        assert printer_lab._require_plain("driver name", "Brother MFC-L8690CDW series", printer_lab._DRIVER_NAME)
+
+    def test_teardown_touches_only_the_port_setup_made(self, monkeypatch, tmp_path):
+        calls = []
+
+        def fake(command):
+            calls.append(command)
+            return "0" if "Count" in command else ""
+
+        monkeypatch.setattr(printer_lab, "_ps", fake)
+        printer_lab.teardown("SpectraLabMfc", tmp_path)
+        listing = next(c for c in calls if "Get-PrinterPort" in c)
+        assert "-eq" in listing and str(tmp_path / "SpectraLabMfc.prn") in listing and "-like" not in listing
+
+    def test_a_printer_on_another_port_is_not_removed(self, monkeypatch, tmp_path):
+        def fake(command):
+            if "Count" in command:
+                return "1"
+            if "PortName" in command:
+                return str(tmp_path / "elsewhere" / "SpectraLabMfc.prn")
+            pytest.fail("a command ran for a printer on another port: " + command)
+
+        monkeypatch.setattr(printer_lab, "_ps", fake)
+        with pytest.raises(SystemExit):
+            printer_lab.teardown("SpectraLabMfc", tmp_path)
+
+
+class TestDecoderLimits:
+    def test_a_pcl_xl_job_that_ends_with_the_uel_is_complete(self):
+        data = xl_job(xl_page(0, 1)) + UEL + b"@PJL EOJ\n"
+        decoded = lab_decode.decode(data)
+        assert decoded.complete and decoded.edges() == {"long"}
+
+    def test_a_large_xps_entry_is_not_read(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("big.xml", b"a" * (lab_decode._XPS_ENTRY_LIMIT + 1))
+        decoded = lab_decode.decode(buffer.getvalue())
+        assert not decoded.complete and not decoded.decodable and "not read" in decoded.notes[0]

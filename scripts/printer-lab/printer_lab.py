@@ -10,6 +10,9 @@ Pillow) on Windows:
     python scripts/printer-lab/printer_lab.py frame  --name SpectraLabPdf
     python scripts/printer-lab/printer_lab.py teardown --name SpectraLabMfc
 
+`matrix` exits 1 when a row failed, 2 when no row failed but a job was not fully
+decoded, and 0 otherwise. `--dir` of `teardown` must be the `--dir` of `setup`.
+
 `--repo` names the checkout under test (default: this one); the engine, the
 bundled Ghostscript and the output all come from it. Every printer this tool
 touches must be named SpectraLab* and sit on a file port.
@@ -79,8 +82,20 @@ def _ps(command: str) -> str:
     return result.stdout.strip()
 
 
+_SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
+_DRIVER_NAME = re.compile(r"[\w .()/+-]{1,120}")
+_PATH_TEXT = re.compile(r"[\w :\\/.()-]{1,200}")
+
+
 def _quote(text: str) -> str:
-    return "'" + text.replace("'", "''") + "'"
+    """A PowerShell single-quoted string; every quote character PowerShell accepts is doubled."""
+    return "'" + "".join(c + c if c in _SINGLE_QUOTES else c for c in text) + "'"
+
+
+def _require_plain(kind: str, value: str, pattern: re.Pattern) -> str:
+    if not pattern.fullmatch(value):
+        raise SystemExit(f"Refused: the {kind} '{value}' holds a character the lab does not accept.")
+    return value
 
 
 def port_file(name: str) -> Path:
@@ -108,6 +123,8 @@ def has_duplex_unit(name: str) -> bool:
 
 def setup(name: str, driver: str, directory: Path, duplex_unit: bool) -> None:
     require_lab_name(name)
+    _require_plain("driver name", driver, _DRIVER_NAME)
+    _require_plain("folder", str(directory), _PATH_TEXT)
     directory.mkdir(parents=True, exist_ok=True)
     port = str(directory / f"{name}.prn")
     _ps(f"Add-PrinterPort -Name {_quote(port)} -ErrorAction Stop")
@@ -130,14 +147,17 @@ def setup(name: str, driver: str, directory: Path, duplex_unit: bool) -> None:
     print(f"{name}: {driver} -> {port}; duplex unit reported: {has_duplex_unit(name)}")
 
 
-def teardown(name: str) -> None:
-    """Remove the printer if it exists, then every port this lab made for it."""
+def teardown(name: str, directory: Path) -> None:
+    """Remove the printer if it exists, then the one port `setup` made for it in `directory`."""
     require_lab_name(name)
+    _require_plain("folder", str(directory), _PATH_TEXT)
+    expected = directory / f"{name}.prn"
     if _ps(f"@(Get-Printer -Name {_quote(name)} -ErrorAction SilentlyContinue).Count") == "1":
-        port_file(name)
+        if port_file(name) != expected:
+            raise SystemExit(f"Refused: '{name}' is not on the port {expected}.")
         _ps(f"Remove-Printer -Name {_quote(name)} -ErrorAction Stop")
     ports = _ps(
-        "Get-PrinterPort | Where-Object { $_.Name -like " + _quote("*" + chr(92) + name + ".prn") + " }"
+        "Get-PrinterPort | Where-Object { $_.Name -eq " + _quote(str(expected)) + " }"
         " | ForEach-Object { $_.Name }"
     )
     for port in filter(None, (line.strip() for line in ports.splitlines())):
@@ -221,6 +241,25 @@ class Engine:
         return self.printer.printer_default_duplex(name) or lab_decode.SIMPLEX
 
 
+def row_status(decoded: lab_decode.Decoded, expected: str, unit: bool) -> str:
+    """PASS only when the whole job was read and it names the expected edge."""
+    if not unit:
+        return "NO DUPLEX UNIT"
+    if not decoded.decodable:
+        return "UNDECODABLE"
+    if decoded.edges() != {expected}:
+        return "FAIL"
+    return "PASS" if decoded.complete else "INCOMPLETE"
+
+
+def exit_code(rows: list[dict]) -> int:
+    """1 when a row failed, 2 when no row failed but one was not fully read, else 0."""
+    statuses = {r["status"] for r in rows}
+    if statuses & {"FAIL", "ERROR"}:
+        return 1
+    return 2 if statuses & {"UNDECODABLE", "INCOMPLETE"} else 0
+
+
 def run_matrix(engine: Engine, name: str, work: Path) -> list[dict]:
     path = port_file(name)
     unit = has_duplex_unit(name)
@@ -243,12 +282,7 @@ def run_matrix(engine: Engine, name: str, work: Path) -> list[dict]:
                 rows.append(row)
                 continue
             row.update(found=decoded.summary(), language=decoded.language, note="; ".join(decoded.notes))
-            if not unit:
-                row["status"] = "NO DUPLEX UNIT"
-            elif not decoded.decodable:
-                row["status"] = "UNDECODABLE"
-            else:
-                row["status"] = "PASS" if decoded.edges() == {expected} else "FAIL"
+            row["status"] = row_status(decoded, expected, unit)
             rows.append(row)
     return rows
 
@@ -342,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-duplex-unit", action="store_true")
     p = sub.add_parser("teardown", help="remove a lab printer, its port and its job file")
     p.add_argument("--name", required=True)
+    p.add_argument("--dir", type=Path, default=Path(tempfile.gettempdir()) / "spectra-printer-lab")
     for command in ("matrix", "frame"):
         p = sub.add_parser(command)
         p.add_argument("--name", required=True)
@@ -356,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
         setup(args.name, args.driver, args.dir, not args.no_duplex_unit)
         return 0
     if args.command == "teardown":
-        teardown(args.name)
+        teardown(args.name, args.dir)
         return 0
 
     engine = Engine(args.repo.resolve(), args.gs)
@@ -367,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
             print(format_table(rows))
             if args.json:
                 args.json.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-            return 1 if any(r["status"] in ("FAIL", "ERROR") for r in rows) else 0
+            return exit_code(rows)
         measured = measure_frame(engine, args.name, work)
         if args.update_baseline:
             BASELINE.write_text(format_baseline(measured), encoding="utf-8", newline="\n")

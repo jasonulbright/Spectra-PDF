@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 
 SIMPLEX, LONG, SHORT = "simplex", "long", "short"
@@ -182,6 +183,8 @@ def _decode_pclxl(data: bytes) -> Decoded:
                 pos += 4 + int.from_bytes(data[pos : pos + 4], "little")
             elif tag == 0xFB:
                 pos += 1 + data[pos]
+            elif tag == 0x1B and data.startswith(_UEL, pos - 1):
+                break
             elif 0x41 <= tag <= 0xB9:
                 if tag == _XL_BEGIN_PAGE:
                     pages += 1
@@ -244,6 +247,7 @@ def _decode_postscript(data: bytes) -> Decoded:
 # --- XPS print ticket ------------------------------------------------------
 
 _TICKET_OPTION = {"TwoSidedLongEdge": LONG, "TwoSidedShortEdge": SHORT, "OneSided": SIMPLEX}
+_XPS_ENTRY_LIMIT = 4_000_000
 
 
 def _decode_xps(data: bytes) -> Decoded:
@@ -254,10 +258,19 @@ def _decode_xps(data: bytes) -> Decoded:
         out.language = "zip (damaged)"
         return out
     seen: set[str] = set()
-    for name in archive.namelist():
-        if not name.lower().endswith((".xml", ".ticket")):
+    for info in archive.infolist():
+        if not info.filename.lower().endswith((".xml", ".ticket")):
             continue
-        body = archive.read(name).decode("utf-8", "replace")
+        if info.file_size > _XPS_ENTRY_LIMIT:
+            out.complete = False
+            out.notes.append(f"{info.filename} is larger than {_XPS_ENTRY_LIMIT} bytes and was not read")
+            continue
+        try:
+            body = archive.read(info).decode("utf-8", "replace")
+        except (RuntimeError, NotImplementedError, zlib.error, zipfile.BadZipFile):
+            out.complete = False
+            out.notes.append(f"{info.filename} could not be read")
+            continue
         for m in re.finditer(
             r'name="psk:JobDuplexAllDocumentsContiguously"[^>]*>\s*<[^>]*name="psk:(\w+)"', body
         ):
