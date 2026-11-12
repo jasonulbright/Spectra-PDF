@@ -281,6 +281,12 @@ def run_matrix(engine: Engine, name: str, work: Path) -> list[dict]:
             except Exception as exc:  # noqa: BLE001
                 row.update(found="", status="ERROR", language="", note=str(exc)[:160])
                 rows.append(row)
+                if isinstance(exc, TimeoutError) and all(r["status"] == "ERROR" for r in rows):
+                    row["note"] += (
+                        "; no job was written, so the remaining cells were not run. "
+                        "The driver may not print to a file port: see the PrintService/Admin log, event 372."
+                    )
+                    return rows
                 continue
             row.update(found=decoded.summary(), language=decoded.language, note="; ".join(decoded.notes))
             row["status"] = row_status(decoded, expected, unit)

@@ -261,3 +261,30 @@ class TestRelativeFolder:
         printer_lab.setup("SpectraLabRel", "Some Driver", Path("labdir"), False)
         port = next(c for c in calls if c.startswith("Add-PrinterPort"))
         assert str((tmp_path / "labdir").resolve()) in port
+
+
+class TestMatrixStopsWhenNoJobIsWritten:
+    class FakeEngine:
+        def __init__(self):
+            self.jobs = 0
+
+        def print_job(self, source, name, **kwargs):
+            self.jobs += 1
+
+        def default_duplex(self, name):
+            return "simplex"
+
+    def test_the_first_timeout_ends_the_run_with_one_error_row(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(printer_lab, "port_file", lambda name: tmp_path / "SpectraLabX.prn")
+        monkeypatch.setattr(printer_lab, "has_duplex_unit", lambda name: True)
+        monkeypatch.setattr(printer_lab, "make_source", lambda path, pages=4: None)
+
+        def no_job(path):
+            raise TimeoutError("no finished job")
+
+        monkeypatch.setattr(printer_lab, "_wait_job", no_job)
+        engine = self.FakeEngine()
+        rows = printer_lab.run_matrix(engine, "SpectraLabX", tmp_path)
+        assert len(rows) == 1 and engine.jobs == 1
+        assert rows[0]["status"] == "ERROR" and "event 372" in rows[0]["note"]
+        assert printer_lab.exit_code(rows) == 1
