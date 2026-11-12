@@ -291,4 +291,5 @@ class TestMatrixStopsWhenNoJobIsWritten:
 
 
 def test_a_short_8_3_folder_name_is_accepted():
-    assert printer_lab._require_plain("folder", "C:\Users\RUNNER~1\Temp", printer_lab._PATH_TEXT)
+    short = chr(92).join(["C:", "Users", "RUNNER~1", "Temp"])
+    assert printer_lab._require_plain("folder", short, printer_lab._PATH_TEXT)
