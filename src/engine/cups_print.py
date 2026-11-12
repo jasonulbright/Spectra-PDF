@@ -173,6 +173,32 @@ def destination_exists(name: str, lib=None) -> bool:
     return False
 
 
+def default_duplex(name: str, lib=None) -> str | None:
+    """"long" or "short" when the destination's default `sides` is two-sided.
+
+    The destination options carry the server default and the user's own
+    lpoptions. One-sided, no value and every failure return None."""
+    try:
+        lib = lib or load_library()
+        dest = _named_dest(lib, name)
+    except (OSError, RuntimeError):
+        return None
+    if not dest:
+        return None
+    try:
+        for i in range(dest.contents.num_options):
+            option = dest.contents.options[i]
+            if option.name == b"sides" and option.value is not None:
+                value = option.value.decode("ascii", "replace")
+                return {
+                    "two-sided-long-edge": "long",
+                    "two-sided-short-edge": "short",
+                }.get(value)
+        return None
+    finally:
+        lib.cupsFreeDests(1, dest)
+
+
 def _is_not_found(status: int) -> bool:
     # client-error-not-found (RFC 8011 section 4.1.6.2 0x0406).
     return status == 0x0406

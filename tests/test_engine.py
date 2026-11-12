@@ -3550,6 +3550,18 @@ class TestPrintPageSpec:
         )
 
 
+@pytest.fixture(autouse=True)
+def _no_real_printer_default(monkeypatch):
+    """No test reads a real printer's default settings or a real CUPS queue.
+
+    A machine with a queue named like a test printer and a two-sided default
+    would change the expected prolog."""
+    import engine.printer as printer_mod
+
+    monkeypatch.setattr(printer_mod, "_DEFAULT_DUPLEX_CACHE", {})
+    monkeypatch.setattr(printer_mod, "_read_default_duplex", lambda name: None)
+
+
 class TestPrintArgs:
     def test_exact_argv_fit_all_pages(self):
         args = build_gs_args("C:\\in.pdf", "My Printer", "", "fit", "C:\\gs.exe")
@@ -4374,6 +4386,8 @@ class TestPrintPipeline:
         monkeypatch.setattr(printer_mod, "_run_jobs", fake_jobs)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
         monkeypatch.setattr(printer_mod, "_SPOOL_THROUGH_CUPS", False)
+        # No printer default is read in these tests unless a test sets one.
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: None)
         return captured
 
     def _sized(self, tmp_dir, widths, name="in.pdf"):
@@ -4381,7 +4395,7 @@ class TestPrintPipeline:
         pdf = pikepdf.new()
         for w in widths:
             page = pdf.add_blank_page(page_size=(w, 400))
-            page.Contents = pdf.make_stream(b"")
+            page.Contents = pdf.make_stream(f"% p{int(w)}".encode())
         pdf.save(path)
         return path
 
@@ -4415,6 +4429,166 @@ class TestPrintPipeline:
         assert [a for a in cap["argv"][0] if a.startswith("-sPageList")] == [
             "-sPageList=2,4"
         ]
+
+    def _widths(self, path):
+        with pikepdf.open(path) as out:
+            return [float(p.mediabox[2]) for p in out.pages]
+
+    def _labels(self, path):
+        """Each side's source page (its width), or "_" for a blank back.
+
+        A blank takes the size of page 1, so only the content tells them apart."""
+        labels = []
+        with pikepdf.open(path) as out:
+            for page in out.pages:
+                data = page.Contents.read_bytes() if "/Contents" in page else b""
+                labels.append(int(data[3:]) if data.startswith(b"% p") else "_" if not data.strip() else "x")
+        return labels
+
+    def test_two_sided_reverse_reverses_sheets_and_pads_the_last_back(self, tmp_dir, monkeypatch):
+        # Sheets are (1,2) (3,4) (5,blank). Reversed they are (5,blank) (3,4)
+        # (1,2): front and back stay together. Reversing the sides would put
+        # page 4 on the back of page 5. The blank is the size of page 1.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104, 105])
+        r = print_pdf(file=src, printer="P", gs_path="GS", duplex="long", reverse=True)
+        assert r["prepass"] == ["sheet-order"]
+        assert self._labels(cap["files"][0]) == [105, "_", 103, 104, 101, 102]
+
+    def test_two_sided_reverse_of_an_even_count_has_no_blank(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104])
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="short", reverse=True)
+        assert self._widths(cap["files"][0]) == [103, 104, 101, 102]
+
+    def test_two_sided_uncollated_copies_repeat_whole_sheets(self, tmp_dir, monkeypatch):
+        # (1,2) (3,blank) twice each: 1,2,1,2,3,_,3,_. Repeating sides would put
+        # page 1 on both faces, and a copy would start on the back of a sheet.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103])
+        r = print_pdf(file=src, printer="P", gs_path="GS", duplex="long",
+                      copies=2, collate=False)
+        assert r["jobs"] == 1 and r["prepass"] == ["sheet-order"]
+        assert self._labels(cap["files"][0]) == [101, 102, 101, 102, 103, "_", 103, "_"]
+
+    def test_two_sided_reverse_with_uncollated_copies(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103, 104])
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="long",
+                  reverse=True, copies=2, collate=False)
+        assert self._labels(cap["files"][0]) == [
+            103, 104, 103, 104, 101, 102, 101, 102,
+        ]
+
+    def test_one_sided_reverse_and_copies_are_unchanged(self, tmp_dir, monkeypatch):
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [101, 102, 103])
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="simplex", reverse=True)
+        assert self._widths(cap["files"][0]) == [103, 102, 101]
+        cap["files"].clear()
+        print_pdf(file=src, printer="P", gs_path="GS", duplex="simplex",
+                  copies=2, collate=False)
+        assert self._widths(cap["files"][0]) == [101, 101, 102, 102, 103, 103]
+
+    def test_a_two_sided_printer_default_gets_the_sheet_order_too(self, tmp_dir, monkeypatch):
+        import engine.printer as printer_mod
+
+        cap = self._capture(monkeypatch, tmp_dir)
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: "long")
+        src = self._sized(tmp_dir, [101, 102, 103])
+        print_pdf(file=src, printer="P", gs_path="GS", reverse=True)
+        assert self._labels(cap["files"][0]) == [103, "_", 101, 102]
+
+    def test_two_sided_reverse_works_on_the_imposed_sides(self, tmp_dir, monkeypatch, gs_path):
+        # Six pages 1x2 make three sides; with the blank back that is two sheets.
+        cap = self._capture(monkeypatch, tmp_dir)
+        src = self._sized(tmp_dir, [300] * 6)
+        r = print_pdf(file=src, printer="P", gs_path=gs_path, duplex="short",
+                      reverse=True, layout="nup", nup_rows=1, nup_cols=2,
+                      sheet_width=595, sheet_height=842)
+        assert "sheet-order" in r["prepass"]
+        assert r["prepass"].index("sheet-order") < r["prepass"].index("turn-to-paper")
+        labels = self._labels(cap["files"][0])
+        assert len(labels) == 4 and labels[1] == "_"
+        assert [x for i, x in enumerate(labels) if i != 1] == ["x", "x", "x"]
+
+    def test_two_sided_printer_default_shows_in_the_preview(self, tmp_dir, monkeypatch, gs_path):
+        # The preview must show the order the job prints. Five pages reversed on
+        # a two-sided default are three sheets with a blank back: six sides.
+        import engine.printer as printer_mod
+        from engine.printer import print_preview
+
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: "long")
+        src = self._sized(tmp_dir, [300] * 5)
+        r = print_preview(file=src, gs_path=gs_path, printer="P", reverse=True,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert r["sheets"] == 6
+            assert r["prepass"] == ["sheet-order"]
+        finally:
+            shutil.rmtree(r["preview_dir"], ignore_errors=True)
+        monkeypatch.setattr(printer_mod, "printer_default_duplex", lambda name: None)
+        r = print_preview(file=src, gs_path=gs_path, printer="P", reverse=True,
+                          sheet_width=612, sheet_height=792)
+        try:
+            assert r["sheets"] == 5 and "sheet-order" not in r["prepass"]
+        finally:
+            shutil.rmtree(r["preview_dir"], ignore_errors=True)
+
+    def test_default_duplex_is_kept_a_few_seconds(self, monkeypatch):
+        import engine.printer as printer_mod
+
+        calls = []
+        now = [100.0]
+        monkeypatch.setattr(printer_mod.time, "monotonic", lambda: now[0])
+
+        def read(name):
+            calls.append(name)
+            now[0] += 8.0  # a slow answer: longer than the time it is kept
+            return "short"
+
+        monkeypatch.setattr(printer_mod, "_read_default_duplex", read)
+        assert printer_mod.printer_default_duplex("Q") == "short"
+        # Stamped when the read ENDED (108), so this ask at 108 is still served.
+        assert printer_mod.printer_default_duplex("Q") == "short"
+        assert calls == ["Q"]
+        now[0] += printer_mod._DEFAULT_DUPLEX_TTL_S + 1
+        assert printer_mod.printer_default_duplex("Q") == "short"
+        assert calls == ["Q", "Q"]
+        assert printer_mod.printer_default_duplex("") is None
+        assert printer_mod.printer_default_duplex("   ") is None
+        assert calls == ["Q", "Q"]
+
+    def test_cups_default_duplex_reads_the_destination_sides(self):
+        from types import SimpleNamespace
+
+        from engine import cups_print
+
+        def lib_with(options):
+            dest = SimpleNamespace(contents=SimpleNamespace(
+                num_options=len(options),
+                options=[SimpleNamespace(name=n, value=v) for n, v in options],
+            ))
+            return SimpleNamespace(
+                cupsGetNamedDest=lambda *a: dest, cupsFreeDests=lambda *a: None,
+            )
+
+        assert cups_print.default_duplex("Q", lib_with([(b"sides", b"two-sided-long-edge")])) == "long"
+        assert cups_print.default_duplex("Q", lib_with([(b"copies", b"1"), (b"sides", b"two-sided-short-edge")])) == "short"
+        assert cups_print.default_duplex("Q", lib_with([(b"sides", b"one-sided")])) is None
+        assert cups_print.default_duplex("Q", lib_with([])) is None
+        none_lib = SimpleNamespace(cupsGetNamedDest=lambda *a: None, cupsFreeDests=lambda *a: None)
+        assert cups_print.default_duplex("Q", none_lib) is None
+
+    def test_sheet_sequence(self):
+        from engine.print_layout import sheet_sequence
+
+        assert sheet_sequence(4) == [0, 1, 2, 3]
+        assert sheet_sequence(5) == [0, 1, 2, 3, 4, None]
+        assert sheet_sequence(5, reverse=True) == [4, None, 2, 3, 0, 1]
+        assert sheet_sequence(3, copies=2) == [0, 1, 0, 1, 2, None, 2, None]
+        assert sheet_sequence(4, reverse=True, copies=2) == [2, 3, 2, 3, 0, 1, 0, 1]
+        assert sheet_sequence(1) == [0, None]
 
     def test_uncollated_copies_duplicate_into_one_job(self, tmp_dir, monkeypatch):
         cap = self._capture(monkeypatch, tmp_dir)
@@ -4794,7 +4968,7 @@ class TestPrintPreview:
         from engine.printer import print_preview
         src = self._pdf(tmp_dir, [300, 300])
         # printer/copies/collate are spool concerns; the wire may carry them
-        # and the preview must not multiply pages or hit winspool.
+        # and the preview must not multiply pages or refuse an unknown printer.
         r = print_preview(file=src, gs_path=gs_path,
                           printer="No Such Printer Anywhere",
                           copies=5, collate=False,
