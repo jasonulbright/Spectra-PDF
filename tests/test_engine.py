@@ -3633,13 +3633,19 @@ class TestPrintArgs:
         assert "-sDEVICE=nullpage" in args
         assert not any(a.startswith(("-sDEVICE=mswinpr2", "-sOutputFile", "-dNoCancel")) for a in args)
         prolog = args[args.index("-c") + 1]
+        # The device the prolog selects does not inherit -dDEVICEWIDTHPOINTS; an
+        # imposed sheet printed about 8% small without /PageSize (measured).
         assert prolog == (
             "<< /OutputDevice /mswinpr2 /OutputFile (%printer%P) /NoCancel true "
             "/PageSize [595 842] >> setpagedevice"
         )
+        assert "-dDEVICEWIDTHPOINTS=595" in args
         ps = build_setpagedevice_ps(None, 1, None, None, "short", "P", (595, 842))
         assert ps.index("/OutputDevice") < ps.index("/PageSize") < ps.index("/Duplex true /Tumble true")
+        assert ps.index("/Duplex true /Tumble true") < ps.index("/UserSettings")
         assert ps.count("setpagedevice") == 1
+        with pytest.raises(ValueError, match="mswinpr2"):
+            build_gs_args("in.pdf", "P", "", "fit", "gs", "<< /Duplex true >> setpagedevice")
 
     def test_printer_name_is_escaped_in_the_prolog(self):
         shared = "\\\\server\\Br (2nd)"
@@ -3649,7 +3655,8 @@ class TestPrintArgs:
 
     def test_duplex_rides_the_prolog_never_the_command_line(self):
         # mswinpr2 ignores -dTumble=true on the command line, so a short-edge
-        # job went out as a long-edge one (issue 67). Only setpagedevice works.
+        # job went out as a long-edge one (issue 67). The setpagedevice that
+        # selects the device carries it (a later one only ResetDCs).
         ps = build_setpagedevice_ps(9, 1, None, "a.pdf", "short")
         assert ps == (
             "<< /Duplex true /Tumble true /UserSettings << /Paper 9 "
@@ -3662,7 +3669,8 @@ class TestPrintArgs:
             "<< /Duplex false >> setpagedevice"
         )
         assert build_setpagedevice_ps(None, None, None, None, "printer") is None
-        args = build_gs_args("in.pdf", "P", "", "fit", "gs", ps)
+        full = build_setpagedevice_ps(9, 1, None, "a.pdf", "short", "P")
+        args = build_gs_args("in.pdf", "P", "", "fit", "gs", full)
         assert not any(a.startswith(("-dDuplex", "-dTumble")) for a in args)
 
     def test_setpagedevice_ps_defaults_to_name_only_and_none(self):

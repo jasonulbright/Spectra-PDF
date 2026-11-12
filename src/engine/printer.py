@@ -339,7 +339,9 @@ def build_setpagedevice_ps(
     With `printer` the prolog also selects the mswinpr2 device and its
     OutputFile in the SAME dictionary as the duplex and sheet entries, so the
     device is created with them already set (see the note by
-    DUPLEX_PAGEDEVICE). Without `printer` it carries only the settings and
+    DUPLEX_PAGEDEVICE). /PageSize is needed here: the device selected by the
+    prolog does not inherit -dDEVICEWIDTHPOINTS, and without it an imposed
+    sheet is fitted to a Letter page and prints about 8% small (measured). Without `printer` it carries only the settings and
     returns None when every entry is defaulted. DocumentName is what the
     spooler queue shows; kept printable-ASCII (a name the DEVMODE round-trip
     could garble is omitted rather than mojibake'd) and PS-escaped.
@@ -360,8 +362,8 @@ def build_setpagedevice_ps(
         entries.append(
             f"/OutputDevice /mswinpr2 /OutputFile (%printer%{_ps_escape(printer)}) /NoCancel true"
         )
-        if media:
-            entries.append(f"/PageSize [{_points(media[0])} {_points(media[1])}]")
+    if printer is not None and media:
+        entries.append(f"/PageSize [{_points(media[0])} {_points(media[1])}]")
     if DUPLEX_PAGEDEVICE[duplex]:
         entries.append(DUPLEX_PAGEDEVICE[duplex])
     if parts:
@@ -399,6 +401,9 @@ def build_gs_args(
     prolog = setpagedevice_ps or build_setpagedevice_ps(
         None, None, None, None, "printer", printer, media
     )
+    if "/OutputDevice /mswinpr2" not in prolog:
+        # Without it gs stays on nullpage, prints nothing and exits 0.
+        raise ValueError("The print prolog must select the mswinpr2 device")
     args = [
         gs_path,
         # The one device gs may switch to under -dSAFER. mswinpr2 is selected
@@ -690,7 +695,7 @@ def print_pdf(
     # "Printer default" resolves to the printer's own two-sided setting (see
     # printer_default_duplex); an explicit choice is never looked up.
     driver_duplex = duplex
-    if duplex == "printer" and not _SPOOL_THROUGH_CUPS:
+    if duplex == "printer" and not _SPOOL_THROUGH_CUPS and not _preview:
         driver_duplex = printer_default_duplex(printer) or "printer"
 
     def _spool(job_file: str, job_pages: str, job_fit: str, jobs: int) -> None:
@@ -702,8 +707,6 @@ def print_pdf(
                 resolved_orient, color, doc_name, jobs,
             )
         else:
-            # Built here, not earlier: an imposed job fixes `media` after the
-            # arguments are first known, and the sheet rides the prolog.
             us_ps = build_setpagedevice_ps(
                 paper,
                 _ORIENT_VALUES.get(driver_orient),
