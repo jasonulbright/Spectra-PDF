@@ -10,15 +10,19 @@ paper size, orientation, color, comments modes, print-as-image, and the
 layout modes (multiple-per-sheet, booklet, poster, custom scale). Two
 mechanism families implement it:
 
-- DRIVER (DEVMODE) options ride a setpagedevice prolog. Duplex is the
-  standard page-device pair (/Duplex and /Tumble -> dmDuplex; documented for
-  mswinpr2). It must NOT ride the command line: mswinpr2 ignores a
-  -dTumble=true switch, so every short-edge job went out as DMDUP_VERTICAL
-  (long edge) while setpagedevice /Tumble true sent DMDUP_HORIZONTAL (issue 67,
-  reproduced against the Brother class driver: PCL &l1S for both edges from the
-  switches, &l2S for short from setpagedevice). Paper / orientation / color /
+- DRIVER (DEVMODE) options ride one setpagedevice prolog that also SELECTS the
+  mswinpr2 device (gs starts on nullpage; --permit-devices=mswinpr2 lets the
+  prolog switch under -dSAFER). Duplex is the standard page-device pair
+  (/Duplex and /Tumble -> dmDuplex; documented for mswinpr2). It must reach the
+  device BEFORE it opens, because mswinpr2 builds its printer DC at open:
+  a -dTumble=true command-line switch never reaches the DC (every short-edge
+  job went out as DMDUP_VERTICAL, the long edge), and a later setpagedevice
+  only ResetDCs, which a v3 driver (Brother MFC-L8690CDW series 1.13.0.0)
+  ignores for duplex (the job went out single-sided). Issue 67, reproduced
+  against that driver and the Brother class driver, decoded from the PCL XL
+  and PCL they wrote. Paper / orientation / color /
   document name go through the
-  device's /UserSettings dictionary via the same prolog — the old
+  device's /UserSettings dictionary in the same dictionary — the old
   ``finddevice putdeviceprops`` incantation is REMOVED in gs 10.x
   (probe-verified); setpagedevice forwards because mswinpr2 exports
   /UserSettings. The key->DEVMODE mapping (Paper->dmPaperSize,
@@ -115,7 +119,8 @@ FIT_SWITCHES: dict[str, list[str]] = {
 
 # Duplex -> standard gs page-device entries (mswinpr2: dev->Duplex/tumble ->
 # dmDuplex, DMDUP_VERTICAL = flip on the long edge). They go in the
-# setpagedevice prolog, never on the command line (see the module note).
+# setpagedevice prolog that selects the device, never on the command line and
+# never in a later setpagedevice (see the module note).
 # "printer" omits the pair entirely so the driver's default (or the user's
 # printer preferences) stays in charge.
 DUPLEX_PAGEDEVICE: dict[str, str] = {
@@ -248,6 +253,74 @@ def printer_exists(name: str) -> bool:
     return True
 
 
+# DEVMODE: dmFields is a DWORD at byte 72 and dmDuplex a short at byte 94 (the
+# layout is fixed: 32 WCHAR of device name, four WORDs, then the fields).
+_DM_DUPLEX = 0x1000
+_DEVMODE_FIELDS_AT = 72
+_DEVMODE_DUPLEX_AT = 94
+_DEVMODE_MIN_SIZE = _DEVMODE_DUPLEX_AT + 2
+_DUPLEX_BY_DEVMODE = {2: "long", 3: "short"}
+
+
+def duplex_from_devmode(devmode: bytes) -> str | None:
+    """"long" or "short" when a DEVMODE says two-sided, else None.
+
+    None also covers a DEVMODE that does not carry the duplex field or is too
+    short to hold it."""
+    if len(devmode) < _DEVMODE_MIN_SIZE:
+        return None
+    fields = int.from_bytes(devmode[_DEVMODE_FIELDS_AT:_DEVMODE_FIELDS_AT + 4], "little")
+    if not fields & _DM_DUPLEX:
+        return None
+    value = int.from_bytes(
+        devmode[_DEVMODE_DUPLEX_AT:_DEVMODE_DUPLEX_AT + 2], "little", signed=True
+    )
+    return _DUPLEX_BY_DEVMODE.get(value)
+
+
+def printer_default_duplex(name: str) -> str | None:
+    """The two-sided mode the printer's own default settings hold, if any.
+
+    "Printer default" must mean that. mswinpr2 writes dmDuplex whenever the
+    driver reports a duplex unit, and writes SIMPLEX when the job names no
+    duplex, so a printer whose default is two-sided printed one-sided.
+    Returns "long" or "short" only; one-sided, unknown and every failure
+    return None, and the job then names no duplex, as before. Windows only.
+    """
+    if _SPOOL_THROUGH_CUPS or sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    winspool = ctypes.WinDLL("winspool.drv")
+    winspool.OpenPrinterW.argtypes = [
+        wintypes.LPWSTR, ctypes.POINTER(wintypes.HANDLE), ctypes.c_void_p,
+    ]
+    winspool.OpenPrinterW.restype = wintypes.BOOL
+    winspool.ClosePrinter.argtypes = [wintypes.HANDLE]
+    winspool.ClosePrinter.restype = wintypes.BOOL
+    winspool.DocumentPropertiesW.argtypes = [
+        wintypes.HWND, wintypes.HANDLE, wintypes.LPWSTR,
+        ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    winspool.DocumentPropertiesW.restype = ctypes.c_long
+
+    handle = wintypes.HANDLE()
+    if not winspool.OpenPrinterW(name, ctypes.byref(handle), None):
+        return None
+    try:
+        size = winspool.DocumentPropertiesW(None, handle, name, None, None, 0)
+        if size <= 0:
+            return None
+        buffer = ctypes.create_string_buffer(size)
+        DM_OUT_BUFFER, IDOK = 2, 1
+        if winspool.DocumentPropertiesW(None, handle, name, buffer, None, DM_OUT_BUFFER) != IDOK:
+            return None
+        return duplex_from_devmode(buffer.raw)
+    finally:
+        winspool.ClosePrinter(handle)
+
+
 def _ps_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -258,13 +331,20 @@ def build_setpagedevice_ps(
     color_value: int | None,
     document_name: str | None,
     duplex: str = "printer",
+    printer: str | None = None,
+    media: tuple[float, float] | None = None,
 ) -> str | None:
-    """The -c setpagedevice prolog carrying mswinpr2 /UserSettings and duplex.
+    """The -c setpagedevice prolog: the printer, its sheet, /UserSettings, duplex.
 
-    Returns None when every entry is defaulted (no prolog — the argv stays
-    switch-only, byte-identical to the original contract). DocumentName is
-    what the spooler queue shows; kept printable-ASCII (a name the DEVMODE
-    round-trip could garble is omitted rather than mojibake'd) and PS-escaped.
+    With `printer` the prolog also selects the mswinpr2 device and its
+    OutputFile in the SAME dictionary as the duplex and sheet entries, so the
+    device is created with them already set (see the note by
+    DUPLEX_PAGEDEVICE). /PageSize is needed here: the device selected by the
+    prolog does not inherit -dDEVICEWIDTHPOINTS, and without it an imposed
+    sheet is fitted to a Letter page and prints about 8% small (measured). Without `printer` it carries only the settings and
+    returns None when every entry is defaulted. DocumentName is what the
+    spooler queue shows; kept printable-ASCII (a name the DEVMODE round-trip
+    could garble is omitted rather than mojibake'd) and PS-escaped.
     """
     parts: list[str] = []
     if paper is not None:
@@ -278,6 +358,12 @@ def build_setpagedevice_ps(
         if all(32 <= ord(c) < 127 for c in name):
             parts.append(f"/DocumentName ({_ps_escape(name)})")
     entries: list[str] = []
+    if printer is not None:
+        entries.append(
+            f"/OutputDevice /mswinpr2 /OutputFile (%printer%{_ps_escape(printer)}) /NoCancel true"
+        )
+    if printer is not None and media:
+        entries.append(f"/PageSize [{_points(media[0])} {_points(media[1])}]")
     if DUPLEX_PAGEDEVICE[duplex]:
         entries.append(DUPLEX_PAGEDEVICE[duplex])
     if parts:
@@ -310,19 +396,25 @@ def build_gs_args(
     `media` is the sheet's (width, height) in points as the driver is asked to
     feed it. mswinpr2 opens its page buffer before any /UserSettings arrives,
     and matches the printer's paper list against the size the device holds at
-    that moment, so the size must ride the command line.
+    that moment, so the size rides both the command line and the prolog's
+    /PageSize (the device the prolog selects does not inherit the switches).
     """
+    prolog = setpagedevice_ps or build_setpagedevice_ps(
+        None, None, None, None, "printer", printer, media
+    )
+    if "/OutputDevice /mswinpr2" not in prolog:
+        # Without it gs stays on nullpage, prints nothing and exits 0.
+        raise ValueError("The print prolog must select the mswinpr2 device")
     args = [
         gs_path,
+        # The one device gs may switch to under -dSAFER. mswinpr2 is selected
+        # by the prolog, not by -sDEVICE (see the note by DUPLEX_PAGEDEVICE).
+        "--permit-devices=mswinpr2",
         "-dNOPAUSE",
         "-dBATCH",
         "-dQUIET",
         "-dSAFER",
-        "-sDEVICE=mswinpr2",
-        # Headless subprocess: no progress window, and the printer comes from
-        # the OutputFile — gs must never raise its own printer-picker dialog.
-        "-dNoCancel",
-        f"-sOutputFile=%printer%{printer}",
+        "-sDEVICE=nullpage",
         # Print what the viewer shows: the CropBox, not the MediaBox.
         "-dUseCropBox",
         *(
@@ -334,8 +426,7 @@ def build_gs_args(
     ]
     if pages:
         args.append(f"-sPageList={pages}")
-    if setpagedevice_ps:
-        args += ["-c", setpagedevice_ps, "-f"]
+    args += ["-c", prolog, "-f"]
     args.append(str(Path(file)))
     return args
 
@@ -593,13 +684,6 @@ def print_pdf(
     driver_orient = (
         "portrait" if resolved_orient in ("portrait", "landscape") else resolved_orient
     )
-    us_ps = None if _SPOOL_THROUGH_CUPS else build_setpagedevice_ps(
-        paper,
-        _ORIENT_VALUES.get(driver_orient),
-        _COLOR_VALUES.get(color),
-        doc_name,
-        duplex,
-    )
     media: tuple[float, float] | None = None
     if not imposition and sheet_width is not None and sheet_height is not None:
         # A single-page job still opens the device at the real paper size, so a
@@ -608,6 +692,12 @@ def print_pdf(
         side_a = _num("Sheet width", sheet_width, MIN_SHEET_PT, MAX_SHEET_PT)
         side_b = _num("Sheet height", sheet_height, MIN_SHEET_PT, MAX_SHEET_PT)
         media = (min(side_a, side_b), max(side_a, side_b))
+
+    # "Printer default" resolves to the printer's own two-sided setting (see
+    # printer_default_duplex); an explicit choice is never looked up.
+    driver_duplex = duplex
+    if duplex == "printer" and not _SPOOL_THROUGH_CUPS and not _preview:
+        driver_duplex = printer_default_duplex(printer) or "printer"
 
     def _spool(job_file: str, job_pages: str, job_fit: str, jobs: int) -> None:
         if _SPOOL_THROUGH_CUPS:
@@ -618,6 +708,15 @@ def print_pdf(
                 resolved_orient, color, doc_name, jobs,
             )
         else:
+            us_ps = build_setpagedevice_ps(
+                paper,
+                _ORIENT_VALUES.get(driver_orient),
+                _COLOR_VALUES.get(color),
+                doc_name,
+                driver_duplex,
+                printer,
+                media,
+            )
             _run_jobs(
                 build_gs_args(
                     job_file, printer, job_pages, job_fit, gs_path,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.1111.171
+
+**Two-sided printing follows your choice on every printer**
+
+### Fixed
+- Send the short or long edge you pick to printer drivers that read it only when the job starts.
+- Print two-sided when the printer's default is two-sided and you leave the choice on Printer default.
+
 ## 2026.1111.170
 
 **Flip on the short edge now reaches the printer**
