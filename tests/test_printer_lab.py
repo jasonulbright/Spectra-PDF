@@ -97,6 +97,19 @@ class TestPcl5AndPjl:
         assert lab_decode.decode(data).edges() == {"simplex"}
 
 
+    def test_a_prescribe_prefix_before_the_job_is_skipped(self):
+        # A Kyocera driver opens the job with "!R!SEM6;EXIT;" before the UEL.
+        data = b"!R!SEM6;EXIT;" + UEL + b"@PJL ENTER LANGUAGE=PCL\n\x1bE\x1b&l26A\x1b&l2S\x0c"
+        decoded = lab_decode.decode(data)
+        assert decoded.language == "PCL" and decoded.edges() == {"short"}
+        assert any("PRESCRIBE prefix skipped" in note for note in decoded.notes)
+
+    def test_a_bang_r_bang_prefix_that_is_not_prescribe_is_not_skipped(self):
+        data = b"!R!SEM6;EXIT;rm -rf" + UEL + b"@PJL ENTER LANGUAGE=PCL\n\x1bE\x1b&l2S"
+        decoded = lab_decode.decode(data)
+        assert not any("PRESCRIBE" in note for note in decoded.notes)
+
+
 class TestOtherLanguages:
     def test_postscript_portrait_and_landscape(self):
         portrait = b"%!PS-Adobe-3.0\n%%Orientation: Portrait\n<< /Duplex true /Tumble false >> setpagedevice\n"

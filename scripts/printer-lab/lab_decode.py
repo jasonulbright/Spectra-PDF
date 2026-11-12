@@ -438,6 +438,14 @@ def decode(data: bytes) -> Decoded:
         d = Decoded("PDF")
         d.notes.append("a PDF carries no printer duplex setting")
         return d
+    prefix_note = None
+    if data.startswith(b"!R!"):
+        # A Kyocera driver opens the job with a PRESCRIBE command ("!R!SEM6;EXIT;")
+        # before the UEL; what follows is PJL and an ordinary page language.
+        uel = data.find(_UEL, 0, 4096)
+        if uel > 0 and re.fullmatch(rb"(?:!R![ -~]{0,200}?EXIT;\s*)+", data[:uel]):
+            prefix_note = "PRESCRIBE prefix skipped: " + data[:uel].decode("ascii")
+            data = data[uel:]
     pjl, offset = _pjl_lines(data)
     body = data[offset:]
     sources = _pjl_duplex(pjl)
@@ -456,6 +464,8 @@ def decode(data: bytes) -> Decoded:
         out = Decoded(f"unknown ({language or 'no PJL language'})")
         out.notes.append(f"first bytes {body[:12].hex(' ')}")
     out.sources = sources + out.sources
+    if prefix_note:
+        out.notes.append(prefix_note)
     if sources:
         out.notes.append("PJL names the duplex mode")
     return out
