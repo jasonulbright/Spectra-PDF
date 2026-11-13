@@ -428,7 +428,7 @@ def build_gs_args(
     )
     if "/OutputDevice /mswinpr2" not in prolog:
         # Without it gs stays on nullpage, prints nothing and exits 0.
-        raise ValueError("The print prolog must select the mswinpr2 device")
+        raise AssertionError("the print prolog must select the mswinpr2 device")
     args = [
         gs_path,
         # The one device gs may switch to under -dSAFER. mswinpr2 is selected

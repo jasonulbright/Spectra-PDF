@@ -234,10 +234,23 @@ fn assert_no_bytecode(staged: &BTreeSet<String>) {
 /// payload for a dev run, and the tree the portable bundle is cut from.
 fn copied_resources_dir() -> Option<PathBuf> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").ok()?);
-    // target/<profile>/build/<crate>-<hash>/out
-    let profile_dir = out_dir.ancestors().nth(3)?;
+    let profile_dir = profile_dir_from_out_dir(&out_dir)?;
     let copied = profile_dir.join("engine");
     copied.is_dir().then_some(copied)
+}
+
+/// The profile directory (`target/<profile>`) that `tauri_build::build()` copies
+/// the resources into, found the way tauri-build 2.7 finds it: walk up from
+/// `OUT_DIR` to the `build` directory and take its parent. `OUT_DIR` is
+/// `<profile>/build/<crate>-<hash>/out` before Cargo 1.100 and
+/// `<profile>/build/<crate>/<hash>/out` since, so a fixed depth is wrong for one
+/// of them: it named `<profile>/build` and left the verifier reading a stale
+/// copy.
+fn profile_dir_from_out_dir(out_dir: &Path) -> Option<&Path> {
+    out_dir
+        .ancestors()
+        .find(|path| path.file_name() == Some(std::ffi::OsStr::new("build")))
+        .and_then(Path::parent)
 }
 
 /// The resource copy into `target/<profile>/engine` is additive: a file the

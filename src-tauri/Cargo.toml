@@ -5,7 +5,7 @@ description = "Open-source PDF workbench for Windows"
 authors = ["Jason Ulbright"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.90"
 
 [workspace]
 members = [".", "shell-menu"]
@@ -17,7 +17,7 @@ name = "spectrapdf_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 # Already in the lock as a transitive dependency; the build script verifies
 # every staged engine file against the manifest's recorded digest.
 sha2 = "0.10"
@@ -53,7 +53,7 @@ update-test-source = []
 [dependencies]
 base64 = "0.22"
 sha2 = "0.10"
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -118,13 +118,12 @@ windows-core = "0.62"
 # WebView2's own COM bindings, already in the tree because tauri-runtime-wry
 # uses them -- promoted to a direct dependency so the web capture can reach
 # ICoreWebView2_7::PrintToPdf, which is Chromium's own print pipeline.
-webview2-com = "0.38"
-# Those bindings are generated against windows-core 0.61, and an interface
-# cast only typechecks against the `Interface` trait from the SAME
-# windows-core the interface was generated with -- so 0.61 is named alongside
-# the 0.62 the rest of the crate uses. Neither version is a browser-runtime
-# pin: they track the crates, not the installed WebView2.
-windows-core-webview2 = { package = "windows-core", version = "0.61" }
+webview2-com = "0.39"
+# These bindings are generated against windows-core 0.62 (webview2-com 0.39), the
+# same windows-core the rest of the crate uses, which is what an interface cast
+# needs: the `Interface` trait must come from the windows-core the interface was
+# generated with. Keep webview2-com the version tauri-runtime-wry uses; neither
+# is a browser-runtime pin: they track the crates, not the installed WebView2.
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # prctl, flock, socketpair and SCM_RIGHTS for child-process lifetime and
@@ -145,4 +144,4 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 # routed and killed through an `AppHandle`, so proving the deadline kill needs
 # an app. A dev-dependency feature, which resolver 2 keeps out of the normal
 # build — the mock runtime is not compiled into a shipped binary.
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2.12", features = ["test"] }
