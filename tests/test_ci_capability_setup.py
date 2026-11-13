@@ -4375,6 +4375,7 @@ def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_che
     purge_block = script.split('step "no GTK 3 and no WebKitGTK"', 1)[1].split("for tool in", 1)[0]
     assert purge_block.index("GTK_DEPENDENTS") < purge_block.index("apt-get -s purge") < purge_block.index("apt_run purge -y $remove")
     assert "grep '^Inst '" in purge_block and "would also install or upgrade packages" in purge_block
+    assert 'simulation=$(apt-get -s purge $remove 2>&1) || die' in purge_block
 
 
 #: The Ubuntu 26.04 install check: the AppImage runs on a system without

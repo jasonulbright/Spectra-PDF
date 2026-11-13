@@ -116,7 +116,9 @@ if [ -n "$remove" ]; then
   # A purge that would install or upgrade something is not a purge: stop now and
   # name it, instead of waiting for a package script to stall.
   # shellcheck disable=SC2086
-  plan=$(apt-get -s purge $remove 2>/dev/null | grep '^Inst ' || true)
+  simulation=$(apt-get -s purge $remove 2>&1) || die "apt-get could not simulate removing$remove: $simulation"
+  plan=$(printf '%s
+' "$simulation" | grep '^Inst ' || true)
   [ -z "$plan" ] || die "removing$remove would also install or upgrade packages: $plan"
   # shellcheck disable=SC2086
   apt_run purge -y $remove || die "apt-get could not remove$remove"
