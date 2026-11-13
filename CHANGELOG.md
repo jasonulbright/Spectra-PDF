@@ -1,12 +1,15 @@
 # Changelog
 
-## 2026.1112.172
+## 2026.1113.172
 
 **Two-sided jobs keep each sheet together**
 
 ### Fixed
 - Reverse the order of whole sheets in a two-sided job, so front and back stay together.
 - Print uncollated copies of a two-sided job sheet by sheet, so no page lands on both faces.
+
+### Changed
+- Update the app framework and its plugins to Tauri 2.12.
 
 ## 2026.1111.171
 
