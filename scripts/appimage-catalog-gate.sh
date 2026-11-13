@@ -52,6 +52,12 @@ appstreamcli-x86_64.AppImage $DEPS/appstreamcli-x86_64.AppImage 0b567ce75945bea2
 APT_TOOLS="ca-certificates curl file procps psmisc libfuse2 xvfb xauth xdotool x11-utils
 imagemagick tesseract-ocr tesseract-ocr-eng icewm desktop-file-utils libfile-mimeinfo-perl binutils appstream"
 GTK_PACKAGES="libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0-18"
+# Browsers a hosted runner ships that depend on GTK 3. Purging libgtk-3-0 alone
+# makes apt "upgrade" the Firefox package to its snap transition package, whose
+# pre-install script downloads the Firefox snap from the Snap store while apt
+# holds the dpkg lock. That stalled this job for ten minutes and failed it in
+# releases 169 and 172. Purging the browsers in the same command takes seconds.
+GTK_DEPENDENTS="firefox microsoft-edge-stable google-chrome-stable chromium-browser chromium"
 GTK_LIBRARIES='libgtk-3\.so|libwebkit2gtk-4\.[01]\.so|libjavascriptcoregtk-4\.[01]\.so'
 
 [ $# -ge 1 ] || die "usage: appimage-catalog-gate.sh IMAGE.AppImage [--work DIR] [--no-firejail]"
@@ -103,7 +109,17 @@ remove=""
 for p in $GTK_PACKAGES; do
   dpkg -s "$p" >/dev/null 2>&1 && remove="$remove $p"
 done
+for p in $GTK_DEPENDENTS; do
+  dpkg -s "$p" >/dev/null 2>&1 && remove="$remove $p"
+done
 if [ -n "$remove" ]; then
+  # A purge that would install or upgrade something is not a purge: stop now and
+  # name it, instead of waiting for a package script to stall.
+  # shellcheck disable=SC2086
+  simulation=$(apt-get -s purge $remove 2>&1) || die "apt-get could not simulate removing$remove: $simulation"
+  plan=$(printf '%s
+' "$simulation" | grep '^Inst ' || true)
+  [ -z "$plan" ] || die "removing$remove would also install or upgrade packages: $plan"
   # shellcheck disable=SC2086
   apt_run purge -y $remove || die "apt-get could not remove$remove"
 fi

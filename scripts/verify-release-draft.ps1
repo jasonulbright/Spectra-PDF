@@ -642,6 +642,20 @@ try {
             Get-ChildItem -LiteralPath (Join-Path (Join-Path $buildRoot "debug") $area) -Filter "$verifierTest-*" -Force -ErrorAction SilentlyContinue |
                 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         }
+        # Cargo 1.100 keeps a package's intermediate files under
+        # debug/build/<package>/<hash>/{out,fingerprint} instead of debug/deps.
+        $packageBuilds = Join-Path (Join-Path $buildRoot "debug") "build"
+        # -LiteralPath throughout: the build root comes from Cargo metadata and may
+        # hold [ or ], which a wildcard -Path would read as a character set.
+        foreach ($package in @(Get-ChildItem -LiteralPath $packageBuilds -Directory -Force -ErrorAction SilentlyContinue)) {
+            foreach ($hash in @(Get-ChildItem -LiteralPath $package.FullName -Directory -Force -ErrorAction SilentlyContinue)) {
+                foreach ($area in "out", "fingerprint") {
+                    Get-ChildItem -LiteralPath (Join-Path $hash.FullName $area) -Force -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -like "$verifierTest-*" -or $_.Name -like "*$verifierTest" -or $_.Name -like "*$verifierTest.json" } |
+                        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
     }
 }
 

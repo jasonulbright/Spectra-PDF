@@ -2039,7 +2039,14 @@ def _staged_build_outputs(target: Path, stem: str) -> list[Path]:
     """The test binary, debug symbols and incremental cache one staged
     verifier target left in a Cargo target directory."""
     debug = target / "debug"
-    return sorted([*(debug / "deps").glob(f"{stem}-*"), *(debug / "incremental").glob(f"{stem}-*")])
+    # Cargo 1.100 writes a package's intermediate files under
+    # debug/build/<package>/<hash>/{out,fingerprint}; older Cargo used deps/.
+    return sorted([
+        *(debug / "deps").glob(f"{stem}-*"),
+        *(debug / "incremental").glob(f"{stem}-*"),
+        *debug.glob(f"build/*/*/out/{stem}-*"),
+        *debug.glob(f"build/*/*/fingerprint/*{stem}*"),
+    ])
 
 
 def test_verifier_targets_are_kept_only_for_revisions_still_checked_out(tmp_path: Path) -> None:
@@ -2108,7 +2115,13 @@ def test_the_draft_verifier_ignores_an_accepting_test_the_verified_package_carri
     assert (package / "tests" / "updater_manifest.rs").read_text(encoding="utf-8") == ACCEPTING_UPDATER_TEST
     # The build ran in this target, and nothing the staged target compiled
     # outlives the run.
-    assert (target / "debug" / "deps" / "libspectrapdf_lib.rlib").is_file()
+    # The library is in deps/ with Cargo before 1.100 and under build/<package>/<hash>/out/
+    # since; either shows the build ran here.
+    debug = target / "debug"
+    assert (
+        (debug / "deps" / "libspectrapdf_lib.rlib").is_file()
+        or any(debug.glob("build/spectrapdf/*/out/libspectrapdf_lib.rlib"))
+    )
     assert _staged_build_outputs(target, Path(staged.group(1)).stem) == []
 
     _mutate_manifest_top(downloaded, lambda m: m.update(pub_date="2026-09-02T15:00:00.000Z"))
@@ -4355,6 +4368,14 @@ def test_the_catalog_gate_runs_on_the_ubuntu_22_04_runner_beside_the_install_che
     assert 'VERSION_ID="22.04"' in script
     assert "apt_run purge -y $remove" in script
     assert "X-AppImage-Self-Contained=true" in script
+    # The GTK 3 purge names the browsers that depend on it and refuses a plan that
+    # installs or upgrades anything: an upgrade of the Firefox package runs a snap
+    # download inside apt and stalled this job (releases 169 and 172).
+    assert 'GTK_DEPENDENTS="firefox microsoft-edge-stable' in script
+    purge_block = script.split('step "no GTK 3 and no WebKitGTK"', 1)[1].split("for tool in", 1)[0]
+    assert purge_block.index("GTK_DEPENDENTS") < purge_block.index("apt-get -s purge") < purge_block.index("apt_run purge -y $remove")
+    assert "grep '^Inst '" in purge_block and "would also install or upgrade packages" in purge_block
+    assert 'simulation=$(apt-get -s purge $remove 2>&1) || die' in purge_block
 
 
 #: The Ubuntu 26.04 install check: the AppImage runs on a system without
