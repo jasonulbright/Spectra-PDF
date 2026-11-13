@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 // The WebView2 bindings are generated against windows-core 0.61; an interface
 // cast and a PCWSTR argument only typecheck against THAT crate's traits, not
 // the 0.62 the rest of this binary uses.
-use windows_core_webview2::{Interface, BOOL, HSTRING, PCWSTR, PWSTR};
+use windows_core::{Interface, BOOL, HSTRING, PCWSTR, PWSTR};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Environment, ICoreWebView2Environment6, ICoreWebView2PrintSettings,

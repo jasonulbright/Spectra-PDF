@@ -3656,7 +3656,7 @@ class TestPrintArgs:
         assert ps.index("/OutputDevice") < ps.index("/PageSize") < ps.index("/Duplex true /Tumble true")
         assert ps.index("/Duplex true /Tumble true") < ps.index("/UserSettings")
         assert ps.count("setpagedevice") == 1
-        with pytest.raises(ValueError, match="mswinpr2"):
+        with pytest.raises(AssertionError, match="mswinpr2"):
             build_gs_args("in.pdf", "P", "", "fit", "gs", "<< /Duplex true >> setpagedevice")
 
     def test_printer_name_is_escaped_in_the_prolog(self):

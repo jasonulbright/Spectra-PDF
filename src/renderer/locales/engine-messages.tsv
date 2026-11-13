@@ -579,7 +579,6 @@ print_layout.pageRangePageNumber	pattern	print_layout	the page range {{token}} i
 print_layout.pageRangeSelectsPage	pattern	print_layout	the page range {{token}} selects no page
 print_layout.pagesPerSheetLayout	pattern	print_layout	{{number_up}} pages per sheet is not a layout this printer offers ({{v1}})
 print_layout.posterOverlapMustSmaller	exact	print_layout	Poster overlap must be smaller than the paper
-print_layout.rotationMustMultipleDegrees	pattern	print_layout	Rotation must be a multiple of 90 degrees, got {{degrees}}
 print_layout.timedOutAfterS	pattern	print_layout	{{what}} timed out after {{RENDER_TIMEOUT_S}}s
 print_layout.unknownPageOrder	pattern	print_layout	unknown page order {{layout}} ({{v1}})
 print_layout.unknownPageSet	pattern	print_layout	unknown page set {{page_set}} ({{v1}})
@@ -606,7 +605,6 @@ printer.previewNeedsPaperSize	exact	printer	Preview needs the paper size (sheet_
 printer.previewPageCapMust	pattern	printer	Preview page cap must be 1-{{PREVIEW_MAX_PAGES}}, got {{max_pages}}
 printer.printCanceledPrintJobs	pattern	printer	Print canceled: {{done}} of {{jobs}} print jobs were already sent to the printer
 printer.printJobTimedOut	pattern	printer	Print job timed out after {{JOB_TIMEOUT_S}}s — the printer driver did not respond
-printer.printPrologMustSelect	exact	printer	The print prolog must select the mswinpr2 device
 printer.printerSpecified	exact	printer	No printer specified
 printer.printingSystemPrinterAvailable	exact	printer	Printing to a system printer is not available on this platform.
 printer.unknownExpectedOne	pattern	printer	Unknown {{name}} {{value}} (expected one of {{v2}})

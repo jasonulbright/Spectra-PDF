@@ -368,7 +368,8 @@ def rotate_pages(src: str, dst: str, degrees: int = 90) -> None:
     so the turn does not alias between occurrences.
     """
     if degrees % 90 != 0:
-        raise ValueError(f"Rotation must be a multiple of 90 degrees, got {degrees}")
+        # A caller bug, not a refusal a user can meet: no catalog entry.
+        raise AssertionError(f"rotate_pages: {degrees} is not a multiple of 90 degrees")
     with open_pdf(src) as pdf:
         for page in pdf.pages:
             page.obj["/Rotate"] = (_page_rotate(page) + degrees) % 360
