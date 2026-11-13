@@ -5,7 +5,7 @@ description = "Open-source PDF workbench for Windows"
 authors = ["Jason Ulbright"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.90"
 
 [workspace]
 members = [".", "shell-menu"]
@@ -17,7 +17,7 @@ name = "spectrapdf_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 # Already in the lock as a transitive dependency; the build script verifies
 # every staged engine file against the manifest's recorded digest.
 sha2 = "0.10"
@@ -53,7 +53,7 @@ update-test-source = []
 [dependencies]
 base64 = "0.22"
 sha2 = "0.10"
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -144,4 +144,4 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 # routed and killed through an `AppHandle`, so proving the deadline kill needs
 # an app. A dev-dependency feature, which resolver 2 keeps out of the normal
 # build — the mock runtime is not compiled into a shipped binary.
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2.12", features = ["test"] }

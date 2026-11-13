@@ -4580,6 +4580,18 @@ class TestPrintPipeline:
         none_lib = SimpleNamespace(cupsGetNamedDest=lambda *a: None, cupsFreeDests=lambda *a: None)
         assert cups_print.default_duplex("Q", none_lib) is None
 
+    def test_rotate_pages_turns_every_page_and_refuses_a_bad_angle(self, tmp_dir):
+        from engine.print_layout import rotate_pages
+
+        src = self._sized(tmp_dir, [300, 300])
+        dst = os.path.join(tmp_dir, "turned.pdf")
+        rotate_pages(src, dst, 90)
+        with pikepdf.open(dst) as out:
+            assert [int(p.obj["/Rotate"]) for p in out.pages] == [90, 90]
+        # A caller bug, not a refusal a user meets: no catalog row, an assertion.
+        with pytest.raises(AssertionError, match="multiple of 90"):
+            rotate_pages(src, dst, 45)
+
     def test_sheet_sequence(self):
         from engine.print_layout import sheet_sequence
 

@@ -15,9 +15,9 @@ use tauri::WebviewWindow;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
-// The WebView2 bindings are generated against windows-core 0.61; an interface
-// cast and a PCWSTR argument only typecheck against THAT crate's traits, not
-// the 0.62 the rest of this binary uses.
+// The WebView2 bindings (webview2-com 0.39) are generated against windows-core
+// 0.62, the same crate the rest of this binary uses; an interface cast and a
+// PCWSTR argument only typecheck against that crate's traits.
 use windows_core::{Interface, BOOL, HSTRING, PCWSTR, PWSTR};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
