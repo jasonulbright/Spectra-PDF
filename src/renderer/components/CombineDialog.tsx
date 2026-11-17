@@ -495,6 +495,7 @@ export function CombineDialog({
                       type="button"
                       data-testid="combine-row-up"
                       aria-label={tChrome('dialog.createPdf.moveUp')}
+                      title={tChrome('dialog.createPdf.moveUp')}
                       className="px-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-60"
                       disabled={busy || index === 0}
                       onClick={() => setRows((prev) => moveRow(prev, row.id, -1))}
@@ -505,6 +506,7 @@ export function CombineDialog({
                       type="button"
                       data-testid="combine-row-down"
                       aria-label={tChrome('dialog.createPdf.moveDown')}
+                      title={tChrome('dialog.createPdf.moveDown')}
                       className="px-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-60"
                       disabled={busy || index === rows.length - 1}
                       onClick={() => setRows((prev) => moveRow(prev, row.id, 1))}
@@ -515,6 +517,7 @@ export function CombineDialog({
                       type="button"
                       data-testid="combine-row-remove"
                       aria-label={tChrome('dialog.createPdf.remove')}
+                      title={tChrome('dialog.createPdf.remove')}
                       className="px-1 text-neutral-400 hover:text-red-400 disabled:opacity-60"
                       disabled={busy}
                       onClick={() => setRows((prev) => removeRow(prev, row.id))}

@@ -287,6 +287,7 @@ export function TakeoffPanel(): React.ReactElement {
                         key={c}
                         type="button"
                         aria-label={tChrome('panel.takeoff.colorAria', { color: c })}
+                        title={tChrome('panel.takeoff.colorAria', { color: c })}
                         onClick={() => updateGroup(g, { color: c })}
                         className="w-4 h-4 rounded-sm border border-black/30"
                         style={{ background: c }}

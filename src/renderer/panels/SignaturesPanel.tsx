@@ -672,6 +672,7 @@ export function SignaturesPanel(): React.ReactElement {
               onClick={() => saveTrustRoots(trustRoots.filter((r) => r !== p))}
               className="text-neutral-600 hover:text-red-400"
               aria-label={tChrome('panel.sig.removeAnchor', { path: p })}
+              title={tChrome('panel.sig.removeAnchor', { path: p })}
             >
               ×
             </button>

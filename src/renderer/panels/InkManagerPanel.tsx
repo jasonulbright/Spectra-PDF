@@ -227,6 +227,7 @@ export function InkManagerPanel(): React.ReactElement {
               <button
                 data-testid={`ink-manager-up-${slug}`}
                 aria-label={tChrome('panel.inkManager.moveUp')}
+                title={tChrome('panel.inkManager.moveUp')}
                 disabled={index === 0}
                 onClick={() => moveInk(ink.name, -1)}
                 className="px-1.5 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
@@ -236,6 +237,7 @@ export function InkManagerPanel(): React.ReactElement {
               <button
                 data-testid={`ink-manager-down-${slug}`}
                 aria-label={tChrome('panel.inkManager.moveDown')}
+                title={tChrome('panel.inkManager.moveDown')}
                 disabled={index === usable.length - 1}
                 onClick={() => moveInk(ink.name, 1)}
                 className="px-1.5 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"

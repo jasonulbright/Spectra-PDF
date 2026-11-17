@@ -8088,7 +8088,7 @@ export function WorkspaceCanvasView({
           className="absolute top-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{ocrApplyError}</span>
-          <button onClick={() => setOcrApplyError(null)} className="text-red-300 hover:text-red-100">×</button>
+          <button onClick={() => setOcrApplyError(null)} className="text-red-300 hover:text-red-100" title={tChrome('dialog.update.dismiss')} aria-label={tChrome('dialog.update.dismiss')}>×</button>
         </div>
       )}
       {formsError && (
@@ -8097,7 +8097,7 @@ export function WorkspaceCanvasView({
           className="absolute top-28 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-error border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{formsError}</span>
-          <button onClick={() => setFormsError(null)} className="text-red-300 hover:text-red-100">×</button>
+          <button onClick={() => setFormsError(null)} className="text-red-300 hover:text-red-100" title={tChrome('dialog.update.dismiss')} aria-label={tChrome('dialog.update.dismiss')}>×</button>
         </div>
       )}
       {mergeNotice && (
@@ -8106,7 +8106,7 @@ export function WorkspaceCanvasView({
           className="absolute top-40 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 canvas-toast is-warning border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
         >
           <span className="flex-1">{mergeNotice}</span>
-          <button onClick={() => setMergeNotice(null)} className="text-amber-300 hover:text-amber-100">×</button>
+          <button onClick={() => setMergeNotice(null)} className="text-amber-300 hover:text-amber-100" title={tChrome('dialog.update.dismiss')} aria-label={tChrome('dialog.update.dismiss')}>×</button>
         </div>
       )}
 
@@ -8481,6 +8481,8 @@ export function WorkspaceCanvasView({
               <button
                 key={hex}
                 type="button"
+                title={hex}
+                aria-label={hex}
                 className={'page-edittext-colorchip' + (atSpanColor === hex ? ' selected' : '')}
                 style={{ background: hex }}
                 onClick={() => setAtSpanColor((c) => (c === hex ? null : hex))}
@@ -8571,6 +8573,8 @@ export function WorkspaceCanvasView({
                     type="button"
                     className="text-neutral-500 hover:text-red-400"
                     onClick={() => setAtSpans((prev) => prev.filter((_x, xi) => xi !== i))}
+                    title={tChrome('dialog.createPdf.remove')}
+                    aria-label={tChrome('dialog.createPdf.remove')}
                   >
                     ✕
                   </button>
@@ -8869,7 +8873,7 @@ export function WorkspaceCanvasView({
               output: signDone.output,
             })}
           </span>
-          <button onClick={() => setSignDone(null)} className="hover:text-white">×</button>
+          <button onClick={() => setSignDone(null)} className="hover:text-white" title={tChrome('dialog.update.dismiss')} aria-label={tChrome('dialog.update.dismiss')}>×</button>
         </div>
       )}
 
@@ -8886,6 +8890,8 @@ export function WorkspaceCanvasView({
               </span>
               <button
                 onClick={() => setMarksClearedSeen(markLedger.cleared)}
+                title={tChrome('dialog.update.dismiss')}
+                aria-label={tChrome('dialog.update.dismiss')}
                 className="text-amber-300 hover:text-amber-100"
               >
                 ×
@@ -8900,6 +8906,8 @@ export function WorkspaceCanvasView({
               <span className="flex-1">{redactError}</span>
               <button
                 onClick={() => setRedactError(null)}
+                title={tChrome('dialog.update.dismiss')}
+                aria-label={tChrome('dialog.update.dismiss')}
                 className="text-red-300 hover:text-red-100"
               >
                 ×
@@ -8917,6 +8925,8 @@ export function WorkspaceCanvasView({
           <span className="flex-1">{linkError}</span>
           <button
             onClick={() => setLinkError(null)}
+            title={tChrome('dialog.update.dismiss')}
+            aria-label={tChrome('dialog.update.dismiss')}
             className="text-red-300 hover:text-red-100"
           >
             ×
@@ -8934,6 +8944,8 @@ export function WorkspaceCanvasView({
           </span>
           <button
             onClick={() => setSnapshotError(null)}
+            title={tChrome('dialog.update.dismiss')}
+            aria-label={tChrome('dialog.update.dismiss')}
             className="text-red-300 hover:text-red-100"
           >
             ×

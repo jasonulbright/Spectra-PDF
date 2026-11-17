@@ -551,6 +551,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                   <button
                     type="button"
                     data-testid={`action-step-up-${i}`}
+                    title={tChrome('dialog.createPdf.moveUp')}
+                    aria-label={tChrome('dialog.createPdf.moveUp')}
                     disabled={i === 0}
                     onClick={() => {
                       const steps = [...action.steps];
@@ -564,6 +566,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                   <button
                     type="button"
                     data-testid={`action-step-down-${i}`}
+                    title={tChrome('dialog.createPdf.moveDown')}
+                    aria-label={tChrome('dialog.createPdf.moveDown')}
                     disabled={i === action.steps.length - 1}
                     onClick={() => {
                       const steps = [...action.steps];
