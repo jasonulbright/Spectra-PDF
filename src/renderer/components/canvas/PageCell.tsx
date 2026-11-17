@@ -10,6 +10,7 @@ import {
 } from '../../lib/annotation-view';
 import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
 import type { RedactionMark } from '../../lib/redaction';
+import { redactionRectsFromSelection } from '../../lib/redaction-selection';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
@@ -1727,6 +1728,49 @@ function PageCellImpl({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [snapArmed]);
+  // Redact by text selection (issue 110). While the Redact tool is armed, a drag
+  // that starts on text selects it; when the pointer is released the selection
+  // becomes one mark per line on this page, then the selection is cleared. Every
+  // page listens, and each takes only the line boxes that lie on it, so a drag
+  // across a page break marks both pages. The latest props ride a ref because
+  // the window listener closes over the render it was added in.
+  const redactSelectionRef = useRef({ docId, pageId: page.id, rotation: page.rotation, add: onAddRedactionMark });
+  redactSelectionRef.current = { docId, pageId: page.id, rotation: page.rotation, add: onAddRedactionMark };
+  useEffect(() => {
+    if (tool !== 'redact') return;
+    const onUp = (): void => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+      const { docId: d, pageId, rotation, add } = redactSelectionRef.current;
+      const pageEl = document.querySelector<HTMLElement>(`[data-page-id="${CSS.escape(pageId)}"]`);
+      if (!pageEl) return;
+      const rects: { left: number; top: number; right: number; bottom: number }[] = [];
+      for (let i = 0; i < sel.rangeCount; i++) {
+        // Only a selection made in a page's text layer marks anything; text in a
+        // panel or a dialog is not a document selection.
+        const range = sel.getRangeAt(i);
+        const root = range.commonAncestorContainer;
+        const host = root instanceof Element ? root : root.parentElement;
+        if (!host?.closest('.textLayer') && !host?.querySelector('.textLayer')) continue;
+        for (const r of range.getClientRects()) {
+          rects.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+        }
+      }
+      const b = pageEl.getBoundingClientRect();
+      const marks = redactionRectsFromSelection(rects, {
+        left: b.left,
+        top: b.top,
+        right: b.right,
+        bottom: b.bottom,
+      });
+      if (marks.length === 0) return;
+      for (const m of marks) add(d, pageId, m, rotation);
+      // After the other pages' listeners have read the same selection.
+      window.setTimeout(() => window.getSelection()?.removeAllRanges(), 0);
+    };
+    window.addEventListener('pointerup', onUp);
+    return () => window.removeEventListener('pointerup', onUp);
+  }, [tool]);
   const publishSnap = (hit: SnapHit | null): void => {
     setSnapMarker((prev) =>
       prev && hit && prev.type === hit.type && prev.x === hit.x && prev.y === hit.y ? prev : hit,
@@ -3020,6 +3064,9 @@ function PageCellImpl({
     // band and silently created a HIGHLIGHT annotation (regression, the
     // same class as the 'hand' fix above).
     if (tool === 'forms' || tool === 'edit') return;
+    // Redact: a press on text starts a text selection (the mark is made when the
+    // pointer is released, see the effect below). A press anywhere else draws.
+    if (tool === 'redact' && e.target instanceof Element && e.target.closest('.textLayer :is(span, br)')) return;
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink' || tool === 'inkhighlight') {
@@ -3614,7 +3661,8 @@ function PageCellImpl({
           rotation={page.rotation}
           displayWidth={displayWidth}
           displayHeight={pageHeight}
-          active={tool === 'select'}
+          active={tool === 'select' || tool === 'redact'}
+          spansOnly={tool === 'redact'}
           ocrSelection={ocrSelection}
         />
       )}

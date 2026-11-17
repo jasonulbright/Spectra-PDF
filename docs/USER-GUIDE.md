@@ -508,11 +508,12 @@ Redaction removes content from the file. Text and images under each marked regio
 ### Mark by hand
 
 1. Click **Tools > Redact**.
-2. Draw a box on the page over the content to remove. The box is labeled **REDACT**.
-3. Mark all the places.
-4. In the status bar, click the button that redacts the marked regions. It shows the number of regions.
-5. Spectra PDF asks you to confirm. It says that it will permanently remove the content under the regions.
-6. Save the document.
+2. To mark text, drag over it with the pointer. When you release the button, Spectra PDF marks each selected line with one box. The boxes are as tall as the lines. You can also double-click a word or triple-click a line.
+3. To mark a picture, a scan, or any area without text, start the drag on an empty part of the page and draw a box. A drag that starts on text selects text. It does not draw a box.
+4. Each box is labeled **REDACT**. Mark all the places. To remove one mark, click the **×** on the box.
+5. In the status bar, click the button that redacts the marked regions. It shows the number of regions.
+6. Spectra PDF asks you to confirm. It says that it will permanently remove the content under the regions.
+7. Save the document.
 
 The status bar also has the buttons **Save marks** and **Clear**. **Save marks** keeps the marks in the document so you can review them later. Nothing is redacted until you redact the marked regions. **Clear** removes the marks.
 

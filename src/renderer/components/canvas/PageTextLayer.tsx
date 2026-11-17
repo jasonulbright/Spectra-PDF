@@ -71,6 +71,10 @@ export interface PageTextLayerProps {
   displayHeight: number;
   /** Whether text is selectable right now — see the pointer-events note below. */
   active: boolean;
+  /** Only the text itself takes the pointer; the rest of the page still draws.
+   *  The Redact tool uses it: a drag that starts on text selects it, a drag that
+   *  starts anywhere else draws a box. */
+  spansOnly?: boolean;
   /** Recognise this page for selection when it carries no text. */
   ocrSelection?: OcrSelectionContext | null;
 }
@@ -122,6 +126,7 @@ export function PageTextLayer({
   displayWidth,
   displayHeight,
   active,
+  spansOnly = false,
   ocrSelection,
 }: PageTextLayerProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -473,7 +478,7 @@ export function PageTextLayer({
     <>
       <div
         ref={containerRef}
-        className="textLayer"
+        className={spansOnly ? 'textLayer textLayer--spans' : 'textLayer'}
         data-testid="text-layer"
         data-text-build={native?.version}
         data-ocr-status={ocrStatus ?? undefined}
@@ -486,7 +491,10 @@ export function PageTextLayer({
         // those pointers would break them — so it stays inert unless selecting.
         // `user-select` follows too, or a drag with another tool active would
         // still paint a selection highlight under the band.
-        style={{ pointerEvents: active ? 'auto' : 'none', userSelect: active ? 'text' : 'none' }}
+        style={{
+          pointerEvents: active && !spansOnly ? 'auto' : 'none',
+          userSelect: active ? 'text' : 'none',
+        }}
       />
       {ocrStatus === 'pending' && (
         <div className="page-ocr-busy" data-testid="page-ocr-busy" role="status">
