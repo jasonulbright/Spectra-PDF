@@ -10,7 +10,8 @@ import {
 } from '../../lib/annotation-view';
 import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
 import type { RedactionMark } from '../../lib/redaction';
-import { redactionRectsFromSelection } from '../../lib/redaction-selection';
+import { marksNotCovered, redactionRectsFromSelection } from '../../lib/redaction-selection';
+import { textLayerRects } from '../../lib/selection-rects';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
@@ -1292,6 +1293,10 @@ function VectorRestyleToolbar({
   );
 }
 
+// Redact by text selection: a press on text raises it, the pointer release of that
+// same gesture reads and clears it. Shared, because every page cell listens.
+let redactTextGesture = false;
+
 function PageCellImpl({
   docId,
   page,
@@ -1728,48 +1733,70 @@ function PageCellImpl({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [snapArmed]);
-  // Redact by text selection (issue 110). While the Redact tool is armed, a drag
-  // that starts on text selects it; when the pointer is released the selection
-  // becomes one mark per line on this page, then the selection is cleared. Every
-  // page listens, and each takes only the line boxes that lie on it, so a drag
-  // across a page break marks both pages. The latest props ride a ref because
-  // the window listener closes over the render it was added in.
-  const redactSelectionRef = useRef({ docId, pageId: page.id, rotation: page.rotation, add: onAddRedactionMark });
-  redactSelectionRef.current = { docId, pageId: page.id, rotation: page.rotation, add: onAddRedactionMark };
+  // Redact by text selection (issue 110). While the Redact tool is armed, a press
+  // on text starts a text selection (see handlePointerDown) and raises
+  // `redactTextGesture`. When the pointer is released the selection becomes one
+  // mark per line on this page, then the selection is cleared. Only a gesture
+  // that began on text marks anything: an older selection, a keyboard
+  // selection, or a click on a button must never turn into marks. Every page
+  // listens, and each takes only the text that lies on its own element, so a
+  // drag across a page break marks both pages, and a document shown in two
+  // panes is marked once. The latest props ride a ref because the window
+  // listener closes over the render it was added in.
+  const pageRootRef = useRef<HTMLDivElement>(null);
+  const redactSelectionRef = useRef({
+    docId,
+    pageId: page.id,
+    rotation: page.rotation,
+    add: onAddRedactionMark,
+    existing: redactionMarks,
+  });
+  redactSelectionRef.current = {
+    docId,
+    pageId: page.id,
+    rotation: page.rotation,
+    add: onAddRedactionMark,
+    existing: redactionMarks,
+  };
   useEffect(() => {
     if (tool !== 'redact') return;
+    // A selection left from another tool is not a redaction gesture.
+    window.getSelection()?.removeAllRanges();
     const onUp = (): void => {
+      if (!redactTextGesture) return;
+      // After every page's listener has read the selection.
+      window.setTimeout(() => {
+        redactTextGesture = false;
+        window.getSelection()?.removeAllRanges();
+      }, 0);
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-      const { docId: d, pageId, rotation, add } = redactSelectionRef.current;
-      const pageEl = document.querySelector<HTMLElement>(`[data-page-id="${CSS.escape(pageId)}"]`);
-      if (!pageEl) return;
+      const pageEl = pageRootRef.current;
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !pageEl) return;
+      const { docId: d, pageId, rotation, add, existing } = redactSelectionRef.current;
       const rects: { left: number; top: number; right: number; bottom: number }[] = [];
-      for (let i = 0; i < sel.rangeCount; i++) {
-        // Only a selection made in a page's text layer marks anything; text in a
-        // panel or a dialog is not a document selection.
-        const range = sel.getRangeAt(i);
-        const root = range.commonAncestorContainer;
-        const host = root instanceof Element ? root : root.parentElement;
-        if (!host?.closest('.textLayer') && !host?.querySelector('.textLayer')) continue;
-        for (const r of range.getClientRects()) {
-          rects.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
-        }
-      }
+      for (let i = 0; i < sel.rangeCount; i++) rects.push(...textLayerRects(sel.getRangeAt(i)));
       const b = pageEl.getBoundingClientRect();
-      const marks = redactionRectsFromSelection(rects, {
+      const found = redactionRectsFromSelection(rects, {
         left: b.left,
         top: b.top,
         right: b.right,
         bottom: b.bottom,
       });
-      if (marks.length === 0) return;
+      const marks = marksNotCovered(
+        found,
+        (existing ?? []).map((m) => projectMarkRect(m, rotation)),
+      );
       for (const m of marks) add(d, pageId, m, rotation);
-      // After the other pages' listeners have read the same selection.
-      window.setTimeout(() => window.getSelection()?.removeAllRanges(), 0);
+    };
+    const onCancel = (): void => {
+      redactTextGesture = false;
     };
     window.addEventListener('pointerup', onUp);
-    return () => window.removeEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
   }, [tool]);
   const publishSnap = (hit: SnapHit | null): void => {
     setSnapMarker((prev) =>
@@ -3066,7 +3093,16 @@ function PageCellImpl({
     if (tool === 'forms' || tool === 'edit') return;
     // Redact: a press on text starts a text selection (the mark is made when the
     // pointer is released, see the effect below). A press anywhere else draws.
-    if (tool === 'redact' && e.target instanceof Element && e.target.closest('.textLayer :is(span, br)')) return;
+    // Hold Shift to draw a box over text instead, for a picture that text covers.
+    if (
+      tool === 'redact' &&
+      !e.shiftKey &&
+      e.target instanceof Element &&
+      e.target.closest('.textLayer :is(span, br)')
+    ) {
+      redactTextGesture = true;
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink' || tool === 'inkhighlight') {
@@ -3529,6 +3565,7 @@ function PageCellImpl({
 
   return (
     <div
+      ref={pageRootRef}
       data-page-id={page.id}
       // The page's natural DISPLAYED extents in PDF points (rotation-
       // swapped) — the board camera's Actual Size / Fit Width solve their

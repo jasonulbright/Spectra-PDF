@@ -509,7 +509,7 @@ Redaction removes content from the file. Text and images under each marked regio
 
 1. Click **Tools > Redact**.
 2. To mark text, drag over it with the pointer. When you release the button, Spectra PDF marks each selected line with one box. The boxes are as tall as the lines. You can also double-click a word or triple-click a line.
-3. To mark a picture, a scan, or any area without text, start the drag on an empty part of the page and draw a box. A drag that starts on text selects text. It does not draw a box.
+3. To mark a picture, a scan, or any area without text, start the drag on an empty part of the page and draw a box. A drag that starts on text selects text. It does not draw a box. To draw a box over text, for example over a picture that has a text layer, hold `Shift` and drag.
 4. Each box is labeled **REDACT**. Mark all the places. To remove one mark, click the **×** on the box.
 5. In the status bar, click the button that redacts the marked regions. It shows the number of regions.
 6. Spectra PDF asks you to confirm. It says that it will permanently remove the content under the regions.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactionRectsFromSelection } from '../src/renderer/lib/redaction-selection';
+import { marksNotCovered, redactionRectsFromSelection } from '../src/renderer/lib/redaction-selection';
 
 // A 1000 x 2000 page box at the screen origin, so a client coordinate divided by
 // the box size is the normalized value.
@@ -56,5 +56,38 @@ describe('redaction marks from a text selection', () => {
     expect(marks).toHaveLength(3);
     expect(marks[0].x).toBeCloseTo(0.3);
     expect(marks[2].x + marks[2].w).toBeCloseTo(0.5);
+  });
+
+  it('ignores an element box the size of the page', () => {
+    // What Range.getClientRects() adds for a raster or layer inside the range.
+    const marks = redactionRectsFromSelection([r(0, 0, 1000, 2000), r(100, 200, 500, 220)], BOX);
+    expect(marks).toHaveLength(1);
+    expect(marks[0].h).toBeCloseTo(20 / 2000);
+  });
+
+  it('keeps the columns of turned text apart and covers only the selected part', () => {
+    // A page turned a quarter-turn: each line is a tall, narrow column.
+    const marks = redactionRectsFromSelection(
+      [r(200, 600, 220, 1400), r(230, 400, 250, 1000), r(260, 400, 280, 900)],
+      BOX,
+    );
+    expect(marks).toHaveLength(3);
+    const first = marks.find((m) => Math.abs(m.x - 0.2) < 0.001);
+    expect(first?.y).toBeCloseTo(0.3);
+    expect(first?.h).toBeCloseTo(0.4);
+  });
+
+  it('does not merge fragments whose union would cover far more than they do', () => {
+    // Two diagonal-text boxes that overlap vertically but sit far apart.
+    const marks = redactionRectsFromSelection([r(100, 200, 200, 600), r(700, 250, 800, 650)], BOX);
+    expect(marks).toHaveLength(2);
+  });
+
+  it('skips marks an existing mark already covers', () => {
+    const existing = [{ x: 0.1, y: 0.1, w: 0.5, h: 0.02 }];
+    const word = { x: 0.2, y: 0.1, w: 0.1, h: 0.02 };
+    const other = { x: 0.1, y: 0.2, w: 0.3, h: 0.02 };
+    expect(marksNotCovered([word, other], existing)).toEqual([other]);
+    expect(marksNotCovered([word], [])).toEqual([word]);
   });
 });
