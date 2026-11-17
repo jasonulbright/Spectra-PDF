@@ -136,6 +136,7 @@ const HEADING = /^(#{1,4})\s+(.*?)\s*#*\s*$/;
 export function parseGuide(source: string): GuideBlock[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: GuideBlock[] = [];
+  const used = new Set<string>();
   const seen = new Map<string, number>();
   let i = 0;
   while (i < lines.length) {
@@ -144,10 +145,16 @@ export function parseGuide(source: string): GuideBlock[] {
       i += 1;
       continue;
     }
-    if (line.trimStart().startsWith('```')) {
+    const opener = /^\s*(`{3,})/.exec(line);
+    if (opener) {
       const body: string[] = [];
       i += 1;
-      while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+      // A closing fence is at least as long as the opener and has nothing else.
+      const closes = (text: string): boolean => {
+        const m = /^\s*(`{3,})\s*$/.exec(text);
+        return m !== null && m[1].length >= opener[1].length;
+      };
+      while (i < lines.length && !closes(lines[i])) {
         body.push(lines[i]);
         i += 1;
       }
@@ -159,12 +166,19 @@ export function parseGuide(source: string): GuideBlock[] {
     if (heading) {
       const inline = parseInline(heading[2]);
       const base = headingSlug(inlineText(inline));
-      const count = seen.get(base) ?? 0;
+      // The next unused suffix, so `Same`, `Same`, `Same 1` get three ids.
+      let count = seen.get(base) ?? 0;
+      let id = count === 0 ? base : `${base}-${count}`;
+      while (used.has(id)) {
+        count += 1;
+        id = `${base}-${count}`;
+      }
       seen.set(base, count + 1);
+      used.add(id);
       blocks.push({
         kind: 'heading',
         level: heading[1].length as 1 | 2 | 3 | 4,
-        id: count === 0 ? base : `${base}-${count}`,
+        id,
         inline,
       });
       i += 1;

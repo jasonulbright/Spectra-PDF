@@ -158,6 +158,7 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
       className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
       onClick={onClose}
       data-testid="help-dialog"
+      data-app-text
     >
       <div
         ref={shellRef}
@@ -175,6 +176,8 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
         <div className="flex flex-1 min-h-0">
           <nav
             aria-label={tChrome('dialog.help.contents')}
+            lang="en"
+            dir="ltr"
             className="w-60 shrink-0 overflow-y-auto border-e border-neutral-800 p-3 text-[13px]"
             data-testid="help-contents"
           >
@@ -197,6 +200,8 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
           </nav>
           <div
             ref={bodyRef}
+            lang="en"
+            dir="ltr"
             className="flex-1 overflow-y-auto px-6 py-4 text-sm"
             data-testid="help-body"
           >

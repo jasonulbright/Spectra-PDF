@@ -48,6 +48,20 @@ describe('guide markdown reader', () => {
     expect(text(table.rows[0][1])).toBe('Open | load');
   });
 
+  it('closes a fence only with at least as many backticks', () => {
+    const blocks = parseGuide(['````', '```', '# inside', '```', '````', '', '## After', ''].join('\n'));
+    expect(blocks[0]).toEqual({ kind: 'code', text: ['```', '# inside', '```'].join('\n') });
+    expect(blocks[1]).toMatchObject({ kind: 'heading', id: 'after' });
+  });
+
+  it('gives every heading its own id', () => {
+    const ids = parseGuide(['## Same', '', '## Same', '', '## Same 1', ''].join('\n'))
+      .filter((b) => b.kind === 'heading')
+      .map((b) => (b as { id: string }).id);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids.slice(0, 2)).toEqual(['same', 'same-1']);
+  });
+
   it('reads code fences without reading inside them', () => {
     const blocks = parseGuide('```\n# not a heading\n**not bold**\n```\n');
     expect(blocks).toEqual([{ kind: 'code', text: '# not a heading\n**not bold**' }]);
