@@ -186,6 +186,7 @@ import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
 import { HelpDialog } from './components/HelpDialog';
+import { isAppTextCopy } from './lib/copy-guard';
 import { IccLicenseDialog } from './components/IccLicenseDialog';
 import { ensureIccAssent, iccNeedsAssent, registerIccLicenseOpener } from './lib/icc-assent';
 import { CustomizeToolbarDialog } from './components/CustomizeToolbarDialog';
@@ -2096,7 +2097,7 @@ function AppContent(): React.ReactElement {
       const target = event.target;
       // The user guide is application text, not document content. A selection
       // that still holds PDF pages is document content wherever focus sits.
-      if (pageIds.length === 0 && target instanceof Element && target.closest('[data-app-text]')) return;
+      if (isAppTextCopy(target, pageIds)) return;
       if (target instanceof HTMLElement
           && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
       const block = copyBlock(now, pageIds);

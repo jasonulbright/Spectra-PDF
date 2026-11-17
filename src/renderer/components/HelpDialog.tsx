@@ -7,6 +7,7 @@ import {
   parseGuide,
   type GuideBlock,
   type GuideInline,
+  type GuideList,
 } from '../lib/guide-markdown';
 // The guide is one Markdown file kept in docs/. Vite inlines it at build time,
 // so the dialog works offline and the text always matches the build.
@@ -62,6 +63,23 @@ const HEADING_CLASS: Record<1 | 2 | 3 | 4, string> = {
   4: 'text-sm font-semibold mt-4 mb-1',
 };
 
+function renderList(list: GuideList, key: number, jump: (id: string) => void): React.ReactNode {
+  const Tag = list.ordered ? 'ol' : 'ul';
+  return (
+    <Tag
+      key={key}
+      className={`my-2 ps-6 space-y-1 ${list.ordered ? 'list-decimal' : 'list-disc'}`}
+    >
+      {list.items.map((item, i) => (
+        <li key={i}>
+          {renderInline(item.inline, jump)}
+          {item.sub ? renderList(item.sub, 0, jump) : null}
+        </li>
+      ))}
+    </Tag>
+  );
+}
+
 function renderBlock(
   block: GuideBlock,
   key: number,
@@ -82,19 +100,8 @@ function renderBlock(
           {renderInline(block.inline, jump)}
         </p>
       );
-    case 'list': {
-      const Tag = block.ordered ? 'ol' : 'ul';
-      return (
-        <Tag
-          key={key}
-          className={`my-2 ps-6 space-y-1 ${block.ordered ? 'list-decimal' : 'list-disc'}`}
-        >
-          {block.items.map((item, i) => (
-            <li key={i}>{renderInline(item, jump)}</li>
-          ))}
-        </Tag>
-      );
-    }
+    case 'list':
+      return renderList(block, key, jump);
     case 'quote':
       return (
         <blockquote key={key} className="my-3 ps-3 border-s-2 border-neutral-600 text-neutral-300">
@@ -149,7 +156,11 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
 
   const jump = (id: string): void => {
     const el = bodyRef.current?.querySelector<HTMLElement>(`#${CSS.escape(ID_PREFIX + id)}`);
-    el?.scrollIntoView({ block: 'start' });
+    if (!el) return;
+    el.scrollIntoView({ block: 'start' });
+    // Keyboard scrolling follows focus, so move it to the heading.
+    el.tabIndex = -1;
+    el.focus({ preventScroll: true });
   };
 
   return (
@@ -176,15 +187,13 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
         <div className="flex flex-1 min-h-0">
           <nav
             aria-label={tChrome('dialog.help.contents')}
-            lang="en"
-            dir="ltr"
             className="w-60 shrink-0 overflow-y-auto border-e border-neutral-800 p-3 text-[13px]"
             data-testid="help-contents"
           >
             <div className="text-xs uppercase tracking-wide text-neutral-500 mb-2">
               {tChrome('dialog.help.contents')}
             </div>
-            <ul className="space-y-1">
+            <ul className="space-y-1" lang="en" dir="ltr">
               {outline.map((entry) => (
                 <li key={entry.id} className={entry.level === 3 ? 'ps-3' : ''}>
                   <button
@@ -202,6 +211,7 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
             ref={bodyRef}
             lang="en"
             dir="ltr"
+            tabIndex={0}
             className="flex-1 overflow-y-auto px-6 py-4 text-sm"
             data-testid="help-body"
           >

@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   type GuideBlock,
   type GuideInline,
+  type GuideList,
   guideOutline,
   headingSlug,
   inlineText,
@@ -37,8 +40,25 @@ describe('guide markdown reader', () => {
     const blocks = parseGuide('1. Open the file.\n2. Press **Save**\n   to keep it.\n\n- one\n- two\n');
     expect(blocks[0]).toMatchObject({ kind: 'list', ordered: true });
     expect(pick(blocks[0], 'list').items).toHaveLength(2);
-    expect(text(pick(blocks[0], 'list').items[1])).toBe('Press Save to keep it.');
+    expect(text(pick(blocks[0], 'list').items[1].inline)).toBe('Press Save to keep it.');
     expect(blocks[1]).toMatchObject({ kind: 'list', ordered: false });
+  });
+
+  it('keeps a nested list under its item, so step numbers stay right', () => {
+    const blocks = parseGuide(['1. For Password:', '   1. Type the user password.', '   2. Type the owner password.', '2. Click Encrypt.', '3. Choose the file name.', ''].join('\n'));
+    const list = pick(blocks[0], 'list');
+    expect(list.items).toHaveLength(3);
+    expect(list.items[0].sub?.ordered).toBe(true);
+    expect(list.items[0].sub?.items).toHaveLength(2);
+    expect(text(list.items[1].inline)).toBe('Click Encrypt.');
+  });
+
+  it('nests a bullet list under a numbered step', () => {
+    const blocks = parseGuide(['5. Select the options:', '   - Straighten', '   - Compress', '6. Start.', ''].join('\n'));
+    const list = pick(blocks[0], 'list');
+    expect(list.items).toHaveLength(2);
+    expect(list.items[0].sub?.ordered).toBe(false);
+    expect(list.items[0].sub?.items.map((i) => text(i.inline))).toEqual(['Straighten', 'Compress']);
   });
 
   it('reads tables with escaped bars', () => {
@@ -90,5 +110,34 @@ describe('guide markdown reader', () => {
       { id: 'b', level: 2, text: 'B' },
       { id: 'c', level: 3, text: 'C' },
     ]);
+  });
+});
+
+describe('the bundled user guide', () => {
+  const source = readFileSync(resolve(__dirname, '../docs/USER-GUIDE.md'), 'utf8');
+  const blocks = parseGuide(source);
+
+  it('has a heading for every in-guide link', () => {
+    const ids = new Set(blocks.filter((b) => b.kind === 'heading').map((b) => (b as { id: string }).id));
+    const targets: string[] = [];
+    const visit = (nodes: GuideInline[]): void => {
+      for (const n of nodes) {
+        if (n.kind === 'jump') targets.push(n.target);
+        if (n.kind === 'bold' || n.kind === 'italic' || n.kind === 'jump') visit(n.children);
+      }
+    };
+    const list = (l: GuideList): void => {
+      for (const item of l.items) {
+        visit(item.inline);
+        if (item.sub) list(item.sub);
+      }
+    };
+    for (const b of blocks) {
+      if (b.kind === 'paragraph' || b.kind === 'quote') visit(b.inline);
+      else if (b.kind === 'list') list(b);
+      else if (b.kind === 'table') [b.head, ...b.rows].forEach((row) => row.forEach(visit));
+    }
+    expect(targets.length).toBeGreaterThan(10);
+    expect(targets.filter((id) => !ids.has(id))).toEqual([]);
   });
 });

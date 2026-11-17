@@ -14,10 +14,22 @@ export type GuideInline =
   | { kind: 'code'; text: string }
   | { kind: 'jump'; target: string; children: GuideInline[] };
 
+/** One list item: its text, and the list nested under it (if any). */
+export interface GuideListItem {
+  inline: GuideInline[];
+  sub: GuideList | null;
+}
+
+export interface GuideList {
+  kind: 'list';
+  ordered: boolean;
+  items: GuideListItem[];
+}
+
 export type GuideBlock =
   | { kind: 'heading'; level: 1 | 2 | 3 | 4; id: string; inline: GuideInline[] }
   | { kind: 'paragraph'; inline: GuideInline[] }
-  | { kind: 'list'; ordered: boolean; items: GuideInline[][] }
+  | GuideList
   | { kind: 'quote'; inline: GuideInline[] }
   | { kind: 'code'; text: string }
   | { kind: 'table'; head: GuideInline[][]; rows: GuideInline[][][] }
@@ -133,6 +145,43 @@ const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 const HEADING = /^(#{1,4})\s+(.*?)\s*#*\s*$/;
 
+const indentOf = (s: string): number => s.length - s.trimStart().length;
+
+/**
+ * A list that starts at `start`. An item holds the list indented under it, so
+ * a numbered step keeps its own number and its sub-steps. A line indented deeper
+ * than the item, with no marker, wraps the item's text.
+ */
+function parseList(lines: string[], start: number): { block: GuideList; next: number } {
+  const base = indentOf(lines[start]);
+  const ordered = NUMBERED.test(lines[start]) && !BULLET.test(lines[start]);
+  const items: GuideListItem[] = [];
+  let i = start;
+  while (i < lines.length && lines[i].trim()) {
+    const line = lines[i];
+    const indent = indentOf(line);
+    const own = (ordered ? NUMBERED : BULLET).exec(line);
+    if (indent === base && own) {
+      items.push({ inline: parseInline(own[1]), sub: null });
+      i += 1;
+    } else if (indent > base && items.length > 0) {
+      const item = items[items.length - 1];
+      if (BULLET.test(line) || NUMBERED.test(line)) {
+        const nested = parseList(lines, i);
+        if (item.sub) item.sub.items.push(...nested.block.items);
+        else item.sub = nested.block;
+        i = nested.next;
+      } else {
+        item.inline.push(...parseInline(` ${line.trim()}`));
+        i += 1;
+      }
+    } else {
+      break;
+    }
+  }
+  return { block: { kind: 'list', ordered, items }, next: i };
+}
+
 export function parseGuide(source: string): GuideBlock[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: GuideBlock[] = [];
@@ -209,24 +258,10 @@ export function parseGuide(source: string): GuideBlock[] {
       blocks.push({ kind: 'quote', inline: parseInline(parts.join(' ')) });
       continue;
     }
-    const listMatch = BULLET.exec(line) ?? NUMBERED.exec(line);
-    if (listMatch) {
-      const ordered = NUMBERED.test(line) && !BULLET.test(line);
-      const items: GuideInline[][] = [];
-      while (i < lines.length) {
-        const m = (ordered ? NUMBERED : BULLET).exec(lines[i]);
-        if (m) {
-          items.push(parseInline(m[1]));
-          i += 1;
-        } else if (lines[i].trim() && /^\s{2,}\S/.test(lines[i]) && items.length) {
-          // A wrapped line of the item above.
-          items[items.length - 1].push(...parseInline(` ${lines[i].trim()}`));
-          i += 1;
-        } else {
-          break;
-        }
-      }
-      blocks.push({ kind: 'list', ordered, items });
+    if (BULLET.test(line) || NUMBERED.test(line)) {
+      const list = parseList(lines, i);
+      blocks.push(list.block);
+      i = list.next;
       continue;
     }
     const parts: string[] = [];
