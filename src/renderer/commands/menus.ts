@@ -335,6 +335,7 @@ export const MENUS: MenuDef[] = [
     id: 'help',
     label: 'Help',
     items: [
+      cmd('help.userGuide', 'menuitem-help-user-guide'),
       cmd('help.about', 'menuitem-help-about'),
       cmd('help.licenses', 'menuitem-help-licenses'),
       cmd('help.checkUpdates', 'menuitem-help-check-updates'),

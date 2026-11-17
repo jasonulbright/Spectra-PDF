@@ -24,6 +24,11 @@ export const DIALOG_STRINGS = {
   'dialog.about.version': 'Version {{version}}',
   'dialog.about.tagline': 'A modern, offline-first PDF workbench.',
 
+  'dialog.help.aria': 'Spectra PDF user guide',
+  'dialog.help.title': 'User Guide',
+  'dialog.help.contents': 'Contents',
+  'dialog.help.englishOnly': 'The user guide is in English.',
+
   'dialog.confirm.titleUnsaved': 'Unsaved Changes',
   'dialog.confirm.titleProceed': 'Are you sure?',
   'dialog.confirm.titleNotice': 'Notice',

@@ -185,6 +185,8 @@ import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
+import { HelpDialog } from './components/HelpDialog';
+import { isAppTextCopy } from './lib/copy-guard';
 import { IccLicenseDialog } from './components/IccLicenseDialog';
 import { ensureIccAssent, iccNeedsAssent, registerIccLicenseOpener } from './lib/icc-assent';
 import { CustomizeToolbarDialog } from './components/CustomizeToolbarDialog';
@@ -382,6 +384,7 @@ function AppContent(): React.ReactElement {
     });
   }, []);
   const [showAbout, setShowAbout] = useState(false);
+  const [showUserGuide, setShowUserGuide] = useState(false);
   // The colour-profile licence. It opens BY ITSELF exactly once — on a
   // portable copy with no answer on record — because the bundling terms
   // require the text to be presented before the profiles are used, and a
@@ -2092,6 +2095,9 @@ function AppContent(): React.ReactElement {
       const pageIds = selectionPageIds(window.getSelection());
       if (pageIds.length === 0 && (!showableDoc(now) || !isDocTab(now.ui.focusedTab))) return;
       const target = event.target;
+      // The user guide is application text, not document content. A selection
+      // that still holds PDF pages is document content wherever focus sits.
+      if (isAppTextCopy(target, pageIds)) return;
       if (target instanceof HTMLElement
           && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
       const block = copyBlock(now, pageIds);
@@ -3729,6 +3735,7 @@ function AppContent(): React.ReactElement {
     combineFiles,
     openLicenses: () => setShowSettings('licenses'),
     openAbout: () => setShowAbout(true),
+    openUserGuide: () => setShowUserGuide(true),
     openCustomizeToolbar: () => setShowCustomizeToolbar(true),
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
     exit: handleExit,
@@ -3789,6 +3796,7 @@ function AppContent(): React.ReactElement {
       combineFiles: () => h.current.combineFiles(),
       openLicenses: () => h.current.openLicenses(),
       openAbout: () => h.current.openAbout(),
+      openUserGuide: () => h.current.openUserGuide(),
       openCustomizeToolbar: () => h.current.openCustomizeToolbar(),
       checkForUpdates: () => h.current.checkForUpdates(),
       exit: () => h.current.exit(),
@@ -4656,6 +4664,7 @@ function AppContent(): React.ReactElement {
         </div>
       )}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
+      {showUserGuide && <HelpDialog onClose={() => setShowUserGuide(false)} />}
       {showIccLicense && <IccLicenseDialog onClose={() => setShowIccLicense(false)} />}
       {showGsMissing && <GsMissingDialog onClose={() => setShowGsMissing(false)} />}
       {showCustomizeToolbar && (

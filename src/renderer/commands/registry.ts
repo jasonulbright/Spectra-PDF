@@ -307,6 +307,7 @@ export const COMMAND_IDS = [
   'window.newWindow',
   'window.moveToNewWindow',
   'window.minimizeToTray',
+  'help.userGuide',
   'help.about',
   'help.licenses',
   'help.checkUpdates',
@@ -1134,6 +1135,11 @@ const BASE_COMMANDS: Record<CommandId, Command> = {
     title: 'Minimize to Tray',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.minimizeToTray(),
+  },
+  'help.userGuide': {
+    title: 'User Guide',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openUserGuide(),
   },
   'help.about': {
     title: 'About Spectra PDF',

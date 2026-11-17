@@ -310,6 +310,7 @@ describe('all flags true reproduces the unfiltered model', () => {
         {
           "id": "help",
           "items": [
+            "help.userGuide|menuitem-help-user-guide",
             "help.about|menuitem-help-about",
             "help.licenses|menuitem-help-licenses",
             "help.checkUpdates|menuitem-help-check-updates",
@@ -408,6 +409,7 @@ describe('all flags true reproduces the unfiltered model', () => {
         "window.newWindow",
         "window.moveToNewWindow",
         "window.minimizeToTray",
+        "help.userGuide",
         "help.about",
         "help.licenses",
         "help.checkUpdates",
