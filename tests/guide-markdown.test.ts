@@ -1,11 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import {
+  type GuideBlock,
+  type GuideInline,
   guideOutline,
   headingSlug,
   inlineText,
   parseGuide,
   parseInline,
 } from '../src/renderer/lib/guide-markdown';
+
+function pick<K extends GuideBlock['kind']>(block: GuideBlock, kind: K): Extract<GuideBlock, { kind: K }> {
+  expect(block.kind).toBe(kind);
+  return block as Extract<GuideBlock, { kind: K }>;
+}
+
+function text(inline: GuideInline[]): string {
+  return inlineText(inline);
+}
 
 describe('guide markdown reader', () => {
   it('makes GitHub-style heading slugs', () => {
@@ -17,7 +28,7 @@ describe('guide markdown reader', () => {
     const blocks = parseGuide('# Title\n\nFirst line\nsecond line\n\n## Same\n\n## Same\n');
     expect(blocks[0]).toMatchObject({ kind: 'heading', level: 1, id: 'title' });
     expect(blocks[1]).toMatchObject({ kind: 'paragraph' });
-    expect(inlineText((blocks[1] as { inline: never }).inline)).toBe('First line second line');
+    expect(text(pick(blocks[1], 'paragraph').inline)).toBe('First line second line');
     expect(blocks[2]).toMatchObject({ id: 'same' });
     expect(blocks[3]).toMatchObject({ id: 'same-1' });
   });
@@ -25,17 +36,16 @@ describe('guide markdown reader', () => {
   it('reads numbered and bulleted lists, with wrapped items', () => {
     const blocks = parseGuide('1. Open the file.\n2. Press **Save**\n   to keep it.\n\n- one\n- two\n');
     expect(blocks[0]).toMatchObject({ kind: 'list', ordered: true });
-    expect((blocks[0] as { items: unknown[] }).items).toHaveLength(2);
-    expect(inlineText((blocks[0] as { items: never[][] }).items[1])).toBe('Press Save to keep it.');
+    expect(pick(blocks[0], 'list').items).toHaveLength(2);
+    expect(text(pick(blocks[0], 'list').items[1])).toBe('Press Save to keep it.');
     expect(blocks[1]).toMatchObject({ kind: 'list', ordered: false });
   });
 
   it('reads tables with escaped bars', () => {
     const blocks = parseGuide('| Key | Action |\n| --- | --- |\n| Ctrl+O | Open \\| load |\n');
-    expect(blocks[0].kind).toBe('table');
-    const table = blocks[0] as { head: never[][]; rows: never[][][] };
-    expect(inlineText(table.head[1])).toBe('Action');
-    expect(inlineText(table.rows[0][1])).toBe('Open | load');
+    const table = pick(blocks[0], 'table');
+    expect(text(table.head[1])).toBe('Action');
+    expect(text(table.rows[0][1])).toBe('Open | load');
   });
 
   it('reads code fences without reading inside them', () => {
