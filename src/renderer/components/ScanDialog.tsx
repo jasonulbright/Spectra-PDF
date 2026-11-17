@@ -967,6 +967,7 @@ export function ScanDialog({
                     type="button"
                     data-testid="scan-page-remove"
                     aria-label={tChrome('dialog.scan.removePage')}
+                    title={tChrome('dialog.scan.removePage')}
                     className="absolute top-0 end-0 px-1 text-neutral-400 hover:text-red-400"
                     disabled={busy}
                     onClick={() => setPages((prev) => removePage(prev, page.id))}

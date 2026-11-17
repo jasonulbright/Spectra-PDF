@@ -360,6 +360,7 @@ export function TagsPanel(): React.ReactElement {
               data-testid={`tag-toggle-${key}`}
               aria-expanded={isOpen}
               aria-label={tChrome(isOpen ? 'panel.tags.collapse' : 'panel.tags.expand', { type: node.type })}
+              title={tChrome(isOpen ? 'panel.tags.collapse' : 'panel.tags.expand', { type: node.type })}
               onClick={() =>
                 setExpanded((prev) => {
                   const next = new Set(prev);

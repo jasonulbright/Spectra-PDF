@@ -832,6 +832,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
           <button
             data-testid="print-preview-prev"
             aria-label={tChrome('dialog.print.prevSheet')}
+            title={tChrome('dialog.print.prevSheet')}
             disabled={previewIndex <= 0}
             onClick={() => setPreviewIndex((i) => Math.max(0, i - 1))}
             className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
@@ -855,6 +856,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
           <button
             data-testid="print-preview-next"
             aria-label={tChrome('dialog.print.nextSheet')}
+            title={tChrome('dialog.print.nextSheet')}
             disabled={previewIndex >= previewUrls.length - 1}
             onClick={() => setPreviewIndex((i) => Math.min(previewUrls.length - 1, i + 1))}
             className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
