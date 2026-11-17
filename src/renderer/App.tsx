@@ -2094,8 +2094,9 @@ function AppContent(): React.ReactElement {
       const pageIds = selectionPageIds(window.getSelection());
       if (pageIds.length === 0 && (!showableDoc(now) || !isDocTab(now.ui.focusedTab))) return;
       const target = event.target;
-      // The user guide is application text, not document content.
-      if (target instanceof Element && target.closest('[data-app-text]')) return;
+      // The user guide is application text, not document content. A selection
+      // that still holds PDF pages is document content wherever focus sits.
+      if (pageIds.length === 0 && target instanceof Element && target.closest('[data-app-text]')) return;
       if (target instanceof HTMLElement
           && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
       const block = copyBlock(now, pageIds);
