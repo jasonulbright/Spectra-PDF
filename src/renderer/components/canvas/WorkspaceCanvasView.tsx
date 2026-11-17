@@ -8481,6 +8481,8 @@ export function WorkspaceCanvasView({
               <button
                 key={hex}
                 type="button"
+                title={hex}
+                aria-label={hex}
                 className={'page-edittext-colorchip' + (atSpanColor === hex ? ' selected' : '')}
                 style={{ background: hex }}
                 onClick={() => setAtSpanColor((c) => (c === hex ? null : hex))}
