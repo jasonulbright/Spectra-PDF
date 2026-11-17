@@ -130,6 +130,8 @@ export interface AppCommandHandlers {
   openLicenses(): void;
   /** Open the About dialog (name/version/repo). */
   openAbout(): void;
+  /** Open the built-in user guide (Help ▸ User Guide). */
+  openUserGuide(): void;
   /** Open the Customize Toolbar dialog (per-item show/hide). */
   openCustomizeToolbar(): void;
   /** Manual update check (Help ▸ Check for Updates) — surfaces the
