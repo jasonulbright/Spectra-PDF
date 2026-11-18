@@ -353,6 +353,28 @@ describe('redact by selecting text', () => {
     expect(text).toContain('India');
   });
 
+  it('still accepts a box in Organize view after the file view was turned', async () => {
+    // The turn is held per file, but only the document view shows it. Organize
+    // draws its cells unturned, so a mark there must not have the turn taken off.
+    expect(await invokeAppCommand('view.rotateCW')).toBe(true);
+    try {
+      expect(await invokeAppCommand('view.organizeAll')).toBe(true);
+      await browser.pause(1200);
+      const cell = await $('[data-page-id]');
+      const r = await cell.getElementRect(cell.elementId);
+      const x = r.x + r.width * 0.2;
+      const y = r.y + r.height * 0.3;
+      await drag({ x, y }, { x: x + r.width * 0.4, y: y + r.height * 0.2 });
+      await browser.waitUntil(async () => (await getRedactionMarkCount()) === 1, {
+        timeoutMsg: `expected 1 mark in Organize view, saw ${await getRedactionMarkCount()}`,
+      });
+    } finally {
+      await invokeAppCommand('view.documentView');
+      await invokeAppCommand('view.rotateCCW');
+    }
+    await browser.pause(800);
+  });
+
   it('marks a line once, not once per pane, in split view', async () => {
     expect(await invokeAppCommand('window.split')).toBe(true);
     try {

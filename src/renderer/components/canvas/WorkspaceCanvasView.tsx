@@ -692,6 +692,10 @@ export function WorkspaceCanvasView({
   // A gesture ends on the page its render showed; the store may hold other
   // bytes or ids by then. A drawing that cannot land where it was drawn is
   // refused with the notice every refused edit owes.
+  // The view turn the cells show: only the document view applies Rotate View. The
+  // Organize view draws its cells unturned, whatever turn the file's view holds.
+  const shownViewTurn = (s: ReturnType<typeof readState>, path: string): number =>
+    s.ui.docViewMode === 'document' ? s.ui.viewRotationByPath[path] ?? 0 : 0;
   const acceptDrawing = useCallback(
     (
       docId: string | undefined,
@@ -710,7 +714,7 @@ export function WorkspaceCanvasView({
             pageId,
             buffer: rendered.buffer,
             rotation: rotationAtDraw,
-            viewRotation: viewTurned ? readState().ui.viewRotationByPath[rendered.path] ?? 0 : 0,
+            viewRotation: viewTurned ? shownViewTurn(readState(), rendered.path) : 0,
           })
         : null;
       if (!target) dispatch({ type: 'NOTE_EDIT_REFUSED' });
