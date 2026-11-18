@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument, StandardFonts, degrees } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -10,6 +10,7 @@ import {
   setView,
   getRedactionMarkCount,
   clearRedactionMarks,
+  invokeAppCommand,
 } from '../support/harness.js';
 
 // Issue 110: with the Redact tool, a drag that starts on text selects it and
@@ -239,5 +240,72 @@ describe('redact by selecting text', () => {
     const [box] = await marks();
     // A drawn band is about the drag's size, not one text line.
     expect(box.height).toBeGreaterThan(50);
+  });
+
+  it('marks a line once, not once per pane, in split view', async () => {
+    expect(await invokeAppCommand('window.split')).toBe(true);
+    try {
+      await browser.pause(800);
+      await browser.execute(() => {
+        (document.querySelector('[data-testid="text-layer"] span') as HTMLElement).scrollIntoView({ block: 'center' });
+      });
+      await browser.pause(400);
+      const spans = await spanBoxes(0);
+      const first = spans[0];
+      const second = spans[1];
+      await drag({ x: first.left + 3, y: center(first).y }, { x: second.right - 3, y: center(second).y });
+      await browser.waitUntil(async () => (await getRedactionMarkCount()) >= 1, {
+        timeoutMsg: 'the drag in split view made no marks',
+      });
+      await browser.pause(300);
+      // Two lines selected: two marks in the document, whatever the pane count.
+      expect(await getRedactionMarkCount()).toBe(2);
+    } finally {
+      await invokeAppCommand('window.split');
+    }
+  });
+
+  it('marks one narrow column per line on a page stored turned a quarter-turn', async () => {
+    // The file itself says /Rotate 90, so each line shows as a column on screen.
+    const turned = resolve(tmp, 'turned.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([400, 400]);
+    page.setRotation(degrees(90));
+    page.drawText('Alpha bravo charlie delta', { x: 30, y: 340, size: 16, font });
+    page.drawText('Echo foxtrot golf hotel', { x: 30, y: 300, size: 16, font });
+    page.drawText('India juliet kilo lima', { x: 30, y: 260, size: 16, font });
+    writeFileSync(turned, await doc.save());
+    await closeAllFiles();
+    await openByPaths([turned]);
+    await setView('canvas');
+    await browser.execute(() => (window as any).__SPECTRA_TEST__.setTool('redact'));
+    await browser.waitUntil(async () => (await allSpanCount()) >= 3, {
+      timeout: 20_000,
+      timeoutMsg: 'the turned page never showed text',
+    });
+    let last = '';
+    let steady = 0;
+    await browser.waitUntil(
+      async () => {
+        const now = JSON.stringify(await spanBoxes(0));
+        steady = now === last ? steady + 1 : 0;
+        last = now;
+        await browser.pause(200);
+        return steady >= 4;
+      },
+      { timeout: 20_000, timeoutMsg: 'the turned page never settled' },
+    );
+    const spans = await spanBoxes(0);
+    expect(spans.length).toBe(3);
+    // The lines are columns now: each span is taller than it is wide.
+    expect(spans[0].bottom - spans[0].top).toBeGreaterThan(spans[0].right - spans[0].left);
+    const first = spans[0];
+    const third = spans[2];
+    await drag({ x: center(first).x, y: first.top + 20 }, { x: center(third).x, y: third.bottom - 20 });
+    await browser.waitUntil(async () => (await getRedactionMarkCount()) === 3, {
+      timeoutMsg: `expected 3 column marks, saw ${await getRedactionMarkCount()}`,
+    });
+    for (const m of await marks()) expect(m.height).toBeGreaterThan(m.width);
   });
 });

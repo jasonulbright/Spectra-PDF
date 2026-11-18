@@ -70,6 +70,7 @@ describe('redaction marks from a text selection', () => {
     const marks = redactionRectsFromSelection(
       [r(200, 600, 220, 1400), r(230, 400, 250, 1000), r(260, 400, 280, 900)],
       BOX,
+      true,
     );
     expect(marks).toHaveLength(3);
     const first = marks.find((m) => Math.abs(m.x - 0.2) < 0.001);
@@ -89,5 +90,23 @@ describe('redaction marks from a text selection', () => {
     const other = { x: 0.1, y: 0.2, w: 0.3, h: 0.02 };
     expect(marksNotCovered([word, other], existing)).toEqual([other]);
     expect(marksNotCovered([word], [])).toEqual([word]);
+  });
+
+  it('makes one mark per upright line when every fragment is one glyph', () => {
+    // A PDF that emits one text item per character: each fragment is taller than
+    // wide, yet the text runs left to right.
+    const glyphs = (top: number) => [0, 1, 2, 3, 4].map((i) => r(100 + i * 9, top, 107 + i * 9, top + 20));
+    const marks = redactionRectsFromSelection([...glyphs(200), ...glyphs(230)], BOX);
+    expect(marks).toHaveLength(2);
+    expect(marks[0].w).toBeGreaterThan(marks[0].h);
+  });
+
+  it('keeps a bullet with its line', () => {
+    const marks = redactionRectsFromSelection(
+      [r(100, 200, 108, 220), r(120, 200, 500, 220)],
+      BOX,
+    );
+    expect(marks).toHaveLength(1);
+    expect(marks[0].x).toBeCloseTo(0.1);
   });
 });

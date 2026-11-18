@@ -9,9 +9,18 @@ import type { RectLike } from './text-selection-markup';
  * layer, a link region. Those are not selected text, and a redaction mark made
  * from one would cover content nobody selected. So this walks the text nodes,
  * cuts each to the ends of the range, and asks for the rects of that piece.
+ * `vertical` is true when the text layer is turned a quarter-turn.
+ *
+ * `within` limits the text to one page element. A document shown in two panes
+ * mounts the same page twice, and a page scrolled out of one pane can sit
+ * behind the other, so on-screen position alone cannot say whose text it is.
  */
-export function textLayerRects(range: Range): RectLike[] {
+export function textLayerRects(
+  range: Range,
+  within?: Element | null,
+): { rects: RectLike[]; vertical: boolean } {
   const out: RectLike[] = [];
+  let vertical = false;
   const root: Node = range.commonAncestorContainer;
   const nodes: Text[] = [];
   if (root.nodeType === Node.TEXT_NODE) {
@@ -24,6 +33,10 @@ export function textLayerRects(range: Range): RectLike[] {
   }
   for (const node of nodes) {
     if (!node.parentElement?.closest('.textLayer')) continue;
+    if (within && !within.contains(node)) continue;
+    // A page turned a quarter-turn lays its lines out as columns on screen.
+    const turn = node.parentElement.closest<HTMLElement>('.textLayer')?.dataset.mainRotation;
+    if (turn === '90' || turn === '270') vertical = true;
     const piece = document.createRange();
     piece.selectNodeContents(node);
     if (node === range.startContainer) piece.setStart(node, range.startOffset);
@@ -33,5 +46,5 @@ export function textLayerRects(range: Range): RectLike[] {
       out.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
     }
   }
-  return out;
+  return { rects: out, vertical };
 }

@@ -1744,6 +1744,7 @@ function PageCellImpl({
   // panes is marked once. The latest props ride a ref because the window
   // listener closes over the render it was added in.
   const pageRootRef = useRef<HTMLDivElement>(null);
+  const toolWasRef = useRef(tool);
   const redactSelectionRef = useRef({
     docId,
     pageId: page.id,
@@ -1760,8 +1761,11 @@ function PageCellImpl({
   };
   useEffect(() => {
     if (tool !== 'redact') return;
-    // A selection left from another tool is not a redaction gesture.
-    window.getSelection()?.removeAllRanges();
+    // A selection left from another tool is not a redaction gesture. Clear it
+    // when the tool CHANGES to Redact, not when a page mounts while it is armed
+    // (scrolling mounts pages, and a drag in progress must survive that).
+    if (toolWasRef.current !== 'redact') window.getSelection()?.removeAllRanges();
+    toolWasRef.current = tool;
     const onUp = (): void => {
       if (!redactTextGesture) return;
       // After every page's listener has read the selection.
@@ -1774,14 +1778,19 @@ function PageCellImpl({
       if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !pageEl) return;
       const { docId: d, pageId, rotation, add, existing } = redactSelectionRef.current;
       const rects: { left: number; top: number; right: number; bottom: number }[] = [];
-      for (let i = 0; i < sel.rangeCount; i++) rects.push(...textLayerRects(sel.getRangeAt(i)));
+      let vertical = false;
+      for (let i = 0; i < sel.rangeCount; i++) {
+        const part = textLayerRects(sel.getRangeAt(i), pageEl);
+        rects.push(...part.rects);
+        vertical = vertical || part.vertical;
+      }
       const b = pageEl.getBoundingClientRect();
       const found = redactionRectsFromSelection(rects, {
         left: b.left,
         top: b.top,
         right: b.right,
         bottom: b.bottom,
-      });
+      }, vertical);
       const marks = marksNotCovered(
         found,
         (existing ?? []).map((m) => projectMarkRect(m, rotation)),
