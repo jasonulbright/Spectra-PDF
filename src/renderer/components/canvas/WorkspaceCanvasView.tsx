@@ -692,11 +692,30 @@ export function WorkspaceCanvasView({
   // A gesture ends on the page its render showed; the store may hold other
   // bytes or ids by then. A drawing that cannot land where it was drawn is
   // refused with the notice every refused edit owes.
+  // The view turn the cells show: only the document view applies Rotate View. The
+  // Organize view draws its cells unturned, whatever turn the file's view holds.
+  const shownViewTurn = (s: ReturnType<typeof readState>, path: string): number =>
+    s.ui.docViewMode === 'document' ? s.ui.viewRotationByPath[path] ?? 0 : 0;
   const acceptDrawing = useCallback(
-    (docId: string | undefined, pageId: string, rotationAtDraw: number): { doc: OpenDocument; page: PageRef } | null => {
+    (
+      docId: string | undefined,
+      pageId: string,
+      rotationAtDraw: number,
+      // Only a drawing whose geometry is stored against the SHOWN rotation (the
+      // redaction mark) may be drawn while Rotate View is on. The other bands
+      // convert against the stored page's rotation, so they stay refused there
+      // until each is checked (W-14).
+      viewTurned = false,
+    ): { doc: OpenDocument; page: PageRef } | null => {
       const rendered = docs.find((d) => d.id === docId);
       const target = rendered
-        ? drawingTarget(readState(), { docId: rendered.id, pageId, buffer: rendered.buffer, rotation: rotationAtDraw })
+        ? drawingTarget(readState(), {
+            docId: rendered.id,
+            pageId,
+            buffer: rendered.buffer,
+            rotation: rotationAtDraw,
+            viewRotation: viewTurned ? shownViewTurn(readState(), rendered.path) : 0,
+          })
         : null;
       if (!target) dispatch({ type: 'NOTE_EDIT_REFUSED' });
       return target;
@@ -3357,7 +3376,7 @@ export function WorkspaceCanvasView({
       rect: { x: number; y: number; w: number; h: number },
       rotationAtDraw: 0 | 90 | 180 | 270,
     ) => {
-      const target = acceptDrawing(docId, pageId, rotationAtDraw);
+      const target = acceptDrawing(docId, pageId, rotationAtDraw, true);
       if (!target) return;
       setMarks((prev) => [
         ...prev,

@@ -302,7 +302,12 @@ describe('the canvas', () => {
   const view = source('src/renderer/components/canvas/WorkspaceCanvasView.tsx');
 
   it('refuses, with the notice, a drawing that cannot land where it was drawn', () => {
-    expect(view).toContain("drawingTarget(readState(), { docId: rendered.id, pageId, buffer: rendered.buffer, rotation: rotationAtDraw })");
+    expect(view).toContain('rotation: rotationAtDraw,');
+    expect(view).toContain('viewRotation: viewTurned ? shownViewTurn(readState(), rendered.path) : 0,');
+    // The Organize view draws unturned cells, so it takes no view turn off.
+    expect(view).toContain("s.ui.docViewMode === 'document' ? s.ui.viewRotationByPath[path] ?? 0 : 0");
+    // Only the redaction mark takes the view turn off.
+    expect(view.match(/acceptDrawing\(docId, pageId, rotationAtDraw, true\)/g)).toHaveLength(1);
     expect(view).toContain("if (!target) dispatch({ type: 'NOTE_EDIT_REFUSED' });");
   });
 

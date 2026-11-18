@@ -1,8 +1,13 @@
 import { resolve } from 'node:path';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - no type declarations for the deep legacy import
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
   waitForHarness,
   openByPaths,
@@ -11,7 +16,21 @@ import {
   getRedactionMarkCount,
   clearRedactionMarks,
   invokeAppCommand,
+  applyRedactions,
+  saveActiveAs,
 } from '../support/harness.js';
+
+const require = createRequire(import.meta.url);
+pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+  require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
+
+async function pageText(path: string): Promise<string> {
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
+  const page = await pdf.getPage(1);
+  const content = (await page.getTextContent()) as { items: { str?: string }[] };
+  return content.items.map((item) => item.str ?? '').join(' ');
+}
 
 // Issue 110: with the Redact tool, a drag that starts on text selects it and
 // the release makes one mark per line, each as tall as its line. A drag that
@@ -240,6 +259,120 @@ describe('redact by selecting text', () => {
     const [box] = await marks();
     // A drawn band is about the drag's size, not one text line.
     expect(box.height).toBeGreaterThan(50);
+  });
+
+  it('marks text while the view is turned, and the marks stay on that text when it is turned back', async () => {
+    // Rotate View turns only the display. Marks drawn in it are accepted, and they
+    // follow the text when the view returns (issue: marks were refused here).
+    const settle = async (): Promise<void> => {
+      let previous = '';
+      let steady = 0;
+      await browser.waitUntil(
+        async () => {
+          const now = JSON.stringify(await spanBoxes(0));
+          steady = now === previous ? steady + 1 : 0;
+          previous = now;
+          await browser.pause(200);
+          return steady >= 4;
+        },
+        { timeout: 20_000, timeoutMsg: 'the page never settled' },
+      );
+    };
+    const frame = (box: Box) => ({ left: box.left, top: box.top, right: box.right, bottom: box.bottom });
+    const overlaps = (a: Box, b: Box): boolean =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    expect(await invokeAppCommand('view.rotateCW')).toBe(true);
+    try {
+      await settle();
+      await browser.execute(() => {
+        (document.querySelector('[data-testid="text-layer"] span') as HTMLElement).scrollIntoView({ block: 'center' });
+      });
+      await browser.pause(400);
+      const turned = await spanBoxes(0);
+      // Turned a quarter: the lines are columns, the first line the right-hand one.
+      const byX = [...turned].sort((a, b) => b.left - a.left);
+      await drag(
+        { x: center(byX[0]).x, y: byX[0].top + 20 },
+        { x: center(byX[1]).x, y: byX[1].bottom - 20 },
+      );
+      await browser.waitUntil(async () => (await getRedactionMarkCount()) === 2, {
+        timeoutMsg: `expected 2 marks in the turned view, saw ${await getRedactionMarkCount()}`,
+      });
+    } finally {
+      expect(await invokeAppCommand('view.rotateCCW')).toBe(true);
+    }
+    await settle();
+    await browser.execute(() => {
+      (document.querySelector('[data-testid="text-layer"] span') as HTMLElement).scrollIntoView({ block: 'center' });
+    });
+    await browser.pause(400);
+    const upright = await spanBoxes(0);
+    const rects: Box[] = await browser.execute(() =>
+      Array.from(document.querySelectorAll('.page-redact')).map((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      }),
+    );
+    expect(rects).toHaveLength(2);
+    // Each mark sits on line 1 or line 2 and none touches line 3.
+    for (const r of rects) {
+      expect(overlaps(frame(r), upright[0]) || overlaps(frame(r), upright[1])).toBe(true);
+      expect(overlaps(frame(r), upright[2])).toBe(false);
+    }
+  });
+
+  it('removes exactly the text that was marked in the turned view', async () => {
+    // The same marks, drawn while the view is turned, applied: the file must lose
+    // lines 1 and 2 and keep line 3. This is the end-to-end check of the geometry.
+    await clearRedactionMarks();
+    expect(await invokeAppCommand('view.rotateCW')).toBe(true);
+    try {
+      await browser.pause(1500);
+      await browser.execute(() => {
+        (document.querySelector('[data-testid="text-layer"] span') as HTMLElement).scrollIntoView({ block: 'center' });
+      });
+      await browser.pause(400);
+      const turned = await spanBoxes(0);
+      const byX = [...turned].sort((a, b) => b.left - a.left);
+      await drag(
+        { x: center(byX[0]).x, y: byX[0].top + 20 },
+        { x: center(byX[1]).x, y: byX[1].bottom - 20 },
+      );
+      await browser.waitUntil(async () => (await getRedactionMarkCount()) === 2, {
+        timeoutMsg: `expected 2 marks, saw ${await getRedactionMarkCount()}`,
+      });
+      await applyRedactions();
+    } finally {
+      await invokeAppCommand('view.rotateCCW');
+    }
+    const out = resolve(tmp, 'applied.pdf');
+    await saveActiveAs(out);
+    const text = await pageText(out);
+    expect(text).not.toContain('Alpha');
+    expect(text).not.toContain('Echo');
+    expect(text).toContain('India');
+  });
+
+  it('still accepts a box in Organize view after the file view was turned', async () => {
+    // The turn is held per file, but only the document view shows it. Organize
+    // draws its cells unturned, so a mark there must not have the turn taken off.
+    expect(await invokeAppCommand('view.rotateCW')).toBe(true);
+    try {
+      expect(await invokeAppCommand('view.organizeAll')).toBe(true);
+      await browser.pause(1200);
+      const cell = await $('[data-page-id]');
+      const r = await cell.getElementRect(cell.elementId);
+      const x = r.x + r.width * 0.2;
+      const y = r.y + r.height * 0.3;
+      await drag({ x, y }, { x: x + r.width * 0.4, y: y + r.height * 0.2 });
+      await browser.waitUntil(async () => (await getRedactionMarkCount()) === 1, {
+        timeoutMsg: `expected 1 mark in Organize view, saw ${await getRedactionMarkCount()}`,
+      });
+    } finally {
+      await invokeAppCommand('view.documentView');
+      await invokeAppCommand('view.rotateCCW');
+    }
+    await browser.pause(800);
   });
 
   it('marks a line once, not once per pane, in split view', async () => {
