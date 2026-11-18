@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.1118.173
+
+**A built-in user guide, and redaction by dragging over text**
+
+### Added
+- Open the user guide from Help > User Guide. It covers every tool and works offline.
+- Redact by dragging over text: each selected line gets one tidy box. Hold Shift to draw a box over text instead, or draw a box over a picture or a scan.
+- Add tooltips to buttons that showed only an icon or a spoken name.
+
+### Fixed
+- Accept redaction marks while Rotate View is on.
+
 ## 2026.1113.172
 
 **Two-sided jobs keep each sheet together**
