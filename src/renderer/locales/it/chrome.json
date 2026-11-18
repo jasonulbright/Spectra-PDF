@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "Il documento è rimasto in questa finestra perché durante lo spostamento è stata richiesta un'azione su di esso. Spostalo di nuovo al termine dell'azione.",
   "app.window.moveStoppedByEdit": "Il documento è rimasto in questa finestra perché è stato modificato durante lo spostamento. Spostalo di nuovo per portare con sé la modifica.",
   "app.window.moveRefusedEdit": "Questa modifica non è stata eseguita perché il documento è in corso di spostamento in un'altra finestra.",
+  "app.window.moveSaveAndMove": "Salva e sposta",
   "app.window.focusOther": "Mostra quella finestra",
   "app.window.outputOpenTitle": "Il file è aperto",
   "app.window.outputOpenHere": "\"{{name}}\" è aperto in questa finestra. Chiudilo o scegli un altro nome.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "La partitura non può essere allegata a un documento che dichiara la conformità PDF/A. Disattiva Allega per riconoscere questo documento.",
   "panel.omr.openProjectPathUnreadable": "Audiveris non può aprire questo progetto: il percorso della sua cartella usa caratteri esterni alla tabella codici del sistema.",
   "panel.omr.unrestored": "Non ripristinato: {{target}} (il contenuto precedente è in {{backup}})",
-  "panel.omr.unrestoredNew": "Non rimosso: {{target}} (non esisteva prima di questa esecuzione)"
+  "panel.omr.unrestoredNew": "Non rimosso: {{target}} (non esisteva prima di questa esecuzione)",
+  "app.window.moveSavesFirst": "«{{name}}» contiene modifiche non salvate. Spostarlo in un'altra finestra le salva prima nel file originale e in seguito non potrai annullare le modifiche precedenti. Salvare e spostare?"
 }

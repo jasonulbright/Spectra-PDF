@@ -188,6 +188,7 @@
   "app.window.moveCancelled": "Dokument pozostał w tym oknie, ponieważ podczas przenoszenia zażądano na nim czynności. Przenieś go ponownie po zakończeniu czynności.",
   "app.window.moveStoppedByEdit": "Dokument pozostał w tym oknie, ponieważ został zmieniony podczas przenoszenia. Przenieś go ponownie, aby zabrać zmianę ze sobą.",
   "app.window.moveRefusedEdit": "Ta zmiana nie została wprowadzona, ponieważ dokument jest przenoszony do innego okna.",
+  "app.window.moveSaveAndMove": "Zapisz i przenieś",
   "app.window.focusOther": "Pokaż to okno",
   "app.window.outputOpenTitle": "Plik jest otwarty",
   "app.window.outputOpenHere": "„{{name}}” jest otwarty w tym oknie. Zamknij go lub wybierz inną nazwę.",
@@ -6814,5 +6815,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partytury nie można dołączyć do dokumentu deklarującego zgodność z PDF/A. Wyłącz Dołącz, aby rozpoznać ten dokument.",
   "panel.omr.openProjectPathUnreadable": "Audiveris nie może otworzyć tego projektu: ścieżka jego folderu zawiera znaki spoza strony kodowej systemu.",
   "panel.omr.unrestored": "Nie przywrócono: {{target}} (poprzednia zawartość jest w {{backup}})",
-  "panel.omr.unrestoredNew": "Nie usunięto: {{target}} (nie istniał przed tym uruchomieniem)"
+  "panel.omr.unrestoredNew": "Nie usunięto: {{target}} (nie istniał przed tym uruchomieniem)",
+  "app.window.moveSavesFirst": "Dokument „{{name}}” zawiera niezapisane zmiany. Przeniesienie go do innego okna najpierw zapisze je w oryginalnym pliku, a wcześniejszych edycji nie będzie można potem cofnąć. Zapisać i przenieść?"
 }

@@ -182,6 +182,7 @@
   "app.window.moveCancelled": "移动期间请求了对该文档的操作，因此文档仍留在此窗口中。请在操作完成后再次移动。",
   "app.window.moveStoppedByEdit": "移动期间编辑了该文档，因此文档仍留在此窗口中。请再次移动，以便连同编辑一起移动。",
   "app.window.moveRefusedEdit": "文档正在移动到另一个窗口，因此未进行此编辑。",
+  "app.window.moveSaveAndMove": "保存并移动",
   "app.window.focusOther": "显示该窗口",
   "app.window.outputOpenTitle": "文件已打开",
   "app.window.outputOpenHere": "“{{name}}”已在此窗口中打开。请关闭它，或选择其他名称。",
@@ -6394,5 +6395,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "无法将乐谱附加到声明符合 PDF/A 的文档。请关闭“附加”以识别此文档。",
   "panel.omr.openProjectPathUnreadable": "Audiveris 无法打开此项目：其文件夹路径使用了系统代码页之外的字符。",
   "panel.omr.unrestored": "未恢复：{{target}}（原有内容在 {{backup}} 中）",
-  "panel.omr.unrestoredNew": "未删除：{{target}}（此次运行之前不存在）"
+  "panel.omr.unrestoredNew": "未删除：{{target}}（此次运行之前不存在）",
+  "app.window.moveSavesFirst": "“{{name}}”有未保存的更改。将其移到另一个窗口会先把更改保存到原始文件,之后无法撤销之前的编辑。要保存并移动吗?"
 }

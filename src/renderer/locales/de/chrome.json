@@ -184,6 +184,7 @@
   "app.window.moveCancelled": "Das Dokument ist in diesem Fenster geblieben, weil während des Verschiebens eine Aktion dafür angefordert wurde. Verschieben Sie es erneut, wenn die Aktion abgeschlossen ist.",
   "app.window.moveStoppedByEdit": "Das Dokument ist in diesem Fenster geblieben, weil es während des Verschiebens bearbeitet wurde. Verschieben Sie es erneut, um die Bearbeitung mitzunehmen.",
   "app.window.moveRefusedEdit": "Diese Bearbeitung wurde nicht ausgeführt, weil das Dokument gerade in ein anderes Fenster verschoben wird.",
+  "app.window.moveSaveAndMove": "Speichern und verschieben",
   "app.window.focusOther": "Dieses Fenster anzeigen",
   "app.window.outputOpenTitle": "Datei ist geöffnet",
   "app.window.outputOpenHere": "„{{name}}“ ist in diesem Fenster geöffnet. Schließen Sie die Datei, oder wählen Sie einen anderen Namen.",
@@ -6534,5 +6535,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Die Partitur kann nicht an ein Dokument angehängt werden, das PDF/A-Konformität angibt. Schalten Sie Anhängen aus, um dieses Dokument zu erkennen.",
   "panel.omr.openProjectPathUnreadable": "Audiveris kann dieses Projekt nicht öffnen: Der Ordnerpfad enthält Zeichen außerhalb der Systemcodepage.",
   "panel.omr.unrestored": "Nicht wiederhergestellt: {{target}} (der vorherige Inhalt liegt in {{backup}})",
-  "panel.omr.unrestoredNew": "Nicht entfernt: {{target}} (die Datei gab es vor diesem Lauf nicht)"
+  "panel.omr.unrestoredNew": "Nicht entfernt: {{target}} (die Datei gab es vor diesem Lauf nicht)",
+  "app.window.moveSavesFirst": "„{{name}}“ enthält ungespeicherte Änderungen. Beim Verschieben in ein anderes Fenster werden sie zuerst in die Originaldatei gespeichert, und frühere Änderungen lassen sich danach nicht mehr rückgängig machen. Speichern und verschieben?"
 }

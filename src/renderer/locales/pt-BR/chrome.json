@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "O documento permaneceu nesta janela porque uma ação foi solicitada nele durante a movimentação. Mova-o novamente quando a ação terminar.",
   "app.window.moveStoppedByEdit": "O documento permaneceu nesta janela porque foi editado durante a movimentação. Mova-o novamente para levar a edição junto.",
   "app.window.moveRefusedEdit": "Esta edição não foi feita porque o documento está sendo movido para outra janela.",
+  "app.window.moveSaveAndMove": "Salvar e mover",
   "app.window.focusOther": "Mostrar essa janela",
   "app.window.outputOpenTitle": "O arquivo está aberto",
   "app.window.outputOpenHere": "\"{{name}}\" está aberto nesta janela. Feche-o ou escolha outro nome.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "A partitura não pode ser anexada a um documento que declara conformidade com PDF/A. Desative Anexar para reconhecer este documento.",
   "panel.omr.openProjectPathUnreadable": "O Audiveris não consegue abrir este projeto: o caminho da pasta usa caracteres fora da página de código do sistema.",
   "panel.omr.unrestored": "Não restaurado: {{target}} (o conteúdo anterior está em {{backup}})",
-  "panel.omr.unrestoredNew": "Não removido: {{target}} (não existia antes desta execução)"
+  "panel.omr.unrestoredNew": "Não removido: {{target}} (não existia antes desta execução)",
+  "app.window.moveSavesFirst": "\"{{name}}\" tem alterações não salvas. Movê-lo para outra janela as salva primeiro no arquivo original, e depois você não poderá desfazer as edições anteriores. Salvar e mover?"
 }

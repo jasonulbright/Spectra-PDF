@@ -184,6 +184,7 @@
   "app.window.moveCancelled": "Dokumentet blev i dette vindue, fordi der blev bedt om en handling på det under flytningen. Flyt det igen, når handlingen er færdig.",
   "app.window.moveStoppedByEdit": "Dokumentet blev i dette vindue, fordi det blev redigeret under flytningen. Flyt det igen for at tage redigeringen med.",
   "app.window.moveRefusedEdit": "Denne redigering blev ikke udført, fordi dokumentet er ved at blive flyttet til et andet vindue.",
+  "app.window.moveSaveAndMove": "Gem og flyt",
   "app.window.focusOther": "Vis det vindue",
   "app.window.outputOpenTitle": "Filen er åben",
   "app.window.outputOpenHere": "\"{{name}}\" er åben i dette vindue. Luk den, eller vælg et andet navn.",
@@ -6534,5 +6535,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partituret kan ikke vedhæftes et dokument, der hævder PDF/A-overensstemmelse. Slå Vedhæft fra for at genkende dette dokument.",
   "panel.omr.openProjectPathUnreadable": "Audiveris kan ikke åbne dette projekt: Mappens sti bruger tegn uden for systemets tegntabel.",
   "panel.omr.unrestored": "Ikke gendannet: {{target}} (det tidligere indhold ligger i {{backup}})",
-  "panel.omr.unrestoredNew": "Ikke fjernet: {{target}} (den fandtes ikke før denne kørsel)"
+  "panel.omr.unrestoredNew": "Ikke fjernet: {{target}} (den fandtes ikke før denne kørsel)",
+  "app.window.moveSavesFirst": "\"{{name}}\" har ugemte ændringer. Hvis du flytter det til et andet vindue, gemmes de først i den oprindelige fil, og du kan bagefter ikke fortryde tidligere redigeringer. Gem og flyt?"
 }

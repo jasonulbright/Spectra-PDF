@@ -14,6 +14,7 @@ import {
   setView,
   getState,
   addRedactionMark,
+  answerMovePrompt,
   invokeAppCommand,
   closeAllFiles,
 } from '../support/harness.js';
@@ -121,6 +122,8 @@ describe('a document moved to a new window during an operation on it', () => {
     expect(await pageText(source)).toContain('SECRET TOP LINE');
 
     await release();
+    // The operation left the document with unsaved work, so the move asks first.
+    await answerMovePrompt('save');
     await browser.waitUntil(async () => (await browser.getWindowHandles()).length === 2,
       { timeoutMsg: 'the document never moved to a new window' });
     const redact = await browser.execute(() => (window as any).__rewriteRedact) as { done: boolean; error: string | null };

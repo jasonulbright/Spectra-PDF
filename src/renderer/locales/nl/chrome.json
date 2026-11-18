@@ -184,6 +184,7 @@
   "app.window.moveCancelled": "Het document is in dit venster gebleven omdat er tijdens het verplaatsen een actie op werd gevraagd. Verplaats het opnieuw zodra de actie klaar is.",
   "app.window.moveStoppedByEdit": "Het document is in dit venster gebleven omdat het tijdens het verplaatsen is bewerkt. Verplaats het opnieuw om de bewerking mee te nemen.",
   "app.window.moveRefusedEdit": "Deze bewerking is niet uitgevoerd omdat het document naar een ander venster wordt verplaatst.",
+  "app.window.moveSaveAndMove": "Opslaan en verplaatsen",
   "app.window.focusOther": "Dat venster tonen",
   "app.window.outputOpenTitle": "Bestand is geopend",
   "app.window.outputOpenHere": "\"{{name}}\" is geopend in dit venster. Sluit het, of kies een andere naam.",
@@ -6534,5 +6535,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "De partituur kan niet worden toegevoegd aan een document dat PDF/A-conformiteit claimt. Zet Toevoegen uit om dit document te herkennen.",
   "panel.omr.openProjectPathUnreadable": "Audiveris kan dit project niet openen: het mappad bevat tekens buiten de codetabel van het systeem.",
   "panel.omr.unrestored": "Niet hersteld: {{target}} (de vorige inhoud staat in {{backup}})",
-  "panel.omr.unrestoredNew": "Niet verwijderd: {{target}} (het bestond niet vóór deze uitvoering)"
+  "panel.omr.unrestoredNew": "Niet verwijderd: {{target}} (het bestond niet vóór deze uitvoering)",
+  "app.window.moveSavesFirst": "\"{{name}}\" heeft niet-opgeslagen wijzigingen. Als u het naar een ander venster verplaatst, worden ze eerst in het oorspronkelijke bestand opgeslagen en kunt u eerdere bewerkingen daarna niet meer ongedaan maken. Opslaan en verplaatsen?"
 }

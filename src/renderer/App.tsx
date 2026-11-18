@@ -3419,8 +3419,8 @@ function AppContent(): React.ReactElement {
   // harmless wherever the document ends up. Writing that working copy back over
   // the user's own path is what a MOVE costs, because the receiving window opens
   // the path and mints a working copy from whatever is on disk; without it every
-  // unsaved edit is discarded at the moment of the move, with no prompt and
-  // nothing to undo.
+  // unsaved edit is discarded at the moment of the move, with nothing to undo.
+  // A document with unsaved work asks first; see the prompt before the write.
   //
   // So the order is: flush the page tier, RESERVE the destination, and only
   // then — for a document that is actually leaving — write the file, mark it
@@ -3507,6 +3507,22 @@ function AppContent(): React.ReactElement {
               };
               let moved: TabDragResult;
               try {
+                // The move writes the user's own file, and clears its undo. That is
+                // asked for, not assumed: a document with unsaved work does not leave
+                // until the user says to save it. Cancel keeps the document here, as
+                // it was. The prompt is modal, so nothing edits the document while it
+                // waits; the checks below still catch an edit that raced it.
+                if (plan.saveFirst) {
+                  const agreed = await withPromptTurn(
+                    { begin: app.promptTurnBegin, end: app.promptTurnEnd },
+                    () => showActionConfirm(
+                      tCommandTitle('window.moveToNewWindow', 'Move to New Window'),
+                      tChrome('app.window.moveSavesFirst', { name: handed.name }),
+                      tChrome('app.window.moveSaveAndMove'),
+                    ),
+                  );
+                  if (!agreed) return await stayHere();
+                }
                 const beforeSave = stop();
                 if (beforeSave) {
                   stoppedByEdit = beforeSave === 'edited';
@@ -3574,7 +3590,7 @@ function AppContent(): React.ReactElement {
           });
         }),
       ),
-    [dispatch, commitOrAbort, readState, showNotice],
+    [dispatch, commitOrAbort, readState, showNotice, showActionConfirm],
   );
 
   const handleMoveToNewWindow = useCallback(async () => {

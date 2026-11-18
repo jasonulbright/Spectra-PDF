@@ -192,6 +192,7 @@
   "app.window.moveCancelled": "بقي المستند في هذه النافذة لأن إجراءً عليه طُلب أثناء النقل. انقله مرة أخرى بعد انتهاء الإجراء.",
   "app.window.moveStoppedByEdit": "بقي المستند في هذه النافذة لأنه عُدّل أثناء النقل. انقله مرة أخرى ليأخذ التعديل معه.",
   "app.window.moveRefusedEdit": "لم يُطبَّق هذا التعديل لأن المستند يُنقل إلى نافذة أخرى.",
+  "app.window.moveSaveAndMove": "حفظ ونقل",
   "app.window.focusOther": "إظهار تلك النافذة",
   "app.window.outputOpenTitle": "الملف مفتوح",
   "app.window.outputOpenHere": "\"{{name}}\" مفتوح في هذه النافذة. أغلقه، أو اختر اسمًا آخر.",
@@ -7094,5 +7095,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "لا يمكن إرفاق النوتة بمستند يدّعي التوافق مع PDF/A. أوقف «إرفاق» للتعرّف على هذا المستند.",
   "panel.omr.openProjectPathUnreadable": "لا يستطيع Audiveris فتح هذا المشروع: يستخدم مسار مجلده أحرفًا خارج صفحة الترميز للنظام.",
   "panel.omr.unrestored": "لم تتم الاستعادة: {{target}} (محتواه السابق في {{backup}})",
-  "panel.omr.unrestoredNew": "لم تتم الإزالة: {{target}} (لم يكن موجودًا قبل هذا التشغيل)"
+  "panel.omr.unrestoredNew": "لم تتم الإزالة: {{target}} (لم يكن موجودًا قبل هذا التشغيل)",
+  "app.window.moveSavesFirst": "«{{name}}» يحتوي على تغييرات غير محفوظة. نقله إلى نافذة أخرى يحفظها أولًا في الملف الأصلي، ولا يمكنك التراجع عن التعديلات السابقة بعد ذلك. هل تريد الحفظ والنقل؟"
 }

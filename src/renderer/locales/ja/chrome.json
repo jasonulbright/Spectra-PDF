@@ -182,6 +182,7 @@
   "app.window.moveCancelled": "移動中にこのドキュメントへの操作が要求されたため、ドキュメントはこのウィンドウに残りました。操作が終わってから、もう一度移動してください。",
   "app.window.moveStoppedByEdit": "移動中にドキュメントが編集されたため、ドキュメントはこのウィンドウに残りました。編集内容ごと移動するには、もう一度移動してください。",
   "app.window.moveRefusedEdit": "ドキュメントを別のウィンドウへ移動している途中のため、この編集は行われませんでした。",
+  "app.window.moveSaveAndMove": "保存して移動",
   "app.window.focusOther": "そのウィンドウを表示",
   "app.window.outputOpenTitle": "ファイルが開いています",
   "app.window.outputOpenHere": "\"{{name}}\" はこのウィンドウで開いています。閉じるか、別の名前を選択してください。",
@@ -6394,5 +6395,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "PDF/A 準拠を宣言している文書には楽譜を添付できません。この文書を認識するには、添付をオフにしてください。",
   "panel.omr.openProjectPathUnreadable": "Audiveris はこのプロジェクトを開けません。フォルダーのパスにシステムのコード ページ外の文字が含まれています。",
   "panel.omr.unrestored": "復元されていません: {{target}} (以前の内容は {{backup}} にあります)",
-  "panel.omr.unrestoredNew": "削除されていません: {{target}} (この実行の前には存在しませんでした)"
+  "panel.omr.unrestoredNew": "削除されていません: {{target}} (この実行の前には存在しませんでした)",
+  "app.window.moveSavesFirst": "「{{name}}」に未保存の変更があります。別のウィンドウに移動すると、先に元のファイルへ保存され、それ以前の編集は元に戻せなくなります。保存して移動しますか?"
 }

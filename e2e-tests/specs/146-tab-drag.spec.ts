@@ -12,6 +12,7 @@ import { allowWrites, refuseWrites } from '../support/write-refusal.js';
 import { PDFDocument } from 'pdf-lib';
 import {
   closeAllFiles,
+  answerMovePrompt,
   deleteSelectedCanvasPages,
   getState,
   getWorkspacePageIds,
@@ -302,7 +303,7 @@ describe('cross-window tab drag', () => {
     // by construction.
     const point = contentPoint(frame, frame.innerHeight / 2);
 
-    expect(await tabDragDrop(tornPdf, point)).toBe(true);
+    expect(await tabDragDrop(tornPdf, point, 'save')).toBe(true);
     const handles = await waitForHandles(2);
     secondHandle = handles.find((h) => h !== mainHandle)!;
 
@@ -333,7 +334,7 @@ describe('cross-window tab drag', () => {
     const source = await readFrame();
     const point = physical(stripCssPoint(target, 40), source.dpr);
 
-    expect(await tabDragDrop(movedPdf, point)).toBe(true);
+    expect(await tabDragDrop(movedPdf, point, 'save')).toBe(true);
     await waitForTabs([keepPdf], 'the dragged document never left the source window');
 
     // The tab closed WITHOUT releasing, because the receiving window already
@@ -406,12 +407,12 @@ describe('cross-window tab drag', () => {
     const backPoint = physical(stripCssPoint(mainFrame, 40), mainFrame.dpr);
 
     await browser.switchToWindow(secondHandle);
-    expect(await tabDragDrop(movedPdf, backPoint)).toBe(true);
+    expect(await tabDragDrop(movedPdf, backPoint, 'save')).toBe(true);
     await waitForTabs([tornPdf], 'the returned document never left the second window');
 
     // The only tab, dragged onto empty space.
     const point = contentPoint(mainFrame, mainFrame.innerHeight * 0.75);
-    expect(await tabDragDrop(tornPdf, point)).toBe(true);
+    expect(await tabDragDrop(tornPdf, point, 'save')).toBe(true);
     const handles = await waitForHandles(3);
 
     // The user dragged a tab, not closed a window: this one stays, empty, and
@@ -508,7 +509,7 @@ describe('cross-window tab drag', () => {
 
     refuseWrites(working);
     try {
-      expect(await tabDragDrop(dirtyPdf, point)).toBe(false);
+      expect(await tabDragDrop(dirtyPdf, point, 'save')).toBe(false);
       // A refusal is a result: the notice says why, the document is still here
       // with its edits still pending, and nothing crossed.
       await waitForDisplayedSelector(COMMIT_ERROR, { timeout: 15_000 });
@@ -529,7 +530,7 @@ describe('cross-window tab drag', () => {
     // Unblock the staging and drop again: the commit runs, and what the other
     // window opens is the document as this one was showing it.
     await browser.switchToWindow(mainHandle);
-    expect(await tabDragDrop(dirtyPdf, point)).toBe(true);
+    expect(await tabDragDrop(dirtyPdf, point, 'save')).toBe(true);
     expect(await tabPaths()).not.toContain(dirtyPdf);
 
     await browser.switchToWindow(secondHandle);
@@ -674,7 +675,7 @@ describe('cross-window tab drag', () => {
     // A quarter of the way down: clear of every strip, including the one the
     // window torn off half way down is showing.
     const point = contentPoint(frame, frame.innerHeight / 4);
-    expect(await tabDragDrop(keepPdf, point)).toBe(true);
+    expect(await tabDragDrop(keepPdf, point, 'save')).toBe(true);
     const handles = await waitForHandles(3);
     const spawned = handles.find((h) => h !== mainHandle && h !== secondHandle)!;
     await browser.switchToWindow(spawned);
@@ -766,7 +767,7 @@ describe('cross-window tab drag', () => {
     // A tear-off is still the only way to place a window somewhere this spec
     // can aim at, for the reason the file header gives.
     const frame = await readFrame();
-    expect(await tabDragDrop(seedPdf, contentPoint(frame, frame.innerHeight / 2))).toBe(true);
+    expect(await tabDragDrop(seedPdf, contentPoint(frame, frame.innerHeight / 2), 'save')).toBe(true);
     const handles = await waitForHandles(2);
     secondHandle = handles.find((h) => h !== mainHandle)!;
     await browser.switchToWindow(secondHandle);
@@ -803,7 +804,7 @@ describe('cross-window tab drag', () => {
     await browser.switchToWindow(mainHandle);
     const source = await readFrame();
     const point = physical(stripCssPoint(target, 40), source.dpr);
-    expect(await tabDragDrop(handoffPdf, point)).toBe(true);
+    expect(await tabDragDrop(handoffPdf, point, 'save')).toBe(true);
     await waitForTabs([tearPdf, lockedPdf], 'the handed-off document never left the source window');
 
     // The move's write landed, and what the other window is showing is that
@@ -847,7 +848,7 @@ describe('cross-window tab drag', () => {
     expect(await diskPageCount(tearPdf)).toBe(5);
 
     const frame = await readFrame();
-    expect(await tabDragDrop(tearPdf, contentPoint(frame, frame.innerHeight * 0.75))).toBe(true);
+    expect(await tabDragDrop(tearPdf, contentPoint(frame, frame.innerHeight * 0.75), 'save')).toBe(true);
     const handles = await waitForHandles(3);
     const torn = handles.find((h) => h !== mainHandle && h !== secondHandle)!;
 
@@ -904,7 +905,7 @@ describe('cross-window tab drag', () => {
       // the working copy over the user's own path, and a read-only destination
       // is a copy the OS refuses.
       refuseWrites(lockedPdf);
-      moved = await tabDragDrop(lockedPdf, point);
+      moved = await tabDragDrop(lockedPdf, point, 'save');
     } finally {
       allowWrites(lockedPdf);
     }
@@ -1001,6 +1002,8 @@ describe('cross-window tab drag', () => {
     await holdHandOff('sealed');
     try {
       expect(await invokeAppCommand('window.moveToNewWindow')).toBe(true);
+      // The pending edit makes the document dirty, so the move asks before it writes.
+      await answerMovePrompt('save');
       await browser.waitUntil(async () => (await handOffsWaiting('sealed')) === 1, {
         timeout: 30_000,
         timeoutMsg: 'the move never reached its seal',

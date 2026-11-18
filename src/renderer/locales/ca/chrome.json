@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "El document s'ha quedat en aquesta finestra perquè s'ha demanat una acció sobre ell durant el trasllat. Torneu-lo a moure quan l'acció hagi acabat.",
   "app.window.moveStoppedByEdit": "El document s'ha quedat en aquesta finestra perquè s'ha editat durant el trasllat. Torneu-lo a moure per endur-vos-en l'edició.",
   "app.window.moveRefusedEdit": "Aquesta edició no s'ha fet perquè el document s'està movent a una altra finestra.",
+  "app.window.moveSaveAndMove": "Desa i mou",
   "app.window.focusOther": "Mostra aquella finestra",
   "app.window.outputOpenTitle": "El fitxer és obert",
   "app.window.outputOpenHere": "\"{{name}}\" és obert en aquesta finestra. Tanqueu-lo o trieu un altre nom.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "La partitura no es pot adjuntar a un document que declara conformitat amb PDF/A. Desactiveu Adjunta per reconèixer aquest document.",
   "panel.omr.openProjectPathUnreadable": "L’Audiveris no pot obrir aquest projecte: el camí de la seva carpeta usa caràcters fora de la pàgina de codis del sistema.",
   "panel.omr.unrestored": "No restaurat: {{target}} (el contingut anterior és a {{backup}})",
-  "panel.omr.unrestoredNew": "No suprimit: {{target}} (no existia abans d’aquesta execució)"
+  "panel.omr.unrestoredNew": "No suprimit: {{target}} (no existia abans d’aquesta execució)",
+  "app.window.moveSavesFirst": "«{{name}}» té canvis sense desar. Moure'l a una altra finestra els desa primer al fitxer original, i després no podreu desfer les edicions anteriors. Voleu desar i moure?"
 }

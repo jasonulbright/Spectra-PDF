@@ -182,6 +182,7 @@
   "app.window.moveCancelled": "移動期間要求了對此文件的動作，因此文件仍留在此視窗中。請在動作完成後再次移動。",
   "app.window.moveStoppedByEdit": "移動期間編輯了此文件，因此文件仍留在此視窗中。請再次移動，以便連同編輯一起移動。",
   "app.window.moveRefusedEdit": "文件正在移動到另一個視窗，因此未進行此編輯。",
+  "app.window.moveSaveAndMove": "儲存並移動",
   "app.window.focusOther": "顯示該視窗",
   "app.window.outputOpenTitle": "檔案已開啟",
   "app.window.outputOpenHere": "「{{name}}」已在此視窗中開啟。請關閉它，或選擇其他名稱。",
@@ -6394,5 +6395,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "無法將樂譜附加到聲明符合 PDF/A 的文件。請關閉「附加」以辨識此文件。",
   "panel.omr.openProjectPathUnreadable": "Audiveris 無法開啟此專案：其資料夾路徑使用了系統字碼頁之外的字元。",
   "panel.omr.unrestored": "未還原：{{target}}（原有內容在 {{backup}} 中）",
-  "panel.omr.unrestoredNew": "未刪除：{{target}}（此次執行之前不存在）"
+  "panel.omr.unrestoredNew": "未刪除：{{target}}（此次執行之前不存在）",
+  "app.window.moveSavesFirst": "「{{name}}」有未儲存的變更。將其移到另一個視窗會先把變更儲存到原始檔案,之後無法復原先前的編輯。要儲存並移動嗎?"
 }
