@@ -48,8 +48,8 @@ describe('guide markdown reader', () => {
     const blocks = parseGuide(['1. For Password:', '   1. Type the user password.', '   2. Type the owner password.', '2. Click Encrypt.', '3. Choose the file name.', ''].join('\n'));
     const list = pick(blocks[0], 'list');
     expect(list.items).toHaveLength(3);
-    expect(list.items[0].sub?.ordered).toBe(true);
-    expect(list.items[0].sub?.items).toHaveLength(2);
+    expect(list.items[0].subs[0]?.ordered).toBe(true);
+    expect(list.items[0].subs[0]?.items).toHaveLength(2);
     expect(text(list.items[1].inline)).toBe('Click Encrypt.');
   });
 
@@ -57,8 +57,32 @@ describe('guide markdown reader', () => {
     const blocks = parseGuide(['5. Select the options:', '   - Straighten', '   - Compress', '6. Start.', ''].join('\n'));
     const list = pick(blocks[0], 'list');
     expect(list.items).toHaveLength(2);
-    expect(list.items[0].sub?.ordered).toBe(false);
-    expect(list.items[0].sub?.items.map((i) => text(i.inline))).toEqual(['Straighten', 'Compress']);
+    expect(list.items[0].subs[0]?.ordered).toBe(false);
+    expect(list.items[0].subs[0]?.items.map((i) => text(i.inline))).toEqual(['Straighten', 'Compress']);
+  });
+
+  it('keeps text that follows a sub-list after it', () => {
+    const blocks = parseGuide(['1. a', '   1. b', '   2. c', '   After sub.', '2. d', ''].join('\n'));
+    const list = pick(blocks[0], 'list');
+    expect(list.items).toHaveLength(2);
+    expect(text(list.items[0].inline)).toBe('a');
+    expect(list.items[0].subs).toHaveLength(1);
+    expect(text(list.items[0].subs[0].items[1].inline)).toBe('c After sub.');
+  });
+
+  it('starts a new sub-list when the marker kind changes under one item', () => {
+    const blocks = parseGuide(['1. a', '   1. b', '   - x', '2. c', ''].join('\n'));
+    const list = pick(blocks[0], 'list');
+    expect(list.items).toHaveLength(2);
+    expect(list.items[0].subs.map((s) => s.ordered)).toEqual([true, false]);
+    expect(list.items[0].subs[0].items).toHaveLength(1);
+    expect(text(list.items[0].subs[1].items[0].inline)).toBe('x');
+  });
+
+  it('ends a top-level list at an unindented paragraph', () => {
+    const blocks = parseGuide(['1. a', 'Next paragraph.', ''].join('\n'));
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].kind).toBe('paragraph');
   });
 
   it('reads tables with escaped bars', () => {
@@ -129,7 +153,7 @@ describe('the bundled user guide', () => {
     const list = (l: GuideList): void => {
       for (const item of l.items) {
         visit(item.inline);
-        if (item.sub) list(item.sub);
+        item.subs.forEach(list);
       }
     };
     for (const b of blocks) {

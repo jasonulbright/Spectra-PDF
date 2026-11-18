@@ -73,7 +73,7 @@ function renderList(list: GuideList, key: number, jump: (id: string) => void): R
       {list.items.map((item, i) => (
         <li key={i}>
           {renderInline(item.inline, jump)}
-          {item.sub ? renderList(item.sub, 0, jump) : null}
+          {item.subs.map((sub, n) => renderList(sub, n, jump))}
         </li>
       ))}
     </Tag>
