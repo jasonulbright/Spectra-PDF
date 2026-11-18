@@ -184,6 +184,7 @@
   "app.window.moveCancelled": "A dokumentum ebben az ablakban maradt, mert az áthelyezés közben műveletet kértek rajta. Helyezze át újra, ha a művelet befejeződött.",
   "app.window.moveStoppedByEdit": "A dokumentum ebben az ablakban maradt, mert az áthelyezés közben szerkesztették. Helyezze át újra, hogy a szerkesztés is vele menjen.",
   "app.window.moveRefusedEdit": "Ez a szerkesztés nem történt meg, mert a dokumentum áthelyezése egy másik ablakba folyamatban van.",
+  "app.window.moveSaveAndMove": "Mentés és áthelyezés",
   "app.window.focusOther": "Az adott ablak megjelenítése",
   "app.window.outputOpenTitle": "A fájl meg van nyitva",
   "app.window.outputOpenHere": "„{{name}}” meg van nyitva ebben az ablakban. Zárja be, vagy válasszon másik nevet.",
@@ -6534,5 +6535,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "A kotta nem csatolható olyan dokumentumhoz, amely PDF/A-megfelelőséget állít. Kapcsolja ki a Csatolás lehetőséget a dokumentum felismeréséhez.",
   "panel.omr.openProjectPathUnreadable": "Az Audiveris nem tudja megnyitni ezt a projektet: a mappája elérési útja a rendszer kódlapján kívüli karaktereket tartalmaz.",
   "panel.omr.unrestored": "Nincs visszaállítva: {{target}} (a korábbi tartalma itt van: {{backup}})",
-  "panel.omr.unrestoredNew": "Nincs eltávolítva: {{target}} (ez előtt a futás előtt nem létezett)"
+  "panel.omr.unrestoredNew": "Nincs eltávolítva: {{target}} (ez előtt a futás előtt nem létezett)",
+  "app.window.moveSavesFirst": "A(z) „{{name}}” mentetlen módosításokat tartalmaz. Ha másik ablakba helyezi át, a program előbb az eredeti fájlba menti őket, és a korábbi szerkesztések utána nem vonhatók vissza. Menti és áthelyezi?"
 }

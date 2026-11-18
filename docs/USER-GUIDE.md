@@ -44,7 +44,7 @@ What Spectra PDF never does:
 - It does not show ads. It does not collect usage data. It does not show upgrade offers.
 - It does not use the network for its own purposes, except to look for, download and install updates. By default it looks for a new release when it starts. You can turn this off. See [Settings, language and updates](#settings-language-and-updates).
 - It uses the network for other work only when you start that work. Examples are opening a document from a web address, capturing a web page, sending a form with its own Submit button, and signing with a signing service. OCR, spell check, signature trust, export and print production run on your computer.
-- It does not change your original file until you save. One action saves for you: **Window > Move to New Window**, and dragging a tab out of the window, write the document to its original file first. See [Open, save and the working copy](#open-save-and-the-working-copy).
+- It does not change your original file until you save. One action can save for you: **Window > Move to New Window**, and dragging a tab out of the window, write the document to its original file first, after asking. See [Open, save and the working copy](#open-save-and-the-working-copy).
 - It does not fetch an address that is written inside a document by itself. Nothing in a document that you open from the web address is run.
 - It does not run the custom scripts of a form, unless you turn on the setting **Run unrecognized field scripts**. The setting is off at first.
 - It does not send a document to a signing service. When you sign with a signing service, only the digest of the signed part is sent.
@@ -123,7 +123,7 @@ You can also use **File > Create PDF from Clipboard**, **File > Create PDF from 
 
 ### The working copy
 
-When you open a file, Spectra PDF makes a temporary working copy. All your edits go to the working copy. The original file does not change until you save. One exception: **Window > Move to New Window**, and dragging a tab out of the window, write the working copy to the original file first. They do not ask, and you cannot undo earlier edits afterward.
+When you open a file, Spectra PDF makes a temporary working copy. All your edits go to the working copy. The original file does not change until you save. One exception: **Window > Move to New Window**, and dragging a tab out of the window, write the working copy to the original file first. If the document has unsaved changes they ask before they do, and after a move you cannot undo earlier edits.
 
 - **File > Save** (`Ctrl+S`) writes the working copy over the original file. The item is dim when the document has no unsaved changes.
 - **File > Save As…** (`Ctrl+Shift+S`) writes the working copy to a file that you choose.
@@ -338,7 +338,7 @@ Press `Ctrl+L` to go to the search box in the toolbar. Type the name of a tool, 
 ### Window menu
 
 - **Window > Split** shows two panes over the same document. Each pane has its own scroll position and zoom.
-- **Window > New Window** opens a second window. **Window > Move to New Window** moves the document to a new window. If the document has unsaved changes, Spectra PDF saves them to the original file first. A document belongs to one window at a time.
+- **Window > New Window** opens a second window. **Window > Move to New Window** moves the document to a new window. If the document has unsaved changes, Spectra PDF asks, then saves them to the original file first. Choose Cancel to keep the document where it is. A document belongs to one window at a time.
 - **Window > Minimize to Tray** minimizes the window to the system tray.
 
 ## Edit text and images

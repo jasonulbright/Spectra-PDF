@@ -184,6 +184,7 @@
   "app.window.moveCancelled": "Dokumentet ble værende i dette vinduet fordi det ble bedt om en handling på det under flyttingen. Flytt det på nytt når handlingen er fullført.",
   "app.window.moveStoppedByEdit": "Dokumentet ble værende i dette vinduet fordi det ble redigert under flyttingen. Flytt det på nytt for å ta med redigeringen.",
   "app.window.moveRefusedEdit": "Denne redigeringen ble ikke utført fordi dokumentet flyttes til et annet vindu.",
+  "app.window.moveSaveAndMove": "Lagre og flytt",
   "app.window.focusOther": "Vis det vinduet",
   "app.window.outputOpenTitle": "Filen er åpen",
   "app.window.outputOpenHere": "«{{name}}» er åpen i dette vinduet. Lukk den, eller velg et annet navn.",
@@ -6534,5 +6535,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partituret kan ikke legges ved et dokument som oppgir PDF/A-samsvar. Slå av Legg ved for å gjenkjenne dette dokumentet.",
   "panel.omr.openProjectPathUnreadable": "Audiveris kan ikke åpne dette prosjektet: Mappebanen bruker tegn utenfor systemets tegntabell.",
   "panel.omr.unrestored": "Ikke gjenopprettet: {{target}} (det tidligere innholdet ligger i {{backup}})",
-  "panel.omr.unrestoredNew": "Ikke fjernet: {{target}} (den fantes ikke før denne kjøringen)"
+  "panel.omr.unrestoredNew": "Ikke fjernet: {{target}} (den fantes ikke før denne kjøringen)",
+  "app.window.moveSavesFirst": "«{{name}}» har ulagrede endringer. Hvis du flytter det til et annet vindu, lagres de først i den opprinnelige filen, og du kan ikke angre tidligere redigeringer etterpå. Lagre og flytte?"
 }

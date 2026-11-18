@@ -188,6 +188,7 @@
   "app.window.moveCancelled": "Dokument je ostal v tem oknu, ker je bilo med premikanjem zanj zahtevano dejanje. Ko se dejanje konča, ga znova premaknite.",
   "app.window.moveStoppedByEdit": "Dokument je ostal v tem oknu, ker je bil med premikanjem urejen. Znova ga premaknite, da se urejanje prenese z njim.",
   "app.window.moveRefusedEdit": "To urejanje ni bilo izvedeno, ker se dokument premika v drugo okno.",
+  "app.window.moveSaveAndMove": "Shrani in premakni",
   "app.window.focusOther": "Pokaži to okno",
   "app.window.outputOpenTitle": "Datoteka je odprta",
   "app.window.outputOpenHere": "»{{name}}« je odprta v tem oknu. Zaprite jo ali izberite drugo ime.",
@@ -6814,5 +6815,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partiture ni mogoče priložiti dokumentu, ki navaja skladnost s PDF/A. Izklopite Priloži, da prepoznate ta dokument.",
   "panel.omr.openProjectPathUnreadable": "Audiveris ne more odpreti tega projekta: pot do njegove mape vsebuje znake zunaj kodne strani sistema.",
   "panel.omr.unrestored": "Ni obnovljeno: {{target}} (prejšnja vsebina je v {{backup}})",
-  "panel.omr.unrestoredNew": "Ni odstranjeno: {{target}} (pred tem zagonom ni obstajala)"
+  "panel.omr.unrestoredNew": "Ni odstranjeno: {{target}} (pred tem zagonom ni obstajala)",
+  "app.window.moveSavesFirst": "»{{name}}« ima neshranjene spremembe. Če ga premaknete v drugo okno, se najprej shranijo v izvirno datoteko in prejšnjih urejanj nato ne boste mogli razveljaviti. Želite shraniti in premakniti?"
 }

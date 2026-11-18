@@ -371,6 +371,11 @@ export const WORKBENCH_STRINGS = {
   // sealed for the hand-over it is refused.
   'app.window.moveStoppedByEdit':
     'The document stayed in this window because it was edited during the move. Move it again to take the edit with it.',
+  // A document with unsaved changes is written over its original file when it
+  // moves, and that clears its undo history, so the move asks first.
+  'app.window.moveSavesFirst':
+    '"{{name}}" has unsaved changes. Moving it to another window saves them to the original file first, and you cannot undo earlier edits afterward. Save and move?',
+  'app.window.moveSaveAndMove': 'Save and Move',
   'app.window.moveRefusedEdit':
     'This edit was not made because the document is being moved to another window.',
   'app.window.openElsewhere':

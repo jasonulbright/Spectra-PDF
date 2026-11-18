@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "Le document est resté dans cette fenêtre, car une action a été demandée sur lui pendant le déplacement. Déplacez-le à nouveau une fois l'action terminée.",
   "app.window.moveStoppedByEdit": "Le document est resté dans cette fenêtre, car il a été modifié pendant le déplacement. Déplacez-le à nouveau pour emporter la modification.",
   "app.window.moveRefusedEdit": "Cette modification n'a pas été effectuée, car le document est en cours de déplacement vers une autre fenêtre.",
+  "app.window.moveSaveAndMove": "Enregistrer et déplacer",
   "app.window.focusOther": "Afficher cette fenêtre",
   "app.window.outputOpenTitle": "Fichier ouvert",
   "app.window.outputOpenHere": "« {{name}} » est ouvert dans cette fenêtre. Fermez-le ou choisissez un autre nom.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "La partition ne peut pas être jointe à un document qui déclare une conformité PDF/A. Désactivez Joindre pour reconnaître ce document.",
   "panel.omr.openProjectPathUnreadable": "Audiveris ne peut pas ouvrir ce projet : le chemin de son dossier utilise des caractères hors de la page de codes du système.",
   "panel.omr.unrestored": "Non restauré : {{target}} (son contenu précédent se trouve dans {{backup}})",
-  "panel.omr.unrestoredNew": "Non supprimé : {{target}} (il n’existait pas avant cette exécution)"
+  "panel.omr.unrestoredNew": "Non supprimé : {{target}} (il n’existait pas avant cette exécution)",
+  "app.window.moveSavesFirst": "« {{name}} » contient des modifications non enregistrées. Le déplacer vers une autre fenêtre les enregistre d'abord dans le fichier d'origine, et vous ne pourrez plus annuler les modifications précédentes. Enregistrer et déplacer ?"
 }

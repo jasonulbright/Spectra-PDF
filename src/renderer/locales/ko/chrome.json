@@ -182,6 +182,7 @@
   "app.window.moveCancelled": "이동 중에 문서에 대한 작업이 요청되어 문서가 이 창에 남아 있습니다. 작업이 끝난 후 다시 옮기세요.",
   "app.window.moveStoppedByEdit": "이동 중에 문서가 편집되어 문서가 이 창에 남아 있습니다. 편집 내용과 함께 옮기려면 다시 옮기세요.",
   "app.window.moveRefusedEdit": "문서를 다른 창으로 옮기는 중이므로 이 편집은 적용되지 않았습니다.",
+  "app.window.moveSaveAndMove": "저장 후 이동",
   "app.window.focusOther": "해당 창 표시",
   "app.window.outputOpenTitle": "파일이 열려 있음",
   "app.window.outputOpenHere": "\"{{name}}\"이(가) 이 창에서 열려 있습니다. 닫거나 다른 이름을 선택하세요.",
@@ -6394,5 +6395,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "PDF/A 준수를 선언한 문서에는 악보를 첨부할 수 없습니다. 이 문서를 인식하려면 첨부를 끄십시오.",
   "panel.omr.openProjectPathUnreadable": "Audiveris가 이 프로젝트를 열 수 없습니다. 폴더 경로에 시스템 코드 페이지 밖의 문자가 있습니다.",
   "panel.omr.unrestored": "복원되지 않음: {{target}}(이전 내용은 {{backup}}에 있음)",
-  "panel.omr.unrestoredNew": "제거되지 않음: {{target}}(이번 실행 전에는 없던 파일)"
+  "panel.omr.unrestoredNew": "제거되지 않음: {{target}}(이번 실행 전에는 없던 파일)",
+  "app.window.moveSavesFirst": "\"{{name}}\"에 저장하지 않은 변경 사항이 있습니다. 다른 창으로 이동하면 먼저 원본 파일에 저장되며, 이후에는 이전 편집을 실행 취소할 수 없습니다. 저장하고 이동하시겠습니까?"
 }

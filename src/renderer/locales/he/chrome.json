@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "המסמך נשאר בחלון זה כי התבקשה עליו פעולה במהלך ההעברה. העבירו אותו שוב לאחר שהפעולה תסתיים.",
   "app.window.moveStoppedByEdit": "המסמך נשאר בחלון זה כי נערך במהלך ההעברה. העבירו אותו שוב כדי שהעריכה תעבור איתו.",
   "app.window.moveRefusedEdit": "עריכה זו לא בוצעה כי המסמך מועבר לחלון אחר.",
+  "app.window.moveSaveAndMove": "שמירה והעברה",
   "app.window.focusOther": "הצגת החלון הזה",
   "app.window.outputOpenTitle": "הקובץ פתוח",
   "app.window.outputOpenHere": "\"{{name}}\" פתוח בחלון הזה. יש לסגור אותו או לבחור שם אחר.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "לא ניתן לצרף את הפרטיטורה למסמך שמצהיר על תאימות PDF/A. כבה את „צרף” כדי לזהות מסמך זה.",
   "panel.omr.openProjectPathUnreadable": "Audiveris לא יכול לפתוח את הפרויקט הזה: נתיב התיקייה שלו משתמש בתווים שמחוץ לדף הקוד של המערכת.",
   "panel.omr.unrestored": "לא שוחזר: {{target}} (התוכן הקודם שלו נמצא ב-{{backup}})",
-  "panel.omr.unrestoredNew": "לא הוסר: {{target}} (הוא לא היה קיים לפני הריצה הזו)"
+  "panel.omr.unrestoredNew": "לא הוסר: {{target}} (הוא לא היה קיים לפני הריצה הזו)",
+  "app.window.moveSavesFirst": "ל-\"{{name}}\" יש שינויים שלא נשמרו. העברתו לחלון אחר שומרת אותם תחילה בקובץ המקורי, ולאחר מכן לא ניתן לבטל עריכות קודמות. לשמור ולהעביר?"
 }

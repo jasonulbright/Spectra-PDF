@@ -251,6 +251,15 @@ export async function invokeAppCommand(id: string): Promise<boolean> {
   );
 }
 
+/** Answer the Move to New Window prompt a document with unsaved edits raises:
+ * `save` is Save and Move, `cancel` keeps the document where it is. */
+export async function answerMovePrompt(answer: 'save' | 'cancel' = 'save', timeout = 20_000): Promise<void> {
+  const sel = answer === 'save' ? '[data-testid="confirm-affirm"]' : '[data-testid="confirm-cancel"]';
+  const el = await $(sel);
+  await el.waitForDisplayed({ timeout, timeoutMsg: 'the move never asked about the unsaved edits' });
+  await el.click();
+}
+
 /** A point in a hand-off to another window where a spec can hold it:
  * `committed` after the page tier came to rest, before the reservation;
  * `sealed` after the file was written and sealed, before the hand-over. */
@@ -3823,15 +3832,31 @@ export interface PhysicalScreenPoint {
  * so the commit gate, the Rust resolution, the handover and the tab close all
  * run unchanged.
  */
-export async function tabDragDrop(path: string, point: PhysicalScreenPoint): Promise<boolean> {
-  const result = await browser.executeAsync<boolean | string, [string, PhysicalScreenPoint]>(
-    function (p, at, done) {
+export async function tabDragDrop(
+  path: string,
+  point: PhysicalScreenPoint,
+  // A document with unsaved edits asks before a hand-off writes its file. The
+  // drop blocks the session until it resolves, so the answer is clicked from
+  // inside the same script: `save` is Save and Move, `cancel` keeps the document.
+  answer?: 'save' | 'cancel',
+): Promise<boolean> {
+  const result = await browser.executeAsync<boolean | string, [string, PhysicalScreenPoint, string]>(
+    function (p, at, ans, done) {
+      let timer: ReturnType<typeof setInterval> | undefined;
+      if (ans) {
+        const id = ans === 'save' ? 'confirm-affirm' : 'confirm-cancel';
+        timer = setInterval(() => {
+          const el = document.querySelector('[data-testid="' + id + '"]') as HTMLElement | null;
+          if (el) el.click();
+        }, 100);
+      }
       (window as any).__SPECTRA_TEST__.tabDragDrop(p, at)
-        .then((moved: boolean) => done(moved))
-        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+        .then((moved: boolean) => { if (timer) clearInterval(timer); done(moved); })
+        .catch((err: unknown) => { if (timer) clearInterval(timer); done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any); });
     },
     path,
     point,
+    answer ?? '',
   );
   if (typeof result === 'string') {
     throw new Error(`tabDragDrop failed: ${result.replace(ERROR_TAG, '')}`);

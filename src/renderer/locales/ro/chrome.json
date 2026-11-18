@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "Documentul a rămas în această fereastră deoarece a fost cerută o acțiune asupra lui în timpul mutării. Mutați-l din nou după ce acțiunea s-a încheiat.",
   "app.window.moveStoppedByEdit": "Documentul a rămas în această fereastră deoarece a fost editat în timpul mutării. Mutați-l din nou pentru a lua editarea cu el.",
   "app.window.moveRefusedEdit": "Această editare nu a fost făcută deoarece documentul este mutat în altă fereastră.",
+  "app.window.moveSaveAndMove": "Salvează și mută",
   "app.window.focusOther": "Arată acea fereastră",
   "app.window.outputOpenTitle": "Fișierul este deschis",
   "app.window.outputOpenHere": "„{{name}}” este deschis în această fereastră. Închideți-l sau alegeți alt nume.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partitura nu poate fi atașată la un document care declară conformitate PDF/A. Dezactivați Atașare pentru a recunoaște acest document.",
   "panel.omr.openProjectPathUnreadable": "Audiveris nu poate deschide acest proiect: calea folderului folosește caractere din afara paginii de coduri a sistemului.",
   "panel.omr.unrestored": "Nerestaurat: {{target}} (conținutul anterior este în {{backup}})",
-  "panel.omr.unrestoredNew": "Neeliminat: {{target}} (nu exista înainte de această rulare)"
+  "panel.omr.unrestoredNew": "Neeliminat: {{target}} (nu exista înainte de această rulare)",
+  "app.window.moveSavesFirst": "„{{name}}” are modificări nesalvate. Mutarea într-o altă fereastră le salvează mai întâi în fișierul original, iar apoi nu mai puteți anula editările anterioare. Salvați și mutați?"
 }

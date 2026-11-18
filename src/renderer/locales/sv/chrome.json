@@ -184,6 +184,7 @@
   "app.window.moveCancelled": "Dokumentet blev kvar i det här fönstret eftersom en åtgärd på det begärdes under flytten. Flytta det igen när åtgärden är klar.",
   "app.window.moveStoppedByEdit": "Dokumentet blev kvar i det här fönstret eftersom det redigerades under flytten. Flytta det igen för att ta med redigeringen.",
   "app.window.moveRefusedEdit": "Den här redigeringen gjordes inte eftersom dokumentet flyttas till ett annat fönster.",
+  "app.window.moveSaveAndMove": "Spara och flytta",
   "app.window.focusOther": "Visa det fönstret",
   "app.window.outputOpenTitle": "Filen är öppen",
   "app.window.outputOpenHere": "\"{{name}}\" är öppen i det här fönstret. Stäng den, eller välj ett annat namn.",
@@ -6534,5 +6535,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partituret kan inte bifogas till ett dokument som anger PDF/A-överensstämmelse. Stäng av Bifoga för att känna igen det här dokumentet.",
   "panel.omr.openProjectPathUnreadable": "Audiveris kan inte öppna det här projektet: mappens sökväg innehåller tecken utanför systemets teckentabell.",
   "panel.omr.unrestored": "Inte återställd: {{target}} (det tidigare innehållet finns i {{backup}})",
-  "panel.omr.unrestoredNew": "Inte borttagen: {{target}} (den fanns inte före den här körningen)"
+  "panel.omr.unrestoredNew": "Inte borttagen: {{target}} (den fanns inte före den här körningen)",
+  "app.window.moveSavesFirst": "”{{name}}” har osparade ändringar. Om du flyttar det till ett annat fönster sparas de först i originalfilen, och du kan efteråt inte ångra tidigare redigeringar. Spara och flytta?"
 }

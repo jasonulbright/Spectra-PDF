@@ -188,6 +188,7 @@
   "app.window.moveCancelled": "Dokument zostal v tomto okne, pretože počas presunu bola naň vyžiadaná akcia. Po dokončení akcie ho presuňte znova.",
   "app.window.moveStoppedByEdit": "Dokument zostal v tomto okne, pretože bol počas presunu upravený. Presuňte ho znova, aby sa úprava preniesla s ním.",
   "app.window.moveRefusedEdit": "Táto úprava sa nevykonala, pretože sa dokument presúva do iného okna.",
+  "app.window.moveSaveAndMove": "Uložiť a presunúť",
   "app.window.focusOther": "Zobraziť toto okno",
   "app.window.outputOpenTitle": "Súbor je otvorený",
   "app.window.outputOpenHere": "„{{name}}“ je otvorený v tomto okne. Zatvorte ho alebo zvoľte iný názov.",
@@ -6814,5 +6815,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "Partitúru nemožno pripojiť k dokumentu, ktorý deklaruje zhodu s PDF/A. Ak chcete tento dokument rozpoznať, vypnite Pripojiť.",
   "panel.omr.openProjectPathUnreadable": "Audiveris nemôže otvoriť tento projekt: cesta k jeho priečinku obsahuje znaky mimo kódovej stránky systému.",
   "panel.omr.unrestored": "Neobnovené: {{target}} (predchádzajúci obsah je v {{backup}})",
-  "panel.omr.unrestoredNew": "Neodstránené: {{target}} (pred týmto spustením neexistoval)"
+  "panel.omr.unrestoredNew": "Neodstránené: {{target}} (pred týmto spustením neexistoval)",
+  "app.window.moveSavesFirst": "Dokument „{{name}}“ obsahuje neuložené zmeny. Presunutie do iného okna ich najprv uloží do pôvodného súboru a skoršie úpravy potom nepôjde vrátiť späť. Uložiť a presunúť?"
 }

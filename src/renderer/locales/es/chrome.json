@@ -186,6 +186,7 @@
   "app.window.moveCancelled": "El documento se quedó en esta ventana porque se pidió una acción sobre él durante el traslado. Vuelva a moverlo cuando la acción haya terminado.",
   "app.window.moveStoppedByEdit": "El documento se quedó en esta ventana porque se editó durante el traslado. Vuelva a moverlo para llevarse la edición.",
   "app.window.moveRefusedEdit": "Esta edición no se hizo porque el documento se está moviendo a otra ventana.",
+  "app.window.moveSaveAndMove": "Guardar y mover",
   "app.window.focusOther": "Mostrar esa ventana",
   "app.window.outputOpenTitle": "El archivo está abierto",
   "app.window.outputOpenHere": "\"{{name}}\" está abierto en esta ventana. Ciérrelo o elija otro nombre.",
@@ -6674,5 +6675,6 @@
   "engine.recognize_music.scoreCannotAttachedDocument2": "La partitura no se puede adjuntar a un documento que declara conformidad con PDF/A. Desactive Adjuntar para reconocer este documento.",
   "panel.omr.openProjectPathUnreadable": "Audiveris no puede abrir este proyecto: la ruta de su carpeta usa caracteres fuera de la página de códigos del sistema.",
   "panel.omr.unrestored": "No restaurado: {{target}} (su contenido anterior está en {{backup}})",
-  "panel.omr.unrestoredNew": "No eliminado: {{target}} (no existía antes de esta ejecución)"
+  "panel.omr.unrestoredNew": "No eliminado: {{target}} (no existía antes de esta ejecución)",
+  "app.window.moveSavesFirst": "«{{name}}» tiene cambios sin guardar. Al moverlo a otra ventana, primero se guardan en el archivo original y después no se podrán deshacer las ediciones anteriores. ¿Guardar y mover?"
 }

@@ -3419,8 +3419,8 @@ function AppContent(): React.ReactElement {
   // harmless wherever the document ends up. Writing that working copy back over
   // the user's own path is what a MOVE costs, because the receiving window opens
   // the path and mints a working copy from whatever is on disk; without it every
-  // unsaved edit is discarded at the moment of the move, with no prompt and
-  // nothing to undo.
+  // unsaved edit is discarded at the moment of the move, with nothing to undo.
+  // A document with unsaved work asks first; see the prompt before the reservation.
   //
   // So the order is: flush the page tier, RESERVE the destination, and only
   // then — for a document that is actually leaving — write the file, mark it
@@ -3485,6 +3485,31 @@ function AppContent(): React.ReactElement {
               if (stop() === 'edited') {
                 stoppedByEdit = true;
                 return false;
+              }
+              // The move writes the user's own file, and clears its undo. That is
+              // asked for, not assumed: a document with unsaved work does not leave
+              // until the user says to save it. Cancel keeps the document here, as
+              // it was. The question comes BEFORE the destination is reserved: a
+              // reservation hands the path's claim to the other window, and that
+              // window stays usable while a prompt waits. It could open the file as
+              // it is on disk, or close and leave the write with nowhere to go. The
+              // prompt is modal, so nothing edits the document while it waits; the
+              // stop check after it still catches an edit that raced it.
+              const unsaved = readState().files.get(path);
+              if (unsaved && (unsaved.dirty || readState().pageDirtyPaths.includes(path))) {
+                const agreed = await withPromptTurn(
+                  { begin: app.promptTurnBegin, end: app.promptTurnEnd },
+                  () => showActionConfirm(
+                    tCommandTitle('window.moveToNewWindow', 'Move to New Window'),
+                    tChrome('app.window.moveSavesFirst', { name: unsaved.name }),
+                    tChrome('app.window.moveSaveAndMove'),
+                  ),
+                );
+                if (!agreed) return false;
+                if (stop() === 'edited') {
+                  stoppedByEdit = true;
+                  return false;
+                }
               }
               const held = await reserve();
               const handed = readState().files.get(path);
@@ -3574,7 +3599,7 @@ function AppContent(): React.ReactElement {
           });
         }),
       ),
-    [dispatch, commitOrAbort, readState, showNotice],
+    [dispatch, commitOrAbort, readState, showNotice, showActionConfirm],
   );
 
   const handleMoveToNewWindow = useCallback(async () => {
