@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument, StandardFonts, degrees } from 'pdf-lib';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — no type declarations for the deep legacy import
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -41,7 +41,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 const TOL = 12;
 
-describe('bands drawn while Rotate View is on', () => {
+for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands drawn while Rotate View is on' : 'bands drawn on a page whose own /Rotate is 90', () => {
   let tmp = '';
   let source = '';
   let pr: { x: number; y: number; w: number; h: number };
@@ -92,7 +92,7 @@ describe('bands drawn while Rotate View is on', () => {
       timeout: 15_000,
       timeoutMsg: 'no page cell appeared',
     });
-    expect(await invokeAppCommand('view.rotateCW')).toBe(true);
+    if (how === 'view') expect(await invokeAppCommand('view.rotateCW')).toBe(true);
     // The turned page is wider than tall: the frame settles once it is laid out.
     await browser.waitUntil(async () => {
       const r = await pageRect();
@@ -110,6 +110,7 @@ describe('bands drawn while Rotate View is on', () => {
     for (const label of ['ONE', 'TWO', 'THREE']) {
       const page = doc.addPage([612, 792]);
       page.drawText(label, { x: 60, y: 700, size: 28, font });
+      if (how === 'baked') page.setRotation(degrees(90));
     }
     writeFileSync(source, await doc.save());
     await waitForHarness();

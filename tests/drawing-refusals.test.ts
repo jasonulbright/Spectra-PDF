@@ -312,6 +312,12 @@ describe('the canvas', () => {
     expect(view).toContain("if (!target) dispatch({ type: 'NOTE_EDIT_REFUSED' });");
   });
 
+  it('measures the crop, bead and link bands at the own /Rotate of the page plus the shown turn', () => {
+    // p.view is the unrotated box, so a band drawn on a page with /Rotate 90 is
+    // converted at the composed rotation, as a seeded link is drawn.
+    expect(view.match(/\(p\.rotate \?\? 0\) \+ rotationAtDraw/g)).toHaveLength(3);
+  });
+
   it('resolves every mark, guide and band through that rule', () => {
     // Redaction mark, guide, and the signature, new-field, add-text, crop,
     // bead, link, snapshot and add-image bands.

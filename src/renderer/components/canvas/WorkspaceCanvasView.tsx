@@ -2054,13 +2054,14 @@ export function WorkspaceCanvasView({
         const [vx0, vy0, vx1, vy1] = p.view;
         // The band was drawn on the page AS DISPLAYED, so the conversion
         // measures against the displayed extents — which swap under a
-        // quarter turn. `rotationAtDraw` is the in-memory delta; the baked
-        // /Rotate is already in `p.view`'s orientation via the same
-        // composition every placement uses.
-        const turned = rotationAtDraw === 90 || rotationAtDraw === 270;
+        // quarter turn. `p.view` is the UNROTATED box: the page is shown at its
+        // baked /Rotate plus `rotationAtDraw` (the in-memory delta, the shown
+        // view turn included), the composition every placement and seed uses.
+        const shown = (((p.rotate ?? 0) + rotationAtDraw) % 360 + 360) % 360;
+        const turned = shown === 90 || shown === 270;
         const dw = turned ? vy1 - vy0 : vx1 - vx0;
         const dh = turned ? vx1 - vx0 : vy1 - vy0;
-        const insets = insetsFromBand(rect, dw, dh, rotationAtDraw);
+        const insets = insetsFromBand(rect, dw, dh, shown);
         if (!insets) return; // a click, not a crop
         // The page NUMBER and the target path are the workspace doc's — the
         // panel crops `activeFile`, which is that file, not the file an
@@ -2098,7 +2099,9 @@ export function WorkspaceCanvasView({
         const proxy = await getDocumentProxy(page.sourceDocId, buffer);
         const p = await proxy.getPage(page.sourcePageIndex + 1);
         const view = p.view as [number, number, number, number];
-        const bead = pageRectFromBand(rect, view, rotationAtDraw);
+        // `view` is the unrotated box; the band was drawn at the baked /Rotate
+        // plus the in-memory delta.
+        const bead = pageRectFromBand(rect, view, (((p.rotate ?? 0) + rotationAtDraw) % 360 + 360) % 360);
         if (!bead) return; // a click, not a box
         const number = workspacePageNumber(docs, doc, page.id);
         if (number === null) return;
@@ -2135,10 +2138,11 @@ export function WorkspaceCanvasView({
         const proxy = await getDocumentProxy(page.sourceDocId, buffer);
         const p = await proxy.getPage(page.sourcePageIndex + 1);
         const view = p.view as [number, number, number, number];
-        // The page's BAKED /Rotate is already in `view`'s orientation; the
-        // band was drawn under that plus the in-memory delta, which is what
-        // `rotationAtDraw` carries — the same composition the bead uses.
-        const region = pageRectFromBand(rect, view, rotationAtDraw);
+        // `view` is the UNROTATED box; the band was drawn at the baked /Rotate
+        // plus the in-memory delta (`rotationAtDraw`) — the same composition the
+        // bead and the crop use, and the one a link read back from the file is
+        // drawn with.
+        const region = pageRectFromBand(rect, view, (((p.rotate ?? 0) + rotationAtDraw) % 360 + 360) % 360);
         if (!region) return; // a click, not a rectangle
         const number = workspacePageNumber(docs, doc, page.id);
         if (number === null) return;
