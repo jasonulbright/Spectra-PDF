@@ -9,11 +9,11 @@
 // line, with the line's own extent.
 //
 // Text can run across the page too: a page turned a quarter-turn shows each
-// line as a tall, narrow column. The caller says so (`vertical`), from the text
-// layer's own rotation. The shape of a fragment cannot say: a bullet or a
-// one-glyph fragment is taller than wide on an upright page. Vertical lines
-// group by overlap across the page's width, horizontal ones by overlap across
-// its height.
+// line as a tall, narrow column. The caller says so (`vertical` on each rect), from the
+// text node's own first and last characters (see `textLayerRects`), never from
+// the shape of a fragment: a bullet or a one-glyph fragment is taller than wide
+// on an upright page. Vertical lines group by overlap across the page's width,
+// horizontal ones by overlap across its height, each direction on its own.
 //
 // Pure: client rects in, page-normalized rects out, in the same frame the
 // drawn band uses (fractions of the page element's box), so both producers
@@ -70,27 +70,30 @@ const overlapAcross = (line: Line, q: number[]): number => {
  * selection.
  */
 export function redactionRectsFromSelection(
-  rects: RectLike[],
+  rects: (RectLike & { vertical?: boolean })[],
   box: RectLike,
-  vertical = false,
 ): MarkRect[] {
-  const quads: { q: number[] }[] = [];
+  const quads: { q: number[]; vertical: boolean }[] = [];
   for (const r of rects) {
     const cx = (r.left + r.right) / 2;
     const cy = (r.top + r.bottom) / 2;
     if (cx < box.left || cx > box.right || cy < box.top || cy > box.bottom) continue;
     const q = quadFromRect(r, box);
     if (!q || area(q[0], q[1], q[2], q[3]) > MAX_FRAGMENT_AREA) continue;
-    quads.push({ q });
+    quads.push({ q, vertical: r.vertical === true });
   }
   // Reading order for each direction, so a line is built in one pass.
   quads.sort((a, b) =>
-    vertical ? a.q[0] - b.q[0] || a.q[1] - b.q[1] : a.q[1] - b.q[1] || a.q[0] - b.q[0],
+    a.vertical !== b.vertical
+      ? Number(a.vertical) - Number(b.vertical)
+      : a.vertical
+        ? a.q[0] - b.q[0] || a.q[1] - b.q[1]
+        : a.q[1] - b.q[1] || a.q[0] - b.q[0],
   );
   const lines: Line[] = [];
-  for (const { q } of quads) {
+  for (const { q, vertical } of quads) {
     const line = lines.find((l) => {
-      if (overlapAcross(l, q) < SAME_LINE_OVERLAP) return false;
+      if (l.vertical !== vertical || overlapAcross(l, q) < SAME_LINE_OVERLAP) return false;
       const ux0 = Math.min(l.x0, q[0]);
       const uy0 = Math.min(l.y0, q[1]);
       const ux1 = Math.max(l.x1, q[2]);

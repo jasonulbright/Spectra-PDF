@@ -68,9 +68,8 @@ describe('redaction marks from a text selection', () => {
   it('keeps the columns of turned text apart and covers only the selected part', () => {
     // A page turned a quarter-turn: each line is a tall, narrow column.
     const marks = redactionRectsFromSelection(
-      [r(200, 600, 220, 1400), r(230, 400, 250, 1000), r(260, 400, 280, 900)],
+      [r(200, 600, 220, 1400), r(230, 400, 250, 1000), r(260, 400, 280, 900)].map((x) => ({ ...x, vertical: true })),
       BOX,
-      true,
     );
     expect(marks).toHaveLength(3);
     const first = marks.find((m) => Math.abs(m.x - 0.2) < 0.001);

@@ -11,7 +11,7 @@ import {
 import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
 import type { RedactionMark } from '../../lib/redaction';
 import { marksNotCovered, redactionRectsFromSelection } from '../../lib/redaction-selection';
-import { textLayerRects } from '../../lib/selection-rects';
+import { textLayerRects, type TextRect } from '../../lib/selection-rects';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
@@ -1760,12 +1760,13 @@ function PageCellImpl({
     existing: redactionMarks,
   };
   useEffect(() => {
+    const was = toolWasRef.current;
+    toolWasRef.current = tool;
     if (tool !== 'redact') return;
     // A selection left from another tool is not a redaction gesture. Clear it
     // when the tool CHANGES to Redact, not when a page mounts while it is armed
     // (scrolling mounts pages, and a drag in progress must survive that).
-    if (toolWasRef.current !== 'redact') window.getSelection()?.removeAllRanges();
-    toolWasRef.current = tool;
+    if (was !== 'redact') window.getSelection()?.removeAllRanges();
     const onUp = (): void => {
       if (!redactTextGesture) return;
       // After every page's listener has read the selection.
@@ -1777,20 +1778,15 @@ function PageCellImpl({
       const pageEl = pageRootRef.current;
       if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !pageEl) return;
       const { docId: d, pageId, rotation, add, existing } = redactSelectionRef.current;
-      const rects: { left: number; top: number; right: number; bottom: number }[] = [];
-      let vertical = false;
-      for (let i = 0; i < sel.rangeCount; i++) {
-        const part = textLayerRects(sel.getRangeAt(i), pageEl);
-        rects.push(...part.rects);
-        vertical = vertical || part.vertical;
-      }
+      const rects: TextRect[] = [];
+      for (let i = 0; i < sel.rangeCount; i++) rects.push(...textLayerRects(sel.getRangeAt(i), pageEl));
       const b = pageEl.getBoundingClientRect();
       const found = redactionRectsFromSelection(rects, {
         left: b.left,
         top: b.top,
         right: b.right,
         bottom: b.bottom,
-      }, vertical);
+      });
       const marks = marksNotCovered(
         found,
         (existing ?? []).map((m) => projectMarkRect(m, rotation)),

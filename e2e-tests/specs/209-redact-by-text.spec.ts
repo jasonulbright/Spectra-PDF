@@ -308,4 +308,56 @@ describe('redact by selecting text', () => {
     });
     for (const m of await marks()) expect(m.height).toBeGreaterThan(m.width);
   });
+
+  it('marks one box per line on a turned page whose text is drawn to read upright', async () => {
+    // Landscape exports do this: the page says /Rotate 90 and the text is drawn
+    // turned the other way, so the lines read left to right on screen. The page
+    // layer's turn and the text's own turn cancel; the lines are NOT columns.
+    const upright = resolve(tmp, 'upright.pdf');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([400, 400]);
+    page.setRotation(degrees(90));
+    for (const [x, text] of [
+      [60, 'Alpha bravo charlie delta'],
+      [90, 'Echo foxtrot golf hotel'],
+      [120, 'India juliet kilo lima'],
+    ] as [number, string][]) {
+      page.drawText(text, { x, y: 50, size: 16, font, rotate: degrees(90) });
+    }
+    writeFileSync(upright, await doc.save());
+    await closeAllFiles();
+    await openByPaths([upright]);
+    await setView('canvas');
+    await browser.execute(() => (window as any).__SPECTRA_TEST__.setTool('redact'));
+    await browser.waitUntil(async () => (await allSpanCount()) >= 3, {
+      timeout: 20_000,
+      timeoutMsg: 'the page never showed text',
+    });
+    let last = '';
+    let steady = 0;
+    await browser.waitUntil(
+      async () => {
+        const now = JSON.stringify(await spanBoxes(0));
+        steady = now === last ? steady + 1 : 0;
+        last = now;
+        await browser.pause(200);
+        return steady >= 4;
+      },
+      { timeout: 20_000, timeoutMsg: 'the page never settled' },
+    );
+    const spans = await spanBoxes(0);
+    expect(spans.length).toBe(3);
+    // The lines read left to right: each span is wider than it is tall.
+    expect(spans[0].right - spans[0].left).toBeGreaterThan(spans[0].bottom - spans[0].top);
+    // From the middle of the first line to the middle of the second: two marks,
+    // and the first starts where the drag started, not at the start of the line.
+    const [a, b] = [...spans].sort((x, y) => x.top - y.top);
+    const startX = (a.left + a.right) / 2;
+    await drag({ x: startX, y: center(a).y }, { x: (b.left + b.right) / 2, y: center(b).y });
+    await browser.waitUntil(async () => (await getRedactionMarkCount()) === 2, {
+      timeoutMsg: `expected 2 line marks, saw ${await getRedactionMarkCount()}`,
+    });
+    for (const m of await marks()) expect(m.width).toBeGreaterThan(m.height);
+  });
 });
