@@ -41,7 +41,27 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 const TOL = 12;
 
-for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands drawn while Rotate View is on' : 'bands drawn on a page whose own /Rotate is 90', () => {
+// The page is shown turned clockwise by `view` (Rotate View), `baked` (the page's own
+// /Rotate 90) or `both` (they add up to a half turn).
+const SHOWN = {
+  view: {
+    title: 'bands drawn while Rotate View is on',
+    crop: { left: 61.2, right: 367.2, top: 237.6, bottom: 158.4 },
+    link: [91.8, 118.8, 214.2, 435.6],
+  },
+  baked: {
+    title: 'bands drawn on a page whose own /Rotate is 90',
+    crop: { left: 61.2, right: 367.2, top: 237.6, bottom: 158.4 },
+    link: [91.8, 118.8, 214.2, 435.6],
+  },
+  both: {
+    title: 'bands drawn on a /Rotate 90 page with Rotate View on (a half turn)',
+    crop: { left: 183.6, right: 122.4, top: 475.2, bottom: 79.2 },
+    link: [275.4, 118.8, 520.2, 277.2],
+  },
+} as const;
+
+for (const how of ['view', 'baked', 'both'] as const) describe(SHOWN[how].title, () => {
   let tmp = '';
   let source = '';
   let pr: { x: number; y: number; w: number; h: number };
@@ -92,11 +112,11 @@ for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands d
       timeout: 15_000,
       timeoutMsg: 'no page cell appeared',
     });
-    if (how === 'view') expect(await invokeAppCommand('view.rotateCW')).toBe(true);
+    if (how !== 'baked') expect(await invokeAppCommand('view.rotateCW')).toBe(true);
     // The turned page is wider than tall: the frame settles once it is laid out.
     await browser.waitUntil(async () => {
       const r = await pageRect();
-      return !!r && r.w > r.h;
+      return !!r && (how === 'both' ? r.w < r.h : r.w > r.h);
     }, { timeout: 15_000, timeoutMsg: 'the page never showed turned' });
     await browser.pause(800);
     pr = (await pageRect())!;
@@ -110,7 +130,7 @@ for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands d
     for (const label of ['ONE', 'TWO', 'THREE']) {
       const page = doc.addPage([612, 792]);
       page.drawText(label, { x: 60, y: 700, size: 28, font });
-      if (how === 'baked') page.setRotation(degrees(90));
+      if (how !== 'view') page.setRotation(degrees(90));
     }
     writeFileSync(source, await doc.save());
     await waitForHarness();
@@ -127,7 +147,7 @@ for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands d
       timeout: 10_000,
       timeoutMsg: 'opening the tool never armed the crop mode',
     });
-    await drag([0.3, 0.1], [0.7, 0.4]);
+    await drag([0.2, 0.1], [0.7, 0.4]);
     await browser.waitUntil(
       async () => ((await browser.execute(() => document.querySelectorAll('[data-testid="crop-placement"]').length)) as number) === 1,
       { timeout: 10_000, timeoutMsg: 'the drawn crop left no mark on the turned page' },
@@ -137,13 +157,15 @@ for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands d
       async () => Number(await $('[data-testid="pagebox-left"]').getValue()) > 0,
       { timeout: 10_000, timeoutMsg: 'the drawn crop never reached the panel' },
     );
-    // Shown u 0.3..0.7 and v 0.1..0.4 on the clockwise-turned page keep the stored
-    // x 0.1..0.4 and the stored top 0.3..0.7 of a 612 x 792 page.
+    // Shown u 0.2..0.7 and v 0.1..0.4 on the clockwise-turned page keep the stored
+    // x 0.1..0.4 and the stored top 0.3..0.8 of a 612 x 792 page. The two vertical
+    // insets differ on purpose, so a top/bottom swap cannot pass.
+    const crop = SHOWN[how].crop;
     for (const [id, want] of [
-      ['pagebox-left', 61.2],
-      ['pagebox-right', 367.2],
-      ['pagebox-top', 237.6],
-      ['pagebox-bottom', 237.6],
+      ['pagebox-left', crop.left],
+      ['pagebox-right', crop.right],
+      ['pagebox-top', crop.top],
+      ['pagebox-bottom', crop.bottom],
     ] as const) {
       const got = Number(await $(`[data-testid="${id}"]`).getValue());
       expect(Math.abs(got - want)).toBeLessThan(TOL);
@@ -183,7 +205,7 @@ for (const how of ['view', 'baked'] as const) describe(how === 'view' ? 'bands d
     expect(links).toHaveLength(1);
     // Shown u 0.15..0.55 and v 0.15..0.35 are the stored x 0.15..0.35 and the stored
     // top 0.45..0.85, which in PDF space (up from the bottom) is y 118.8..435.6.
-    const want = [91.8, 118.8, 214.2, 435.6];
+    const want = SHOWN[how].link;
     const got = links[0].rect!;
     for (let i = 0; i < 4; i++) expect(Math.abs(got[i] - want[i])).toBeLessThan(TOL);
   });
