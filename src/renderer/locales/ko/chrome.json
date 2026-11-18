@@ -4317,7 +4317,7 @@
   "panel.forms.scriptsNotRun_other": "이 앱이 실행하지 않는 스크립트를 가진 필드가 {{count}}개 있습니다. 해당 필드의 값은 그대로 두었고 다른 필드는 모두 계산되었습니다.",
   "panel.forms.scriptsPolicyHint": "이 컴퓨터에서는 정책에 따라 필드 스크립트가 꺼져 있어 이 설정으로 켤 수 없습니다.",
   "panel.forms.scriptsPosition": "이 앱은 검증할 수 없는 양식 스크립트를 실행하지 않습니다. 표준 서식·검사·계산 호출은 선언적이고 코드를 담지 않으므로 실행하며, 그 밖의 것은 문서에 그대로 남기고 여기에 보고합니다.",
-  "panel.forms.scriptsPreferenceHint": "기본 설정 ▸ 일반에서 ‘검증할 수 없는 필드 스크립트 실행’을 켜면 샌드박스 인터프리터에서 실행됩니다.",
+  "panel.forms.scriptsPreferenceHint": "기본 설정 ▸ 업데이트 및 라이선스에서 ‘검증할 수 없는 필드 스크립트 실행’을 켜면 샌드박스 인터프리터에서 실행됩니다.",
   "panel.forms.scriptsRunningPosition": "표준 서식·검사·계산 호출은 직접 평가되며 코드를 담지 않습니다. 그 밖의 모든 것은 네트워크, 파일 시스템, 인쇄, 사용자의 문서에 접근할 수 없는 샌드박스 인터프리터에서 실행됩니다. 문제 없이 실행된 스크립트는 표시하지 않습니다.",
   "panel.forms.scriptsRunningTitle": "이 문서가 실행하는 스크립트",
   "panel.forms.scriptsTitle": "이 앱이 실행하지 않는 스크립트",

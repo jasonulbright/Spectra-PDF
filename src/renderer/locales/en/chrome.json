@@ -4464,7 +4464,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} fields carry scripts this app does not run. Their own values are left alone; every other field still calculates.",
   "panel.forms.scriptsPolicyHint": "Field scripting is turned off for this machine by policy, so the preference cannot enable it.",
   "panel.forms.scriptsPosition": "This app runs no form script it cannot verify. It runs the standard formatting, validation and calculation calls, which are declarative and carry no code; anything else is left in the document exactly as it was, and reported here.",
-  "panel.forms.scriptsPreferenceHint": "Turn on “Run unrecognized field scripts” in Preferences ▸ General to run these in the sandboxed interpreter.",
+  "panel.forms.scriptsPreferenceHint": "Turn on “Run unrecognized field scripts” in Preferences ▸ Updates & Licenses to run these in the sandboxed interpreter.",
   "panel.forms.scriptsRunningPosition": "Standard formatting, validation and calculation calls are evaluated directly and carry no code. Everything else runs in a sandboxed interpreter with no access to the network, the file system, printing or your documents. Scripts that ran without incident are not listed.",
   "panel.forms.scriptsRunningTitle": "Scripts this document runs",
   "panel.forms.scriptsTitle": "Scripts this app does not run",

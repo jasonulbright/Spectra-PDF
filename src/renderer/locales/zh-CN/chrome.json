@@ -4317,7 +4317,7 @@
   "panel.forms.scriptsNotRun_other": "有 {{count}} 个字段带有本应用不运行的脚本。它们自身的值保持不变，其他字段照常计算。",
   "panel.forms.scriptsPolicyHint": "本机的字段脚本已被策略关闭，此首选项无法启用它们。",
   "panel.forms.scriptsPosition": "本应用不运行任何无法验证的表单脚本。标准的格式、校验和计算调用是声明式的、不含代码，会被执行；其余一律原样保留在文档中，并在此报告。",
-  "panel.forms.scriptsPreferenceHint": "在“首选项 ▸ 常规”中打开“运行无法验证的字段脚本”，即可在沙箱解释器中运行这些脚本。",
+  "panel.forms.scriptsPreferenceHint": "在“首选项 ▸ 更新与许可”中打开“运行无法验证的字段脚本”，即可在沙箱解释器中运行这些脚本。",
   "panel.forms.scriptsRunningPosition": "标准的格式、校验和计算调用直接求值，不含代码。其余一律在沙箱解释器中运行，无法访问网络、文件系统、打印或你的文档。运行无异常的脚本不会列出。",
   "panel.forms.scriptsRunningTitle": "本文档运行的脚本",
   "panel.forms.scriptsTitle": "本应用不运行的脚本",

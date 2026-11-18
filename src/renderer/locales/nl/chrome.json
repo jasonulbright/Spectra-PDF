@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} velden bevatten scripts die deze app niet uitvoert. Hun eigen waarden blijven ongemoeid; alle andere velden worden gewoon berekend.",
   "panel.forms.scriptsPolicyHint": "Veldscripts zijn op deze machine door beleid uitgeschakeld, dus de voorkeur kan ze niet inschakelen.",
   "panel.forms.scriptsPosition": "Deze app voert geen formulierscript uit dat zij niet kan verifiëren. Zij voert de standaardaanroepen voor opmaak, controle en berekening uit, die declaratief zijn en geen code bevatten; al het overige blijft ongewijzigd in het document staan en wordt hier gemeld.",
-  "panel.forms.scriptsPreferenceHint": "Schakel ‘Niet-verifieerbare veldscripts uitvoeren’ in bij Voorkeuren ▸ Algemeen om deze in de afgeschermde interpreter uit te voeren.",
+  "panel.forms.scriptsPreferenceHint": "Schakel ‘Niet-verifieerbare veldscripts uitvoeren’ in bij Voorkeuren ▸ Updates en licenties om deze in de afgeschermde interpreter uit te voeren.",
   "panel.forms.scriptsRunningPosition": "De standaardaanroepen voor opmaak, controle en berekening worden rechtstreeks geëvalueerd en bevatten geen code. Al het overige draait in een afgeschermde interpreter, zonder toegang tot het netwerk, het bestandssysteem, afdrukken of uw documenten. Scripts die zonder incident zijn uitgevoerd, worden niet vermeld.",
   "panel.forms.scriptsRunningTitle": "Scripts die dit document uitvoert",
   "panel.forms.scriptsTitle": "Scripts die deze app niet uitvoert",

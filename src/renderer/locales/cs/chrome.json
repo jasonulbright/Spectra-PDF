@@ -4584,7 +4584,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} polí obsahuje skripty, které tato aplikace nespouští. Jejich vlastní hodnoty zůstávají beze změny a všechna ostatní pole se přesto počítají.",
   "panel.forms.scriptsPolicyHint": "Skriptování polí je na tomto počítači vypnuto zásadou, takže předvolba je nemůže povolit.",
   "panel.forms.scriptsPosition": "Tato aplikace nespouští žádný skript formuláře, který nedokáže ověřit. Spouští standardní volání formátování, kontroly a výpočtu, která jsou deklarativní a neobsahují kód; vše ostatní zůstává v dokumentu beze změny a hlásí se zde.",
-  "panel.forms.scriptsPreferenceHint": "Zapněte „Spouštět neověřitelné skripty polí“ v Předvolbách ▸ Obecné, aby se spouštěly v izolovaném interpretu.",
+  "panel.forms.scriptsPreferenceHint": "Zapněte „Spouštět neověřitelné skripty polí“ v Předvolbách ▸ Aktualizace a licence, aby se spouštěly v izolovaném interpretu.",
   "panel.forms.scriptsRunningPosition": "Standardní volání formátování, kontroly a výpočtu se vyhodnocují přímo a neobsahují kód. Vše ostatní běží v izolovaném interpretu bez přístupu k síti, souborovému systému, tisku či vašim dokumentům. Skripty, které proběhly bez potíží, se zde neuvádějí.",
   "panel.forms.scriptsRunningTitle": "Skripty, které tento dokument spouští",
   "panel.forms.scriptsTitle": "Skripty, které tato aplikace nespouští",

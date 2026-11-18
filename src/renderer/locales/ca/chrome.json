@@ -4495,7 +4495,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} camps porten scripts que aquesta aplicació no executa. Els seus valors es deixen tal com són; la resta de camps es calculen igualment.",
   "panel.forms.scriptsPolicyHint": "Els scripts de camp estan desactivats en aquest equip per directiva, de manera que la preferència no els pot habilitar.",
   "panel.forms.scriptsPosition": "Aquesta aplicació no executa cap script de formulari que no pugui verificar. Executa les crides estàndard de format, verificació i càlcul, que són declaratives i no porten codi; tota la resta queda al document tal com era, i s'informa aquí.",
-  "panel.forms.scriptsPreferenceHint": "Activeu «Executa els scripts de camp no verificables» a Preferències ▸ General per executar-los a l’intèrpret aïllat.",
+  "panel.forms.scriptsPreferenceHint": "Activeu «Executa els scripts de camp no verificables» a Preferències ▸ Actualitzacions i llicències per executar-los a l’intèrpret aïllat.",
   "panel.forms.scriptsRunningPosition": "Les crides estàndard de format, verificació i càlcul s’avaluen directament i no porten codi. Tota la resta s’executa en un intèrpret aïllat, sense accés a la xarxa, al sistema de fitxers, a la impressió ni als vostres documents. Els scripts que s’han executat sense incidències no es llisten.",
   "panel.forms.scriptsRunningTitle": "Scripts que executa aquest document",
   "panel.forms.scriptsTitle": "Scripts que aquesta aplicació no executa",

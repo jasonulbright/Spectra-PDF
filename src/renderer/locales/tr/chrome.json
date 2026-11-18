@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "Bu uygulamanın çalıştırmadığı betikler taşıyan {{count}} alan var. Kendi değerleri olduğu gibi bırakıldı; diğer bütün alanlar yine de hesaplanıyor.",
   "panel.forms.scriptsPolicyHint": "Alan betikleri bu makinede ilkeyle kapatılmıştır, bu nedenle tercih onları etkinleştiremez.",
   "panel.forms.scriptsPosition": "Bu uygulama doğrulayamadığı hiçbir form betiğini çalıştırmaz. Bildirimsel olan ve kod taşımayan standart biçimlendirme, denetim ve hesaplama çağrılarını çalıştırır; geri kalan her şey belgede olduğu gibi kalır ve burada bildirilir.",
-  "panel.forms.scriptsPreferenceHint": "Bunları yalıtılmış yorumlayıcıda çalıştırmak için Tercihler ▸ Genel bölümünden “Doğrulanamayan alan betiklerini çalıştır” seçeneğini açın.",
+  "panel.forms.scriptsPreferenceHint": "Bunları yalıtılmış yorumlayıcıda çalıştırmak için Tercihler ▸ Güncellemeler ve Lisanslar bölümünden “Doğrulanamayan alan betiklerini çalıştır” seçeneğini açın.",
   "panel.forms.scriptsRunningPosition": "Standart biçimlendirme, denetim ve hesaplama çağrıları doğrudan değerlendirilir ve kod taşımaz. Geri kalan her şey; ağa, dosya sistemine, yazdırmaya veya belgelerinize erişimi olmayan yalıtılmış bir yorumlayıcıda çalışır. Sorunsuz çalışan betikler listelenmez.",
   "panel.forms.scriptsRunningTitle": "Bu belgenin çalıştırdığı betikler",
   "panel.forms.scriptsTitle": "Bu uygulamanın çalıştırmadığı betikler",
