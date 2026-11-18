@@ -14,6 +14,7 @@
 // DOM-free and pdf.js-free, so the rule tests in Node.
 import type { AppState, OpenDocument, OpenFile, PageRef, PdfBuffer } from '../state/types';
 import { tChrome } from '../i18n';
+import { pendingPageRotation } from './annotation-view';
 
 type WorkspaceState = Pick<AppState, 'files' | 'workspace'>;
 
@@ -32,20 +33,23 @@ export type ReadPublishedBytes = (file: OpenFile, buffer: PdfBuffer) => Promise<
  * The document and page a drawing lands on, or null.
  *
  * `seen` is the page as the gesture's render showed it: its document, the
- * bytes that document described, and the page's rotation. A drawing is
+ * bytes that document described, and the page's rotation as the cell showed
+ * it (`rotation`: the pending turn plus the view turn of Rotate View, which
+ * is render-only and never reaches the stored page, so `viewRotation` takes it
+ * off again before the comparison). A drawing is
  * display-normalized in that frame and bound to that page id, so it lands
  * only while the workspace holds the page in that document, over the same
  * bytes, which are still its file's bytes, turned the same way.
  */
 export function drawingTarget(
   state: WorkspaceState,
-  seen: { docId: string; pageId: string; buffer: PdfBuffer | null; rotation: number },
+  seen: { docId: string; pageId: string; buffer: PdfBuffer | null; rotation: number; viewRotation?: number },
 ): { doc: OpenDocument; page: PageRef } | null {
   const doc = state.workspace.documents.find((d) => d.id === seen.docId);
   const page = doc?.pages.find((p) => p.id === seen.pageId);
   if (!doc || !page) return null;
   if (doc.buffer !== seen.buffer || state.files.get(doc.path)?.buffer !== doc.buffer) return null;
-  return page.rotation === seen.rotation ? { doc, page } : null;
+  return page.rotation === pendingPageRotation(seen.rotation, seen.viewRotation ?? 0) ? { doc, page } : null;
 }
 
 /** Whether `doc` was read from the bytes its file holds now. */

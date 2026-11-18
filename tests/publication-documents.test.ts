@@ -309,6 +309,10 @@ describe('a drawing that ends on the page its render showed', () => {
     expect(drawingTarget(start.state, { ...seen, buffer: new Uint8Array([1]) })).toBeNull();
     // The page was turned while the gesture ran.
     expect(drawingTarget(start.state, { ...seen, rotation: 90 })).toBeNull();
+    // Rotate View turns the display only. A page turned 90 by the view, with no
+    // pending turn, still takes the drawing; a pending turn that changed does not.
+    expect(drawingTarget(start.state, { ...seen, rotation: 90, viewRotation: 90 })).toEqual({ doc, page });
+    expect(drawingTarget(start.state, { ...seen, rotation: 180, viewRotation: 90 })).toBeNull();
     // The document or the page is gone.
     expect(drawingTarget(start.state, { ...seen, docId: 'gone' })).toBeNull();
     expect(drawingTarget(start.state, { ...seen, pageId: 'gone' })).toBeNull();
