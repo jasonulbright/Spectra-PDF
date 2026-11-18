@@ -14,10 +14,11 @@ export type GuideInline =
   | { kind: 'code'; text: string }
   | { kind: 'jump'; target: string; children: GuideInline[] };
 
-/** One list item: its text, and the list nested under it (if any). */
+/** One list item: its text, and the lists nested under it, in order. A numbered
+ *  sub-list followed by a bullet sub-list are two lists. */
 export interface GuideListItem {
   inline: GuideInline[];
-  sub: GuideList | null;
+  subs: GuideList[];
 }
 
 export interface GuideList {
@@ -149,11 +150,20 @@ const indentOf = (s: string): number => s.length - s.trimStart().length;
 
 /**
  * A list that starts at `start`. An item holds the list indented under it, so
- * a numbered step keeps its own number and its sub-steps. A line indented deeper
- * than the item, with no marker, wraps the item's text.
+ * a numbered step keeps its own number and its sub-steps. A line with no marker
+ * that is indented deeper than the parent list wraps the text of this list's last
+ * item, so text after a sub-list stays after it. A list of the other kind under the same
+ * item starts a new sub-list.
  */
-function parseList(lines: string[], start: number): { block: GuideList; next: number } {
+function parseList(
+  lines: string[],
+  start: number,
+  outer?: number,
+): { block: GuideList; next: number } {
   const base = indentOf(lines[start]);
+  // A line wraps this list's last item when it is indented deeper than the list
+  // that holds this one (for a top-level list, deeper than the list itself).
+  const wrapsAbove = outer ?? base;
   const ordered = NUMBERED.test(lines[start]) && !BULLET.test(lines[start]);
   const items: GuideListItem[] = [];
   let i = start;
@@ -161,20 +171,20 @@ function parseList(lines: string[], start: number): { block: GuideList; next: nu
     const line = lines[i];
     const indent = indentOf(line);
     const own = (ordered ? NUMBERED : BULLET).exec(line);
+    const marked = BULLET.test(line) || NUMBERED.test(line);
     if (indent === base && own) {
-      items.push({ inline: parseInline(own[1]), sub: null });
+      items.push({ inline: parseInline(own[1]), subs: [] });
       i += 1;
-    } else if (indent > base && items.length > 0) {
+    } else if (indent > base && marked && items.length > 0) {
       const item = items[items.length - 1];
-      if (BULLET.test(line) || NUMBERED.test(line)) {
-        const nested = parseList(lines, i);
-        if (item.sub) item.sub.items.push(...nested.block.items);
-        else item.sub = nested.block;
-        i = nested.next;
-      } else {
-        item.inline.push(...parseInline(` ${line.trim()}`));
-        i += 1;
-      }
+      const nested = parseList(lines, i, base);
+      const last = item.subs[item.subs.length - 1];
+      if (last && last.ordered === nested.block.ordered) last.items.push(...nested.block.items);
+      else item.subs.push(nested.block);
+      i = nested.next;
+    } else if (!marked && indent > wrapsAbove && items.length > 0) {
+      items[items.length - 1].inline.push(...parseInline(` ${line.trim()}`));
+      i += 1;
     } else {
       break;
     }
