@@ -59,7 +59,7 @@ describe('Move to New Window asks before it saves', () => {
     });
 
     moveRun = invokeAppCommand('window.moveToNewWindow');
-    await waitForDisplayedSelector(CONFIRM_MESSAGE, 20_000);
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 20_000 });
     const text = await $(CONFIRM_MESSAGE).getText();
     expect(text).toContain('moveme.pdf');
     expect(text).toContain('unsaved changes');
@@ -93,7 +93,7 @@ describe('Move to New Window asks before it saves', () => {
   it('Save and Move writes the file and moves the document', async () => {
     const before = readFileSync(pdf);
     moveRun = invokeAppCommand('window.moveToNewWindow');
-    await waitForDisplayedSelector(CONFIRM_AFFIRM, 20_000);
+    await waitForDisplayedSelector(CONFIRM_AFFIRM, { timeout: 20_000 });
     expect(await $(CONFIRM_AFFIRM).getText()).toBe('Save and Move');
     await $(CONFIRM_AFFIRM).click();
     await moveRun?.catch(() => undefined);

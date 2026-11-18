@@ -527,6 +527,15 @@ describe('cross-window tab drag', () => {
       allowWrites(working);
     }
 
+    // Cancel at the prompt keeps the document here: nothing is reserved, nothing
+    // is written to the user's file, and the other window never held the path.
+    await browser.switchToWindow(mainHandle);
+    const untouched = readFileSync(dirtyPdf);
+    expect(await tabDragDrop(dirtyPdf, point, 'cancel')).toBe(false);
+    expect(await tabPaths()).toContain(dirtyPdf);
+    expect(readFileSync(dirtyPdf).equals(untouched)).toBe(true);
+    expect(await ownPages()).toHaveLength(4);
+
     // Unblock the staging and drop again: the commit runs, and what the other
     // window opens is the document as this one was showing it.
     await browser.switchToWindow(mainHandle);
