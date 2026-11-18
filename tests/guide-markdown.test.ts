@@ -85,6 +85,26 @@ describe('guide markdown reader', () => {
     expect(blocks[1].kind).toBe('paragraph');
   });
 
+  it('wraps the sub-list item for text indented between the two lists', () => {
+    const blocks = parseGuide(['1. a', '      - b', '   text', '2. c', ''].join('\n'));
+    const list = pick(blocks[0], 'list');
+    expect(text(list.items[0].inline)).toBe('a');
+    expect(text(list.items[0].subs[0].items[0].inline)).toBe('b text');
+  });
+
+  it('ends an indented top-level list at a paragraph at the same indent', () => {
+    const blocks = parseGuide(['  - a', '  Para line.', ''].join('\n'));
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].kind).toBe('list');
+    expect(blocks[1].kind).toBe('paragraph');
+  });
+
+  it('keeps two sub-lists of one item as two lists', () => {
+    const blocks = parseGuide(['1. a', '   1. b', '   - x', '2. c', ''].join('\n'));
+    const list = pick(blocks[0], 'list');
+    expect(list.items[0].subs).toHaveLength(2);
+  });
+
   it('reads tables with escaped bars', () => {
     const blocks = parseGuide('| Key | Action |\n| --- | --- |\n| Ctrl+O | Open \\| load |\n');
     const table = pick(blocks[0], 'table');
