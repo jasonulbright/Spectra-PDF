@@ -1466,6 +1466,8 @@ input:not([type]) {
   transform-origin: 0% 0%;
   user-select: text;
 }
+/* Redact tool: only the text takes the pointer (see PageTextLayer `spansOnly`). */
+.textLayer--spans :is(span, br) { pointer-events: auto; }
 .textLayer > :not(.markedContent),
 .textLayer .markedContent span:not(.markedContent) {
   z-index: 1;

@@ -10,6 +10,8 @@ import {
 } from '../../lib/annotation-view';
 import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
 import type { RedactionMark } from '../../lib/redaction';
+import { marksNotCovered, redactionRectsFromSelection } from '../../lib/redaction-selection';
+import { textLayerRects, type TextRect } from '../../lib/selection-rects';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
@@ -1291,6 +1293,10 @@ function VectorRestyleToolbar({
   );
 }
 
+// Redact by text selection: a press on text raises it, the pointer release of that
+// same gesture reads and clears it. Shared, because every page cell listens.
+let redactTextGesture = false;
+
 function PageCellImpl({
   docId,
   page,
@@ -1727,6 +1733,76 @@ function PageCellImpl({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [snapArmed]);
+  // Redact by text selection (issue 110). While the Redact tool is armed, a press
+  // on text starts a text selection (see handlePointerDown) and raises
+  // `redactTextGesture`. When the pointer is released the selection becomes one
+  // mark per line on this page, then the selection is cleared. Only a gesture
+  // that began on text marks anything: an older selection, a keyboard
+  // selection, or a click on a button must never turn into marks. Every page
+  // listens, and each takes only the text that lies on its own element, so a
+  // drag across a page break marks both pages, and a document shown in two
+  // panes is marked once. The latest props ride a ref because the window
+  // listener closes over the render it was added in.
+  const pageRootRef = useRef<HTMLDivElement>(null);
+  const toolWasRef = useRef(tool);
+  const redactSelectionRef = useRef({
+    docId,
+    pageId: page.id,
+    rotation: page.rotation,
+    add: onAddRedactionMark,
+    existing: redactionMarks,
+  });
+  redactSelectionRef.current = {
+    docId,
+    pageId: page.id,
+    rotation: page.rotation,
+    add: onAddRedactionMark,
+    existing: redactionMarks,
+  };
+  useEffect(() => {
+    const was = toolWasRef.current;
+    toolWasRef.current = tool;
+    if (tool !== 'redact') return;
+    // A selection left from another tool is not a redaction gesture. Clear it
+    // when the tool CHANGES to Redact, not when a page mounts while it is armed
+    // (scrolling mounts pages, and a drag in progress must survive that).
+    if (was !== 'redact') window.getSelection()?.removeAllRanges();
+    const onUp = (): void => {
+      if (!redactTextGesture) return;
+      // After every page's listener has read the selection.
+      window.setTimeout(() => {
+        redactTextGesture = false;
+        window.getSelection()?.removeAllRanges();
+      }, 0);
+      const sel = window.getSelection();
+      const pageEl = pageRootRef.current;
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !pageEl) return;
+      const { docId: d, pageId, rotation, add, existing } = redactSelectionRef.current;
+      const rects: TextRect[] = [];
+      for (let i = 0; i < sel.rangeCount; i++) rects.push(...textLayerRects(sel.getRangeAt(i), pageEl));
+      const b = pageEl.getBoundingClientRect();
+      const found = redactionRectsFromSelection(rects, {
+        left: b.left,
+        top: b.top,
+        right: b.right,
+        bottom: b.bottom,
+      });
+      const marks = marksNotCovered(
+        found,
+        (existing ?? []).map((m) => projectMarkRect(m, rotation)),
+      );
+      for (const m of marks) add(d, pageId, m, rotation);
+    };
+    const onCancel = (): void => {
+      redactTextGesture = false;
+    };
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [tool]);
   const publishSnap = (hit: SnapHit | null): void => {
     setSnapMarker((prev) =>
       prev && hit && prev.type === hit.type && prev.x === hit.x && prev.y === hit.y ? prev : hit,
@@ -3020,6 +3096,18 @@ function PageCellImpl({
     // band and silently created a HIGHLIGHT annotation (regression, the
     // same class as the 'hand' fix above).
     if (tool === 'forms' || tool === 'edit') return;
+    // Redact: a press on text starts a text selection (the mark is made when the
+    // pointer is released, see the effect below). A press anywhere else draws.
+    // Hold Shift to draw a box over text instead, for a picture that text covers.
+    if (
+      tool === 'redact' &&
+      !e.shiftKey &&
+      e.target instanceof Element &&
+      e.target.closest('.textLayer :is(span, br)')
+    ) {
+      redactTextGesture = true;
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     if (tool === 'ink' || tool === 'inkhighlight') {
@@ -3482,6 +3570,7 @@ function PageCellImpl({
 
   return (
     <div
+      ref={pageRootRef}
       data-page-id={page.id}
       // The page's natural DISPLAYED extents in PDF points (rotation-
       // swapped) — the board camera's Actual Size / Fit Width solve their
@@ -3614,7 +3703,8 @@ function PageCellImpl({
           rotation={page.rotation}
           displayWidth={displayWidth}
           displayHeight={pageHeight}
-          active={tool === 'select'}
+          active={tool === 'select' || tool === 'redact'}
+          spansOnly={tool === 'redact'}
           ocrSelection={ocrSelection}
         />
       )}
