@@ -4495,7 +4495,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} de câmpuri au scripturi pe care această aplicație nu le rulează. Valorile lor rămân neatinse, iar toate celelalte câmpuri se calculează în continuare.",
   "panel.forms.scriptsPolicyHint": "Scripturile de câmp sunt dezactivate pe acest calculator prin politică, așa că preferința nu le poate activa.",
   "panel.forms.scriptsPosition": "Această aplicație nu rulează niciun script de formular pe care nu îl poate verifica. Rulează apelurile standard de formatare, verificare și calcul, care sunt declarative și nu poartă cod; tot restul rămâne în document așa cum era și este raportat aici.",
-  "panel.forms.scriptsPreferenceHint": "Activați „Rulează scripturile de câmp neverificabile” în Preferințe ▸ General pentru a le rula în interpretorul izolat.",
+  "panel.forms.scriptsPreferenceHint": "Activați „Rulează scripturile de câmp neverificabile” în Preferințe ▸ Actualizări și licențe pentru a le rula în interpretorul izolat.",
   "panel.forms.scriptsRunningPosition": "Apelurile standard de formatare, verificare și calcul sunt evaluate direct și nu poartă cod. Tot restul rulează într-un interpretor izolat, fără acces la rețea, la sistemul de fișiere, la tipărire sau la documentele dumneavoastră. Scripturile care au rulat fără incidente nu sunt listate.",
   "panel.forms.scriptsRunningTitle": "Scripturi pe care le rulează acest document",
   "panel.forms.scriptsTitle": "Scripturi pe care această aplicație nu le rulează",

@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} kentässä on komentosarjoja, joita tämä sovellus ei suorita. Niiden omat arvot jätetään ennalleen, ja kaikki muut kentät lasketaan silti.",
   "panel.forms.scriptsPolicyHint": "Kenttäkomentosarjat on poistettu käytöstä tässä koneessa käytännöllä, joten asetus ei voi ottaa niitä käyttöön.",
   "panel.forms.scriptsPosition": "Tämä sovellus ei suorita lomakkeen komentosarjaa, jota se ei voi varmistaa. Se suorittaa muotoilun, tarkistuksen ja laskennan vakiokutsut, jotka ovat deklaratiivisia eivätkä sisällä koodia; kaikki muu jää asiakirjaan sellaisenaan ja raportoidaan tässä.",
-  "panel.forms.scriptsPreferenceHint": "Ota käyttöön ”Suorita vahvistamattomat kenttäkomentosarjat” kohdassa Asetukset ▸ Yleiset, jotta nämä suoritetaan eristetyssä tulkissa.",
+  "panel.forms.scriptsPreferenceHint": "Ota käyttöön ”Suorita vahvistamattomat kenttäkomentosarjat” kohdassa Asetukset ▸ Päivitykset ja lisenssit, jotta nämä suoritetaan eristetyssä tulkissa.",
   "panel.forms.scriptsRunningPosition": "Muotoilun, tarkistuksen ja laskennan vakiokutsut arvioidaan suoraan eivätkä ne sisällä koodia. Kaikki muu suoritetaan eristetyssä tulkissa, jolla ei ole pääsyä verkkoon, tiedostojärjestelmään, tulostukseen eikä asiakirjoihisi. Ilman häiriöitä suoritettuja komentosarjoja ei luetella.",
   "panel.forms.scriptsRunningTitle": "Komentosarjat, jotka tämä asiakirja suorittaa",
   "panel.forms.scriptsTitle": "Komentosarjat, joita tämä sovellus ei suorita",

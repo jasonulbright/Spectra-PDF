@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} fält innehåller skript som den här appen inte kör. Deras egna värden lämnas orörda, och alla andra fält beräknas ändå.",
   "panel.forms.scriptsPolicyHint": "Fältskript är avstängda på den här datorn av en policy, så inställningen kan inte aktivera dem.",
   "panel.forms.scriptsPosition": "Den här appen kör inget formulärskript som den inte kan verifiera. Den kör standardanropen för format, kontroll och beräkning, som är deklarativa och inte bär kod; allt annat lämnas orört i dokumentet och rapporteras här.",
-  "panel.forms.scriptsPreferenceHint": "Slå på ”Kör ej verifierbara fältskript” under Inställningar ▸ Allmänt för att köra dem i den avskärmade tolken.",
+  "panel.forms.scriptsPreferenceHint": "Slå på ”Kör ej verifierbara fältskript” under Inställningar ▸ Uppdateringar och licenser för att köra dem i den avskärmade tolken.",
   "panel.forms.scriptsRunningPosition": "Standardanropen för format, kontroll och beräkning utvärderas direkt och bär ingen kod. Allt annat körs i en avskärmad tolk utan åtkomst till nätverket, filsystemet, utskrift eller dina dokument. Skript som kördes utan händelser listas inte.",
   "panel.forms.scriptsRunningTitle": "Skript som det här dokumentet kör",
   "panel.forms.scriptsTitle": "Skript som appen inte kör",

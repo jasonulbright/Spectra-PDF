@@ -717,7 +717,7 @@ export const PANEL_STRINGS = {
   // needs to act: which switch decides it, and what happened to each script
   // that did run.
   'panel.forms.scriptsPreferenceHint':
-    'Turn on “Run unrecognized field scripts” in Preferences ▸ General to run these in the sandboxed interpreter.',
+    'Turn on “Run unrecognized field scripts” in Preferences ▸ Updates & Licenses to run these in the sandboxed interpreter.',
   'panel.forms.scriptsPolicyHint':
     'Field scripting is turned off for this machine by policy, so the preference cannot enable it.',
   'panel.forms.scriptsRunningTitle': 'Scripts this document runs',

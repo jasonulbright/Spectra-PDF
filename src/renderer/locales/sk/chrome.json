@@ -4584,7 +4584,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} polí obsahuje skripty, ktoré táto aplikácia nespúšťa. Ich vlastné hodnoty zostávajú bez zmeny a všetky ostatné polia sa aj tak počítajú.",
   "panel.forms.scriptsPolicyHint": "Skriptovanie polí je na tomto počítači vypnuté pravidlom, takže predvoľba ho nemôže povoliť.",
   "panel.forms.scriptsPosition": "Táto aplikácia nespúšťa žiadny skript formulára, ktorý nedokáže overiť. Spúšťa štandardné volania formátovania, kontroly a výpočtu, ktoré sú deklaratívne a neobsahujú kód; všetko ostatné zostáva v dokumente bez zmeny a hlási sa tu.",
-  "panel.forms.scriptsPreferenceHint": "Zapnite „Spúšťať neoveriteľné skripty polí“ v Predvoľbách ▸ Všeobecné, aby sa spúšťali v izolovanom interprete.",
+  "panel.forms.scriptsPreferenceHint": "Zapnite „Spúšťať neoveriteľné skripty polí“ v Predvoľbách ▸ Aktualizácie a licencie, aby sa spúšťali v izolovanom interprete.",
   "panel.forms.scriptsRunningPosition": "Štandardné volania formátovania, kontroly a výpočtu sa vyhodnocujú priamo a neobsahujú kód. Všetko ostatné beží v izolovanom interprete bez prístupu k sieti, súborovému systému, tlači či vašim dokumentom. Skripty, ktoré prebehli bez problémov, sa neuvádzajú.",
   "panel.forms.scriptsRunningTitle": "Skripty, ktoré tento dokument spúšťa",
   "panel.forms.scriptsTitle": "Skripty, ktoré táto aplikácia nespúšťa",

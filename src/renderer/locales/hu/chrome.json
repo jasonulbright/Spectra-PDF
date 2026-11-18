@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} mező olyan parancsfájlt tartalmaz, amelyet ez az alkalmazás nem futtat. A saját értékük változatlan marad, a többi mező viszont továbbra is kiszámolódik.",
   "panel.forms.scriptsPolicyHint": "A mezőparancsfájlok ezen a gépen házirenddel ki vannak kapcsolva, így a beállítás nem engedélyezheti őket.",
   "panel.forms.scriptsPosition": "Ez az alkalmazás nem futtat olyan űrlap-parancsfájlt, amelyet nem tud ellenőrizni. A szabványos formázási, ellenőrzési és számítási hívásokat futtatja, amelyek kijelentő jellegűek és nem hordoznak kódot; minden más érintetlenül marad a dokumentumban, és itt jelenik meg.",
-  "panel.forms.scriptsPreferenceHint": "Kapcsolja be a „Nem ellenőrizhető mezőparancsfájlok futtatása” beállítást a Beállítások ▸ Általános lapon, hogy ezek az elszigetelt értelmezőben fussanak.",
+  "panel.forms.scriptsPreferenceHint": "Kapcsolja be a „Nem ellenőrizhető mezőparancsfájlok futtatása” beállítást a Beállítások ▸ Frissítések és licencek lapon, hogy ezek az elszigetelt értelmezőben fussanak.",
   "panel.forms.scriptsRunningPosition": "A szabványos formázási, ellenőrzési és számítási hívások közvetlenül értékelődnek ki, és nem hordoznak kódot. Minden más elszigetelt értelmezőben fut, hálózati, fájlrendszeri, nyomtatási és dokumentum-hozzáférés nélkül. A gond nélkül lefutott parancsfájlok nem szerepelnek a listán.",
   "panel.forms.scriptsRunningTitle": "A dokumentum által futtatott parancsfájlok",
   "panel.forms.scriptsTitle": "Parancsfájlok, amelyeket ez az alkalmazás nem futtat",

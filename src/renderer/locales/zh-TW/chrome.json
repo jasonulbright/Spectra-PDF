@@ -4317,7 +4317,7 @@
   "panel.forms.scriptsNotRun_other": "有 {{count}} 個欄位帶有本應用程式不執行的指令碼。這些欄位自己的值維持不變，其他欄位照常計算。",
   "panel.forms.scriptsPolicyHint": "本機的欄位指令碼已由原則關閉，此偏好設定無法啟用它們。",
   "panel.forms.scriptsPosition": "本應用程式不執行任何無法驗證的表單指令碼。標準的格式、檢查與計算呼叫是宣告式的、不含程式碼，會被執行；其餘一律原樣保留在文件中，並在此回報。",
-  "panel.forms.scriptsPreferenceHint": "在「偏好設定 ▸ 一般」中開啟「執行無法驗證的欄位指令碼」，即可在沙箱直譯器中執行這些指令碼。",
+  "panel.forms.scriptsPreferenceHint": "在「偏好設定 ▸ 更新與授權」中開啟「執行無法驗證的欄位指令碼」，即可在沙箱直譯器中執行這些指令碼。",
   "panel.forms.scriptsRunningPosition": "標準的格式、檢查與計算呼叫直接求值，不含程式碼。其餘一律在沙箱直譯器中執行，無法存取網路、檔案系統、列印或您的文件。執行無異常的指令碼不會列出。",
   "panel.forms.scriptsRunningTitle": "本文件執行的指令碼",
   "panel.forms.scriptsTitle": "本應用程式不執行的指令碼",

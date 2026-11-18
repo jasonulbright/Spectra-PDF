@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} Felder tragen Skripte, die diese Anwendung nicht ausführt. Ihre Werte bleiben unverändert; alle anderen Felder werden weiterhin berechnet.",
   "panel.forms.scriptsPolicyHint": "Formularskripte sind für diesen Rechner per Richtlinie deaktiviert, daher kann die Einstellung sie nicht aktivieren.",
   "panel.forms.scriptsPosition": "Diese Anwendung führt kein Formularskript aus, das sie nicht überprüfen kann. Sie führt die standardmäßigen Formatierungs-, Prüf- und Berechnungsaufrufe aus, die deklarativ sind und keinen Code tragen; alles andere bleibt unverändert im Dokument und wird hier gemeldet.",
-  "panel.forms.scriptsPreferenceHint": "Aktivieren Sie „Nicht überprüfbare Feldskripte ausführen“ unter Einstellungen ▸ Allgemein, um diese im abgeschotteten Interpreter auszuführen.",
+  "panel.forms.scriptsPreferenceHint": "Aktivieren Sie „Nicht überprüfbare Feldskripte ausführen“ unter Einstellungen ▸ Updates und Lizenzen, um diese im abgeschotteten Interpreter auszuführen.",
   "panel.forms.scriptsRunningPosition": "Die standardmäßigen Formatierungs-, Prüf- und Berechnungsaufrufe werden direkt ausgewertet und tragen keinen Code. Alles Übrige läuft in einem abgeschotteten Interpreter ohne Zugriff auf das Netzwerk, das Dateisystem, den Druck oder Ihre Dokumente. Skripte, die ohne Zwischenfall liefen, werden nicht aufgeführt.",
   "panel.forms.scriptsRunningTitle": "Skripte, die dieses Dokument ausführt",
   "panel.forms.scriptsTitle": "Skripte, die diese Anwendung nicht ausführt",

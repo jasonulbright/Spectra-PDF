@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} felter indeholder scripts, som denne app ikke kører. Deres egne værdier røres ikke, og alle andre felter beregnes stadig.",
   "panel.forms.scriptsPolicyHint": "Feltscripts er slået fra på denne maskine af en politik, så indstillingen kan ikke aktivere dem.",
   "panel.forms.scriptsPosition": "Denne app kører intet formularscript, den ikke kan verificere. Den kører de standardkald til formatering, kontrol og beregning, som er deklarative og ikke bærer kode; alt andet bliver liggende uændret i dokumentet og rapporteres her.",
-  "panel.forms.scriptsPreferenceHint": "Slå “Kør ikke-verificerbare feltscripts” til under Indstillinger ▸ Generelt for at køre dem i den afskærmede fortolker.",
+  "panel.forms.scriptsPreferenceHint": "Slå “Kør ikke-verificerbare feltscripts” til under Indstillinger ▸ Opdateringer og licenser for at køre dem i den afskærmede fortolker.",
   "panel.forms.scriptsRunningPosition": "Standardkaldene til formatering, kontrol og beregning evalueres direkte og bærer ikke kode. Alt andet kører i en afskærmet fortolker uden adgang til netværket, filsystemet, udskrivning eller dine dokumenter. Scripts, der kørte uden hændelser, står ikke på listen.",
   "panel.forms.scriptsRunningTitle": "Scripts, som dette dokument kører",
   "panel.forms.scriptsTitle": "Scripts, denne app ikke kører",

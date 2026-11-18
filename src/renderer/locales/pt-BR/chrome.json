@@ -4495,7 +4495,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} campos têm scripts que este aplicativo não executa. Os valores deles ficam como estão; todos os outros campos continuam sendo calculados.",
   "panel.forms.scriptsPolicyHint": "Os scripts de campo estão desativados nesta máquina por política, então a preferência não pode habilitá-los.",
   "panel.forms.scriptsPosition": "Este aplicativo não executa nenhum script de formulário que não possa verificar. Ele executa as chamadas padrão de formato, verificação e cálculo, que são declarativas e não carregam código; todo o resto permanece no documento como estava, e é relatado aqui.",
-  "panel.forms.scriptsPreferenceHint": "Ative “Executar scripts de campo não verificáveis” em Preferências ▸ Geral para executá-los no interpretador isolado.",
+  "panel.forms.scriptsPreferenceHint": "Ative “Executar scripts de campo não verificáveis” em Preferências ▸ Atualizações e licenças para executá-los no interpretador isolado.",
   "panel.forms.scriptsRunningPosition": "As chamadas padrão de formato, verificação e cálculo são avaliadas diretamente e não carregam código. Todo o resto é executado em um interpretador isolado, sem acesso à rede, ao sistema de arquivos, à impressão ou aos seus documentos. Scripts que rodaram sem incidentes não são listados.",
   "panel.forms.scriptsRunningTitle": "Scripts que este documento executa",
   "panel.forms.scriptsTitle": "Scripts que este aplicativo não executa",

@@ -4495,7 +4495,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} campos llevan secuencias de comandos que esta aplicación no ejecuta. Sus valores se dejan como están; los demás campos se siguen calculando.",
   "panel.forms.scriptsPolicyHint": "Los scripts de campo están desactivados en este equipo por directiva, así que la preferencia no puede habilitarlos.",
   "panel.forms.scriptsPosition": "Esta aplicación no ejecuta ningún script de formulario que no pueda verificar. Ejecuta las llamadas estándar de formato, validación y cálculo, que son declarativas y no llevan código; todo lo demás queda en el documento tal cual estaba, y se informa aquí.",
-  "panel.forms.scriptsPreferenceHint": "Active «Ejecutar scripts de campo no verificables» en Preferencias ▸ General para ejecutarlos en el intérprete aislado.",
+  "panel.forms.scriptsPreferenceHint": "Active «Ejecutar scripts de campo no verificables» en Preferencias ▸ Actualizaciones y licencias para ejecutarlos en el intérprete aislado.",
   "panel.forms.scriptsRunningPosition": "Las llamadas estándar de formato, validación y cálculo se evalúan directamente y no llevan código. Todo lo demás se ejecuta en un intérprete aislado sin acceso a la red, al sistema de archivos, a la impresión ni a sus documentos. Los scripts que se ejecutaron sin incidencias no se enumeran.",
   "panel.forms.scriptsRunningTitle": "Scripts que ejecuta este documento",
   "panel.forms.scriptsTitle": "Scripts que esta aplicación no ejecuta",

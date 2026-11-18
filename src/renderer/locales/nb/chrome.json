@@ -4406,7 +4406,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} felter har skript som denne appen ikke kjører. Verdiene i feltene blir stående, og alle andre felter regnes ut som før.",
   "panel.forms.scriptsPolicyHint": "Feltskript er slått av på denne maskinen av en policy, så innstillingen kan ikke aktivere dem.",
   "panel.forms.scriptsPosition": "Denne appen kjører ingen skjemaskript den ikke kan verifisere. Den kjører standardkallene for format, kontroll og beregning, som er deklarative og ikke bærer kode; alt annet blir liggende uendret i dokumentet og rapporteres her.",
-  "panel.forms.scriptsPreferenceHint": "Slå på «Kjør skjemaskript som ikke kan verifiseres» under Innstillinger ▸ Generelt for å kjøre dem i den avskjermede tolkeren.",
+  "panel.forms.scriptsPreferenceHint": "Slå på «Kjør skjemaskript som ikke kan verifiseres» under Innstillinger ▸ Oppdateringer og lisenser for å kjøre dem i den avskjermede tolkeren.",
   "panel.forms.scriptsRunningPosition": "Standardkallene for format, kontroll og beregning evalueres direkte og bærer ingen kode. Alt annet kjører i en avskjermet tolker uten tilgang til nettverket, filsystemet, utskrift eller dokumentene dine. Skript som kjørte uten hendelser, er ikke listet opp.",
   "panel.forms.scriptsRunningTitle": "Skript som dette dokumentet kjører",
   "panel.forms.scriptsTitle": "Skript appen ikke kjører",

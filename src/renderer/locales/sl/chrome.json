@@ -4584,7 +4584,7 @@
   "panel.forms.scriptsPolicyHint": "Skripti polj so na tem računalniku izklopljeni s pravilnikom, zato jih nastavitev ne more omogočiti.",
   "panel.forms.scriptsNotRun_two": "{{count}} polji vsebujeta skripta, ki ju ta aplikacija ne zažene. Njuni lastni vrednosti ostaneta nespremenjeni, vsa druga polja pa se vseeno izračunajo.",
   "panel.forms.scriptsPosition": "Ta program ne zažene nobenega skripta obrazca, ki ga ne more preveriti. Zažene standardne klice za obliko, preverjanje in izračun, ki so izjavni in ne nosijo kode; vse drugo ostane v dokumentu nespremenjeno in je navedeno tukaj.",
-  "panel.forms.scriptsPreferenceHint": "Vklopite »Zaženi nepreverljive skripte polj« v Nastavitve ▸ Splošno, da se zaženejo v izoliranem tolmaču.",
+  "panel.forms.scriptsPreferenceHint": "Vklopite »Zaženi nepreverljive skripte polj« v Nastavitve ▸ Posodobitve in licence, da se zaženejo v izoliranem tolmaču.",
   "panel.forms.scriptsRunningPosition": "Standardni klici za obliko, preverjanje in izračun se ovrednotijo neposredno in ne nosijo kode. Vse drugo teče v izoliranem tolmaču brez dostopa do omrežja, datotečnega sistema, tiskanja ali vaših dokumentov. Skripti, ki so se izvedli brez zapletov, niso navedeni.",
   "panel.forms.scriptsRunningTitle": "Skripti, ki jih ta dokument zažene",
   "panel.forms.scriptsTitle": "Skripti, ki jih ta program ne zažene",

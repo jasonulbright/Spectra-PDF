@@ -4584,7 +4584,7 @@
   "panel.forms.scriptsNotRun_other": "{{count}} pola zawierają skrypty, których ta aplikacja nie uruchamia. Ich własne wartości pozostają bez zmian, a wszystkie pozostałe pola są nadal obliczane.",
   "panel.forms.scriptsPolicyHint": "Skrypty pól są wyłączone na tym komputerze przez zasady, więc preferencja nie może ich włączyć.",
   "panel.forms.scriptsPosition": "Ta aplikacja nie uruchamia żadnego skryptu formularza, którego nie potrafi zweryfikować. Uruchamia standardowe wywołania formatowania, sprawdzania i obliczeń, które są deklaratywne i nie zawierają kodu; wszystko inne pozostaje w dokumencie bez zmian i jest zgłaszane tutaj.",
-  "panel.forms.scriptsPreferenceHint": "Włącz „Uruchamiaj nieweryfikowalne skrypty pól” w Preferencjach ▸ Ogólne, aby wykonywać je w izolowanym interpreterze.",
+  "panel.forms.scriptsPreferenceHint": "Włącz „Uruchamiaj nieweryfikowalne skrypty pól” w Preferencjach ▸ Aktualizacje i licencje, aby wykonywać je w izolowanym interpreterze.",
   "panel.forms.scriptsRunningPosition": "Standardowe wywołania formatowania, sprawdzania i obliczeń są obliczane bezpośrednio i nie zawierają kodu. Wszystko inne działa w izolowanym interpreterze bez dostępu do sieci, systemu plików, drukowania ani Twoich dokumentów. Skrypty, które wykonały się bez incydentów, nie są wymieniane.",
   "panel.forms.scriptsRunningTitle": "Skrypty uruchamiane przez ten dokument",
   "panel.forms.scriptsTitle": "Skrypty, których ta aplikacja nie uruchamia",
