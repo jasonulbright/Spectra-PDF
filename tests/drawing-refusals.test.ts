@@ -303,12 +303,19 @@ describe('the canvas', () => {
 
   it('refuses, with the notice, a drawing that cannot land where it was drawn', () => {
     expect(view).toContain('rotation: rotationAtDraw,');
-    expect(view).toContain('viewRotation: viewTurned ? shownViewTurn(readState(), rendered.path) : 0,');
+    expect(view).toContain('viewRotation: shownViewTurn(readState(), rendered.path),');
     // The Organize view draws unturned cells, so it takes no view turn off.
     expect(view).toContain("s.ui.docViewMode === 'document' ? s.ui.viewRotationByPath[path] ?? 0 : 0");
-    // Only the redaction mark takes the view turn off.
-    expect(view.match(/acceptDrawing\(docId, pageId, rotationAtDraw, true\)/g)).toHaveLength(1);
+    // Every drawing takes the view turn off, not only the redaction mark (W-14).
+    expect(view).not.toContain('viewTurned');
+    expect(view).not.toMatch(/acceptDrawing\([^)]*, true\)/);
     expect(view).toContain("if (!target) dispatch({ type: 'NOTE_EDIT_REFUSED' });");
+  });
+
+  it('measures the crop, bead and link bands at the own /Rotate of the page plus the shown turn', () => {
+    // p.view is the unrotated box, so a band drawn on a page with /Rotate 90 is
+    // converted at the composed rotation, as a seeded link is drawn.
+    expect(view.match(/\(p\.rotate \?\? 0\) \+ rotationAtDraw/g)).toHaveLength(3);
   });
 
   it('resolves every mark, guide and band through that rule', () => {
