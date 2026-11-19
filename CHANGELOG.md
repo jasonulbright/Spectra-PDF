@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.1118.174
+
+**Move to New Window asks first, and drawing tools work in Rotate View**
+
+### Fixed
+- Ask before Move to New Window and tab drag-out save a document with unsaved changes over its original file. Cancel keeps the document where it is.
+- Name the right Preferences category in the Forms panel script hint.
+- Draw with every tool while Rotate View is on.
+- Place crop, link and bead bands correctly on pages with their own rotation.
+
 ## 2026.1118.173
 
 **A built-in user guide, and redaction by dragging over text**
