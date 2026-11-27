@@ -34,7 +34,7 @@ def rows():
 class TestManifest:
     def test_it_names_the_complete_copyleft_source_set(self):
         assert {row["component"] for row in rows()} == {
-            "libheif", "libde265", "pi_heif",
+            "libheif", "libde265", "pillow_heif",
             "libreoffice", "poppler", "poppler-data",
             "voikko-fi", "libvoikko", "libiconv", "dictionaries", "ghostscript",
             "ghostxps",
@@ -87,7 +87,7 @@ class TestManifest:
             )
 
     def test_the_committed_binding_source_matches_its_pin(self):
-        row = next(row for row in rows() if row["component"] == "pi_heif")
+        row = next(row for row in rows() if row["component"] == "pillow_heif")
         path = os.path.join(REPO, *row["source"].split("/"))
         with open(path, "rb") as fh:
             assert hashlib.sha256(fh.read()).hexdigest() == row["sha256"]
@@ -112,5 +112,5 @@ class TestReleaseContract:
         assert "preferred form for modifying these dictionaries" in text
         for row in rows():
             assert f"`{row['file']}`" in text or row["component"] in (
-                "libheif", "libde265", "pi_heif"
+                "libheif", "libde265", "pillow_heif"
             ), row["file"]

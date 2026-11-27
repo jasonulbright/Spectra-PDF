@@ -271,6 +271,22 @@ Function SpectraPdfGuiInit
   SetRegView lastused
 FunctionEnd
 
+; ── Embedded runtime ────────────────────────────────────────────────────
+; The template copies files over an existing install and removes none, so an
+; upgrade kept the previous interpreter, its replaced packages and their
+; libraries. The runtime is payload only, so it goes whole before the copy.
+; It is removed only from a folder that holds this application, its engine and
+; an embeddable runtime (a `._pth` file, which a Python installation does not
+; have): a /D= folder shared with other software keeps its own `python`.
+!macro SPECTRA_REMOVE_OLD_RUNTIME
+  ${If} ${FileExists} "$INSTDIR\spectrapdf.exe"
+  ${AndIf} ${FileExists} "$INSTDIR\engine\__startup__.py"
+  ${AndIf} ${FileExists} "$INSTDIR\python\python*._pth"
+    DetailPrint "Removing the previous embedded runtime."
+    RMDir /r "$INSTDIR\python"
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   ; /S shows no GUI, so the GUI-init adoption never ran.
   ${If} ${Silent}
@@ -301,6 +317,7 @@ FunctionEnd
   ${EndIf}
 
   !insertmacro SPECTRA_REQUIRE_APP_CLOSED "install" "spectrapdf.exe"
+  !insertmacro SPECTRA_REMOVE_OLD_RUNTIME
   !insertmacro SPECTRA_RETIRE_SHELL_DLL "x64"
   !insertmacro SPECTRA_RETIRE_SHELL_DLL "arm64"
 !macroend

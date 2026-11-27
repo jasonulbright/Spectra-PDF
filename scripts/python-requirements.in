@@ -14,7 +14,7 @@ pyHanko==0.36.2
 fonttools==4.63.0
 # PKCS#11 token signing: pyHanko's pkcs11 arm needs python-pkcs11
 # (MIT; import name `pkcs11`). Wheel available for the embedded CPython.
-python-pkcs11==0.9.5
+python-pkcs11==0.10.1
 # Right-to-left reflow: HarfBuzz (Apache-2.0) shapes cursively joining
 # scripts. A PDF viewer never shapes -- the content stream carries final
 # glyph choices -- so re-emitting Arabic per character draws every letter in
@@ -27,17 +27,17 @@ uharfbuzz==0.56.0
 # PAPER pixels only. The Pillow-only form measured in recon is an
 # APPROXIMATION of the sliding window with no correctness story, and the
 # ghosted background it produces collapses OCR on the very pages this feature
-# exists for. BSD-3-Clause; a cp314 win_amd64 wheel exists, so nothing
+# exists for. BSD-3-Clause; a cp315 win_amd64 wheel exists, so nothing
 # compiles at packaging time.
 numpy==2.5.2
 # Without this pin, lock generation can omit Pillow despite direct engine imports.
 pillow==13.0.0
-# HEIC/HEIF decoding is NOT resolved here. The decode-only distribution is
-# vendored into the repository instead — scripts/vendored-wheels.tsv and
-# vendor/wheels/ — because its upstream is discontinued and an index cannot be
-# relied on to keep serving it. The encoder-carrying distribution is
-# deliberately not used: it bundles an x265 build that maps into the engine
-# process on every HEIF import, and nothing in the product encodes HEIF.
+# HEIC/HEIF decoding is NOT resolved here. pillow_heif is vendored into the
+# repository instead — scripts/vendored-wheels.tsv and vendor/wheels/ — from
+# the release of https://github.com/jasonulbright/pillow_heif, which builds it
+# with no encoder. The index wheel is deliberately not used: it bundles an x265
+# build that maps into the engine process on every HEIF import, and nothing in
+# the product encodes HEIF.
 # Spreadsheet export: the workbook writer for the xlsx target. A spreadsheet
 # filter cannot write a page-description document, so the cells come from this
 # engine's own table detection and this package writes them. MIT; a

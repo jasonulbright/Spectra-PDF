@@ -1976,6 +1976,12 @@ LINEAR_MASK = {
 }
 
 
+def _approx_mask(mask: dict) -> dict:
+    """The mask with each number compared approximately. pytest.approx refuses a
+    mapping that holds lists."""
+    return {k: v if isinstance(v, str) else pytest.approx(v) for k, v in mask.items()}
+
+
 class TestGradientMask:
     """Gradient soft masks on a placement — luminosity /SMask
     over the image's unit square, marker-carried params, merge-preserved."""
@@ -1989,7 +1995,7 @@ class TestGradientMask:
         r = set_image_opacity(src, out, 1, 0, mask=LINEAR_MASK)
         assert r["mask"]["kind"] == "linear"
         imgs = list_page_images(out, 1)["images"]
-        assert imgs[0]["mask"] == pytest.approx(LINEAR_MASK)
+        assert imgs[0]["mask"] == _approx_mask(LINEAR_MASK)
         assert imgs[1]["mask"] is None  # untargeted placements unmoved
         # The bytes carry the real structure: gs → /SMask /Luminosity whose
         # /G paints a ShadingType-2 gradient over BBox [0,0,1,1].
@@ -2018,7 +2024,7 @@ class TestGradientMask:
             "end_alpha": 0.2,
         }
         set_image_opacity(src, out, 1, 0, mask=radial)
-        assert list_page_images(out, 1)["images"][0]["mask"] == pytest.approx(radial)
+        assert list_page_images(out, 1)["images"][0]["mask"] == _approx_mask(radial)
         with pikepdf.open(out) as pdf:
             egs = pdf.pages[0].obj["/Resources"]["/ExtGState"]
             g = next(egs[k]["/SMask"]["/G"] for k in egs.keys() if egs[k].get("/SMask"))
@@ -2040,7 +2046,7 @@ class TestGradientMask:
         assert sum(1 for op, _ in ops if op == "gs") == 1  # ONE merged frame
         img = list_page_images(out, 1)["images"][0]
         assert img["opacity"] == pytest.approx(0.6)
-        assert img["mask"] == pytest.approx(LINEAR_MASK)
+        assert img["mask"] == _approx_mask(LINEAR_MASK)
 
     def test_mask_none_clears(self, tmp_dir):
         from engine.page_images import set_image_opacity
@@ -2067,7 +2073,7 @@ class TestGradientMask:
         out = os.path.join(tmp_dir, "o.pdf")
         set_image_opacity(src, out, 1, 0, mask=LINEAR_MASK)
         imgs = list_page_images(out, 1)["images"]
-        assert imgs[0]["mask"] == pytest.approx(LINEAR_MASK)
+        assert imgs[0]["mask"] == _approx_mask(LINEAR_MASK)
         assert imgs[1]["mask"] is None  # the sibling form draw untouched
 
     def test_author_softmask_frame_is_never_collapsed(self, tmp_dir):

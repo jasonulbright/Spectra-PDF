@@ -32,7 +32,7 @@ header = (
     "# after changing scripts/python-requirements.in. Installed by\n"
     f"# {installer} via `pip install --require-hashes -r`, so every\n"
     "# transitive dependency (cryptography, lxml, …) is version- and hash-locked,\n"
-    f"# not floated at build time. Resolved for CPython 3.14 / {platform}.\n"
+    f"# not floated at build time. Resolved for CPython 3.15 / {platform}.\n"
     "#\n"
 )
 lines = [f"{n}=={v} --hash=sha256:{s}" for n, v, s in entries]

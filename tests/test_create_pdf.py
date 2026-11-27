@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pikepdf
@@ -357,14 +359,37 @@ class TestHeif:
     def test_the_heif_suffixes_are_a_subset_of_the_accepted_set(self):
         assert set(HEIF_SUFFIXES) <= set(IMAGE_SUFFIXES)
 
+    def test_the_limit_switch_is_gone_before_the_library_loads(self):
+        # libheif drops its resource limits when LIBHEIF_SECURITY_LIMITS is
+        # `off`. A fresh interpreter, so the import is the first one: the hook
+        # records what the variable held when `pillow_heif` was asked for.
+        script = (
+            "import os, sys\n"
+            "seen = []\n"
+            "class Watch:\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'pillow_heif':\n"
+            "            seen.append(os.environ.get('LIBHEIF_SECURITY_LIMITS'))\n"
+            "sys.meta_path.insert(0, Watch())\n"
+            "from engine import create_pdf\n"
+            "assert create_pdf._register_heif()\n"
+            "print(seen)\n"
+        )
+        source = Path(create_pdf_mod.__file__).resolve().parent.parent
+        env = {**os.environ, "LIBHEIF_SECURITY_LIMITS": "off", "PYTHONPATH": str(source)}
+        done = subprocess.run(
+            [sys.executable, "-B", "-c", script], env=env, capture_output=True, text=True, timeout=120, check=True
+        )
+        assert done.stdout.strip() == "[None]"
+
     def test_the_decoder_carries_no_encoder(self):
         # The plugin ships decode-only ON PURPOSE: the encoder-carrying build
         # links a video encoder into the engine process on every HEIF import,
         # and nothing in the product writes HEIF. A build that regained one
         # would regain that, silently.
-        import pi_heif
+        import pillow_heif
 
-        info = pi_heif.libheif_info()
+        info = pillow_heif.libheif_info()
         assert info["decoders"], "no HEVC decoder is present"
         # `mask` is libheif's built-in stub, not a codec library.
         assert set(info["encoders"]) <= {"mask"}

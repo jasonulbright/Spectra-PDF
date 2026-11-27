@@ -2146,9 +2146,9 @@ pub fn get_soffice_path(app: &AppHandle) -> String {
 /// same interpreter, and a variable set on one spawn site and not the other
 /// is a divergence no test of either site sees.
 ///
-/// - `PYTHONUTF8`: the JSON-RPC channel is UTF-8 by contract; without it an
-///   embedded Python on Windows decodes stdin as cp1252 and mojibakes every
-///   non-ASCII value (the engine also reconfigures its own stdio).
+/// - `PYTHONUTF8`: the JSON-RPC channel is UTF-8 by contract. Python 3.15
+///   defaults to UTF-8 mode; the variable also cancels a `PYTHONUTF8=0` in the
+///   user's environment (the engine also reconfigures its own stdio).
 /// - `PYTHONPYCACHEPREFIX`: where the interpreter keeps the bytecode it
 ///   compiles ([`bytecode_cache_dir`]). The installed tree is a payload, not
 ///   a cache, and ships no bytecode; without a cache every engine process

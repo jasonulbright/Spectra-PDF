@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
+import sys
 
 import pytest
 
@@ -21,7 +22,7 @@ PROBE = (
 
 
 def _plant(appdata: pathlib.Path) -> pathlib.Path:
-    site = appdata / "Python" / "Python314" / "site-packages"
+    site = appdata / "Python" / "Python315" / "site-packages"
     site.mkdir(parents=True)
     (site / "spectra_user_site_probe.py").write_text("")
     marker = appdata / "usercustomize-ran"
@@ -29,11 +30,14 @@ def _plant(appdata: pathlib.Path) -> pathlib.Path:
     return marker
 
 
-def _run(args: list[str], appdata: pathlib.Path, script: pathlib.Path, extra: dict[str, str]) -> list[str]:
+def _run(
+    args: list[str], appdata: pathlib.Path, script: pathlib.Path, extra: dict[str, str],
+    interpreter: str = str(RUNTIME),
+) -> list[str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
     env.update(APPDATA=str(appdata), PYTHONUTF8="1", **extra)
     return subprocess.run(
-        [str(RUNTIME), *args, str(script)], env=env, capture_output=True, text=True, timeout=60, check=True
+        [interpreter, *args, str(script)], env=env, capture_output=True, text=True, timeout=60, check=True
     ).stdout.splitlines()
 
 
@@ -43,10 +47,17 @@ def test_the_engine_argv_ignores_a_planted_user_site(tmp_path: pathlib.Path) -> 
     script = tmp_path / "probe.py"
     script.write_text(PROBE)
 
-    # The plant is live without the flag, so the assertions below prove the flag.
-    found, _ = _run([], appdata, script, {})
-    assert found == "True" and marker.exists()
+    # The plant is live: a full interpreter of the same version loads it. The
+    # base interpreter, because a virtual environment has no user site either.
+    found, _ = _run([], appdata, script, {}, interpreter=sys._base_executable)
+    assert found == "True" and marker.exists(), "the plant is not where this Python version looks"
     marker.unlink()
+
+    # From 3.15 the embeddable runtime's ._pth file turns the user site off by
+    # itself, so the shipped runtime ignores the plant with no flag at all.
+    found, _ = _run([], appdata, script, {})
+    assert found == "False"
+    assert not marker.exists()
 
     found, utf8 = _run(["-s"], appdata, script, {"PYTHONNOUSERSITE": "1"})
     assert found == "False"

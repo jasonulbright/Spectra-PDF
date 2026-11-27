@@ -424,7 +424,7 @@ These features use Ghostscript **10.0 or newer**: scan cleanup and OCR rendering
 | Windows SDK | Packaging only: `makeappx.exe` packs the File Explorer command packages |
 | Ghostscript | 10.0+. On Windows, `npm run prepackage` vendors it. On Linux, install the distribution's `ghostscript` package. The capability-present half of the test suite uses it |
 
-Python 3.14 is embedded automatically — no system install needed.
+Python 3.15 is embedded automatically — no system install needed.
 
 ## Quick Start (Development)
 
@@ -467,7 +467,7 @@ a local installer use `package:unsigned`: the installer is identical, it just
 skips the updater artifacts, which only the publish workflow
 (`.github/workflows/release.yml`) has any use for.
 
-Either package script runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.14 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (the pinned, SHA-256-verified upstream Ghostscript, unpacked without running its installer — the build refuses if the tree carries an unlisted binary or the notice row is missing), `scripts/bundle-icc.ps1` (stages the 22 ICC color profiles committed under `vendor/icc`, each sha256-verified against `scripts/icc-profiles.tsv` on the way out and again on disk — no network, and the build refuses if a profile lacks its notice row), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL license texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic, Noto Sans Hebrew and Noto Sans Mongolian), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), `scripts/bundle-jbig2enc.ps1` (the pinned upstream JBIG2 encoder the MRC pass needs, under the same notice gate), `scripts/bundle-dictionaries.ps1` (the 35 hash-pinned Hunspell spelling dictionaries and their notices), `scripts/bundle-voikko.ps1` (the hash-pinned Finnish morphological analyzer and its notices — it writes into the same dictionaries tree, which `bundle-dictionaries.ps1` rebuilds wholesale, so it must run after it), `scripts/build-shell-menu.ps1 -Prepare` (creates the File Explorer command folder), `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) and `scripts/sync-pdfjs-assets.mjs` — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, runs `scripts/build-shell-menu.ps1` to build the x64 and ARM64 File Explorer command handlers and their packages, produces the NSIS installer). Nine of those produce a `tauri.conf.json` resource directory (`python`, `ghostscript`, `icc`, `fonts`, `libreoffice`, `tesseract`, `jbig2enc`, `dictionaries`, `shell`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
+Either package script runs, in order: `scripts/setup-python-embed.ps1` (downloads embedded Python 3.15 + pip-installs the hash-pinned engine deps), `scripts/bundle-ghostscript.ps1` (the pinned, SHA-256-verified upstream Ghostscript, unpacked without running its installer — the build refuses if the tree carries an unlisted binary or the notice row is missing), `scripts/bundle-icc.ps1` (stages the 22 ICC color profiles committed under `vendor/icc`, each sha256-verified against `scripts/icc-profiles.tsv` on the way out and again on disk — no network, and the build refuses if a profile lacks its notice row), `scripts/sync-edit-fonts.ps1` (the hash-pinned edit faces and their OFL license texts — Liberation, Libertinus, Noto Sans CJK SC, IBM Plex Sans Arabic, Noto Sans Hebrew and Noto Sans Mongolian), `scripts/bundle-libreoffice.ps1` (the pinned, checksum-verified export runtime — copies a local install if you have one, else downloads it), `scripts/bundle-tesseract.ps1` (the pinned, SHA-256-verified native OCR engine, plus every redistribution notice for the ~50 libraries it links — the build REFUSES if any shipped binary lacks one), `scripts/bundle-jbig2enc.ps1` (the pinned upstream JBIG2 encoder the MRC pass needs, under the same notice gate), `scripts/bundle-dictionaries.ps1` (the 35 hash-pinned Hunspell spelling dictionaries and their notices), `scripts/bundle-voikko.ps1` (the hash-pinned Finnish morphological analyzer and its notices — it writes into the same dictionaries tree, which `bundle-dictionaries.ps1` rebuilds wholesale, so it must run after it), `scripts/build-shell-menu.ps1 -Prepare` (creates the File Explorer command folder), `scripts/sync-ocr-assets.mjs` (the 47 pinned OCR language models) and `scripts/sync-pdfjs-assets.mjs` — all into `resources/` — then `cargo tauri build` (compiles Rust, bundles the WebView2 frontend, runs `scripts/build-shell-menu.ps1` to build the x64 and ARM64 File Explorer command handlers and their packages, produces the NSIS installer). Nine of those produce a `tauri.conf.json` resource directory (`python`, `ghostscript`, `icc`, `fonts`, `libreoffice`, `tesseract`, `jbig2enc`, `dictionaries`, `shell`), and **every one must exist before a build can succeed** — Tauri validates resource paths even with `--no-bundle`.
 
 Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 
@@ -490,7 +490,7 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 +-------------------+                    +------------------+                      +-------------------+
         |                                        |                                         |
         v                                        v                                         v
-  WebView2 (Edge)                          Tauri commands                           Embedded Python 3.14
+  WebView2 (Edge)                          Tauri commands                           Embedded Python 3.15
   - Menu bar / toolbar / tabs              - File dialogs + path canon              - 190+ operation handlers
   - Reading view (virtualized)             - Printer/scanner enumeration            - pikepdf (structural)
   - Organize board (page strips)           - Sidecar management                     - pdfminer.six (text)
@@ -505,7 +505,7 @@ Output: `src-tauri/target/release/bundle/nsis/Spectra PDF_X.Y.Z_x64-setup.exe`
 Documents are owned by one window at a time; a second window is a second workspace, and ownership is held in Rust so a renderer that goes away cannot leave a document claimed.
 
 **Frontend**: Tauri v2 (WebView2), React 19, TailwindCSS, pdf.js, pdf-lib
-**Backend**: Rust (Tauri commands) + Python 3.14 (embedded), pikepdf, pdfminer.six, pyHanko, Tesseract (upstream, Apache-2.0), and Ghostscript (upstream, separate process)
+**Backend**: Rust (Tauri commands) + Python 3.15 (embedded), pikepdf, pdfminer.six, pyHanko, Tesseract (upstream, Apache-2.0), and Ghostscript (upstream, separate process)
 **IPC**: Tauri `invoke()` (JS→Rust), JSON-RPC 2.0 over stdin/stdout (Rust→Python)
 
 ### What powers each feature

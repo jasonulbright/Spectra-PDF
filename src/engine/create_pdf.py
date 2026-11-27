@@ -87,9 +87,12 @@ def _register_heif() -> bool:
     global _heif_registered
     if _heif_registered is None:
         try:
-            import pi_heif  # noqa: PLC0415
+            # libheif drops its own resource limits when this is `off`, and the
+            # files it reads here are untrusted.
+            os.environ.pop("LIBHEIF_SECURITY_LIMITS", None)
+            import pillow_heif  # noqa: PLC0415
 
-            pi_heif.register_heif_opener()
+            pillow_heif.register_heif_opener()
             _heif_registered = True
         except Exception:  # noqa: BLE001 - any import/registration failure is "absent"
             _heif_registered = False
