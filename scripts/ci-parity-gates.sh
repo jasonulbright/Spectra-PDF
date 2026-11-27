@@ -158,7 +158,11 @@ for line in pathlib.Path("scripts/vendored-wheels.tsv").read_text(encoding="utf-
         continue
     c = line.split("\t")
     if c[2].strip() == "wheel":
-        req.append(f"{c[0].strip()}=={c[1].strip()}")
+        # A local version label (+...) marks a build of ours that no index has;
+        # advisories are filed against the upstream version it is built from.
+        pin = f"{c[0].strip()}=={c[1].strip().split('+')[0]}"
+        if pin not in req:
+            req.append(pin)
 if not seen:
     print("vendored-wheels.tsv has no header row"); sys.exit(1)
 out = pathlib.Path("vendored-audit-requirements.local.txt")
