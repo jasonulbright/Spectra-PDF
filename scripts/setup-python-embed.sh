@@ -22,9 +22,9 @@ esac
 # CPython patch after python.org does, so the Linux runtime may trail
 # .python-version by patch releases of the SAME minor. The `python-linux` arm
 # of scripts/check-toolchains.py fails once a newer build of that minor exists.
-PBS_RELEASE="20261026"
-PBS_PINNED_VERSION="3.14.10"
-PBS_SHA256="4d3c16c59ed0802a3d1d34d8bce504b15ceeaff39d62dadecc6a9fa803412aed"
+PBS_RELEASE="20261124"
+PBS_PINNED_VERSION="3.15.2"
+PBS_SHA256="d94bcba1ca1c63f591fa63109c3eeaacc76ee6796844ac7bdf2ae10715646f05"
 pin_minor="${PBS_PINNED_VERSION%.*}"
 pin_patch="${PBS_PINNED_VERSION##*.}"
 [ "${PYTHON_VERSION%.*}" = "$pin_minor" ] && [ "$pin_patch" -le "${PYTHON_VERSION##*.}" ] ||
@@ -59,14 +59,14 @@ else
   echo "Python already present at $DEST"
 fi
 
-"$PY" -c 'import sys; assert sys.version_info[:2] >= (3, 14)' || die "$PY does not run"
+"$PY" -c 'import sys; assert sys.version_info[:2] >= (3, 15)' || die "$PY does not run"
 
 # The install-only archive carries no notices for the libraries the build
 # links (OpenSSL, SQLite, libffi, Tcl/Tk, ...). The full archive of the same
 # build does: its licenses/ directory and PYTHON.json (which names each
 # linked library and its licence) ship in the runtime as licenses/.
 PBS_FULL_NAME="cpython-$PBS_PINNED_VERSION+$PBS_RELEASE-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst"
-PBS_FULL_SHA256="4a2823d5deacb631e21b3c8387a1ec9be57e1b0ed37b7770e2e71cfe7b94eb94"
+PBS_FULL_SHA256="7ede0d77fbbf8fcffa746dbb5fbdf4442f42bccb944473023a4fe2ba49763f3b"
 PBS_FULL_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_RELEASE/$(printf %s "$PBS_FULL_NAME" | sed 's/+/%2B/g')"
 notices_version() {
   "$PY" -B -S -c "import json, sys; print(json.load(open(sys.argv[1]))['python_version'])" "$DEST/licenses/PYTHON.json" 2>/dev/null || true

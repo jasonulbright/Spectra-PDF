@@ -13,7 +13,7 @@ if ($PythonVersion -notmatch '^\d+\.\d+\.\d+$') {
 }
 # The SHA-256 python.org publishes for the embeddable package of that pin. A
 # pin changed without this value refuses at the download, never ships.
-$ExpectedSha256 = "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159"
+$ExpectedSha256 = "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62"
 $Url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
 $ZipPath = "$env:TEMP\python-embed.zip"
 $DestDir = "$PSScriptRoot\..\resources\python"
@@ -100,8 +100,8 @@ if ($LASTEXITCODE -ne 0) { throw "Vendored wheel install failed" }
 # re-provision over an existing tree skips the download (the version marker is
 # present) and installs only what the manifests list -- so a package dropped
 # from them survives, and the runtime keeps shipping it. That is not
-# hypothetical: pillow_heif was replaced by pi_heif, and without this an
-# incremental dev tree still carried the GPL wheel it was replaced to remove.
+# hypothetical: one HEIF distribution replaced another, and without this
+# an incremental dev tree still carried the wheel it was replaced to remove.
 # The shipped set is exactly the two manifests, so this is derived from them
 # rather than from a hand-kept list that could go stale the same way.
 $Shipped = @{}

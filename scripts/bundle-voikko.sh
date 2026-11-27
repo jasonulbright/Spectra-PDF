@@ -17,7 +17,7 @@
 . "$(dirname "$0")/posix-common.sh"
 github_token_unexport
 require_tool curl sha256sum dpkg-deb tar awk
-# The MSYS2 package is zstd-compressed; the Linux runtime (Python 3.14,
+# The MSYS2 package is zstd-compressed; the Linux runtime (Python 3.15,
 # scripts/setup-python-embed.sh) reads it without a zstd tool.
 PY="$LINUX_RESOURCES/python/bin/python3"
 [ -x "$PY" ] || die "run scripts/setup-python-embed.sh first; its Python reads the zstd package"

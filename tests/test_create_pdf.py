@@ -362,9 +362,9 @@ class TestHeif:
         # links a video encoder into the engine process on every HEIF import,
         # and nothing in the product writes HEIF. A build that regained one
         # would regain that, silently.
-        import pi_heif
+        import pillow_heif
 
-        info = pi_heif.libheif_info()
+        info = pillow_heif.libheif_info()
         assert info["decoders"], "no HEVC decoder is present"
         # `mask` is libheif's built-in stub, not a codec library.
         assert set(info["encoders"]) <= {"mask"}

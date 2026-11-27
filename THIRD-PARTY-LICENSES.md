@@ -151,7 +151,7 @@ written source offer below.
 
 ## Embedded Python runtime
 
-- **CPython 3.14.10** — Python Software Foundation License (PSF) — <https://www.python.org/>
+- **CPython 3.15.2** — Python Software Foundation License (PSF) — <https://www.python.org/>
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
 hash-pinned in `scripts/python-requirements.txt`, or in
@@ -177,7 +177,7 @@ directory — license fields below were read from those wheels' METADATA):
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |
 | pikepdf | MPL-2.0 (source at the link) | <https://github.com/pikepdf/pikepdf> |
 | pillow | MIT-CMU | <https://github.com/python-pillow/Pillow> |
-| pi-heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
+| pillow_heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
@@ -198,52 +198,56 @@ pikepdf's binary wheel embeds the **qpdf** library (Apache-2.0,
 `licenses-for-wheels.txt` (shipped in pikepdf's dist-info) carries the
 corresponding notices.
 
-### HEIF decoding (pi-heif)
+### HEIF decoding (pillow_heif)
 
-HEIC/HEIF camera images are decoded by **pi-heif 1.4.0**, the decode-only
-distribution of the same upstream project. Its wheel and the matching source
-distribution are committed to this repository under `vendor/wheels/` and pinned
-by SHA-256 in `scripts/vendored-wheels.tsv`; nothing about it is fetched at
-build time. It is decode-only deliberately: the encoder-carrying distribution
-of the same project links a **GPL-2.0** video encoder that is mapped into the
-engine process on every HEIF import, and nothing in Spectra PDF encodes HEIF.
+HEIC/HEIF camera images are decoded by **pillow_heif 1.9.0**, as the wheel
+`pillow_heif 1.9.0+spectra.1`. That wheel is not the one the package index
+serves. <https://github.com/jasonulbright/pillow_heif> builds it in its own CI
+from the upstream source with no encoder, and publishes it as release
+`spectra-1.9.0-1`. The wheels and the matching source archive are committed to
+this repository under `vendor/wheels/` and pinned by SHA-256 in
+`scripts/vendored-wheels.tsv`; nothing about them is fetched at build time. It is
+decode-only deliberately: the encoder-carrying wheel links a **GPL-2.0** video
+encoder that is mapped into the engine process on every HEIF import, and nothing
+in Spectra PDF encodes HEIF.
 
-The wheel ships five prebuilt libraries. delvewheel installs `.data/platlib`
-content to the site-packages root, so they sit directly in
+The Windows wheel ships two libraries beside the extension. delvewheel installs
+`.data/platlib` content to the site-packages root, so they sit directly in
 `resources/python/Lib/site-packages/`, not in a `.data` subdirectory. The
-versions below are the ones the shipped libraries **report at run time**;
-upstream's own `LICENSES_bundled.txt` in the wheel's dist-info names older ones
-and is not the authority for this artifact:
+Linux wheel carries the same two libraries in `pillow_heif.libs/`.
 
 | Bundled library | Version | License | Corresponding source |
 |---|---|---|---|
-| libheif | 1.23.0 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.0/libheif-1.23.0.tar.gz> |
-| libde265 | 1.1.1 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.1/libde265-1.1.1.tar.gz> |
-| libgcc / libstdc++ (MinGW-w64 GCC runtime) | – | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://gcc.gnu.org/> |
-| libwinpthread (MinGW-w64) | – | MIT AND Zope-2.1 | <https://www.mingw-w64.org/> |
+| libheif | 1.23.7 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.7/libheif-1.23.7.tar.gz> |
+| libde265 | 1.1.3 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.3/libde265-1.1.3.tar.gz> |
 
-There is no x265 and no libaom in this wheel: the run-time inventory reports one
-decoder (libde265) and no encoder other than libheif's built-in `mask` stub.
+There is no x265 and no libaom in these wheels: the run-time inventory reports
+one decoder (libde265) and no encoder other than libheif's built-in `mask`
+stub. The Windows libraries link the C and C++ runtime statically, so no MinGW
+or Microsoft runtime library ships with them. The Linux libraries use the host's
+`libstdc++` and `libgcc`.
 
 libheif and libde265 are **LGPL-3.0** libraries combined with the application.
 The obligations that follow, and how each is met:
 
 - **Notice.** The LGPL-3.0 text and the GPL-3.0 text it incorporates ship in
-  the wheel's dist-info (`pi_heif-1.4.0.dist-info/licenses/`) inside the
-  installed runtime, alongside this file.
-- **Replacement.** Both libraries are ordinary DLLs loaded by the Windows
-  loader from the site-packages directory, so a recipient may replace either
-  with their own build. One practical condition: delvewheel renamed them with a
-  content hash — `libheif-75127e764628a95f6db9f5070bfc87cb.dll` and
-  `libde265-0-aa0625e0aec56a9d4310a2447674dd8a.dll` — and the importing modules
-  bind to those exact names, so a replacement must be installed under the same
-  filename. The wheel's `DELVEWHEEL` file records that the renaming happened
-  and ships in the dist-info for the same reason.
+  the wheel's dist-info (`pillow_heif-1.9.0+spectra.1.dist-info/licenses/`)
+  inside the installed runtime, alongside this file.
+- **Replacement.** Both libraries are ordinary shared libraries, so a recipient
+  may replace either with their own build. One practical condition: the wheel
+  repair renamed them with a content hash — on Windows
+  `heif-6c841df479b53b5145d146ce67c27763.dll` and
+  `libde265-4cee13fd463a904dfcf3db967fa240cb.dll` — and the importing modules
+  bind to those exact names. A replacement must be installed under the same
+  filename, and a replacement libheif must load libde265 by its hashed name.
+  The wheel's `DELVEWHEEL` file records that the renaming happened and ships in
+  the dist-info for the same reason.
 - **Corresponding source.** The archives linked in the table above are the
-  source for these exact versions. `scripts/corresponding-source.tsv` pins
-  them and the binding's own source distribution by SHA-256.
+  source for these exact versions, built unmodified. The build scripts are in
+  the `spectra/` directory of the fork. `scripts/corresponding-source.tsv` pins
+  the two library archives and the binding's own source archive by SHA-256.
   They are also available from us on request. The binding source is committed
-  in this repository at `vendor/wheels/pi_heif-1.4.0.tar.gz`.
+  in this repository at `vendor/wheels/pillow_heif-1.9.0+spectra.1.tar.gz`.
 
 ### Written source offer
 
@@ -655,14 +659,14 @@ resolves to a row in the manifest named in its section.
 
 ### Python runtime
 
-- CPython 3.14.10 from python-build-standalone release 20261026
+- CPython 3.15.2 from python-build-standalone release 20261124
   (`scripts/setup-python-embed.sh`). The build links OpenSSL, SQLite, libffi,
   XZ, bzip2, zlib, zlib-ng, expat, mpdecimal, libedit, ncurses, libuuid, Tcl/Tk,
   libX11, libXau, libxcb and Zstandard. Their licence texts, and `PYTHON.json`
   naming each linked library, ship at `python/licenses/`, taken from the full
   archive of the same build. The archive omits two of those texts; they are
   pinned in `scripts/python-linux-licenses/`:
-  - **Zstandard** 1.5.7 — BSD-3-Clause (elected from BSD-3-Clause OR
+  - **Zstandard** 1.6.0 — BSD-3-Clause (elected from BSD-3-Clause OR
     GPL-2.0-only) — <https://github.com/facebook/zstd> —
     `python/licenses/LICENSE.zstd.txt`
   - **zlib-ng** 2.2.4 — Zlib — <https://github.com/zlib-ng/zlib-ng> —
@@ -672,7 +676,7 @@ resolves to a row in the manifest named in its section.
   ship.
 - Packages: the versions of `scripts/python-requirements.txt`, resolved to
   manylinux wheels in `scripts/python-requirements-linux.txt`, plus the
-  manylinux pi-heif wheel in `scripts/vendored-wheels.tsv`. Each package's
+  manylinux pillow_heif wheel in `scripts/vendored-wheels.tsv`. Each package's
   licence texts ship in its `*.dist-info` directory, as on Windows.
 - The numpy manylinux wheel carries `libgfortran` (GPL-3.0-or-later WITH
   GCC-exception-3.1) and `libquadmath` (LGPL-2.1-or-later) in `numpy.libs/`.
