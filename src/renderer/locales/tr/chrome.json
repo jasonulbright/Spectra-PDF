@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "Lisans metni",
   "dialog.iccLicense.title": "Renk Profili Lisansı",
   "dialog.iccLicense.unreadable": "Lisans metni Spectra PDF’nin bu kopyasından okunamadı, bu yüzden kabul edilemez. Renk profilleri kullanılamaz durumda kalır.",
+  "dialog.imageImport.cutOff": "{{name}}: dosya yarım kalmış. Resmin bazı bölümleri eksik veya hatalı olabilir.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF sayfaları: {{pages}}): dosya yarım kalmış. Resmin bazı bölümleri eksik veya hatalı olabilir.",
   "dialog.ocr.langCount_one": "{{count}} dil",
   "dialog.ocr.langCount_other": "{{count}} dil",
   "dialog.ocr.langPair": "{{a}} + {{b}}",

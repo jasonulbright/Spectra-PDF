@@ -1673,6 +1673,8 @@
   "dialog.iccLicense.textLabel": "Text licencie",
   "dialog.iccLicense.title": "Licencia farebných profilov",
   "dialog.iccLicense.unreadable": "Text licencie sa z tejto kópie Spectra PDF nepodarilo prečítať, takže ju nemožno prijať. Farebné profily zostávajú nedostupné.",
+  "dialog.imageImport.cutOff": "{{name}}: súbor je skrátený. Časti obrázka môžu chýbať alebo byť chybné.",
+  "dialog.imageImport.cutOffPages": "{{name}} (strany PDF: {{pages}}): súbor je skrátený. Časti obrázka môžu chýbať alebo byť chybné.",
   "dialog.ocr.langCount_few": "{{count}} jazyky",
   "dialog.ocr.langCount_many": "{{count}} jazyka",
   "dialog.ocr.langCount_one": "{{count}} jazyk",

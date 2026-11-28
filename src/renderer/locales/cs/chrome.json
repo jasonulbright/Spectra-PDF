@@ -1673,6 +1673,8 @@
   "dialog.iccLicense.textLabel": "Text licence",
   "dialog.iccLicense.title": "Licence barevných profilů",
   "dialog.iccLicense.unreadable": "Text licence se z této kopie Spectra PDF nepodařilo přečíst, takže ji nelze přijmout. Barevné profily zůstávají nedostupné.",
+  "dialog.imageImport.cutOff": "{{name}}: soubor je oříznutý. Části obrázku mohou chybět nebo být chybné.",
+  "dialog.imageImport.cutOffPages": "{{name}} (stránky PDF: {{pages}}): soubor je oříznutý. Části obrázku mohou chybět nebo být chybné.",
   "dialog.ocr.langCount_few": "{{count}} jazyky",
   "dialog.ocr.langCount_many": "{{count}} jazyka",
   "dialog.ocr.langCount_one": "{{count}} jazyk",

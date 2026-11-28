@@ -54,6 +54,7 @@ import re
 from pathlib import Path
 
 import pikepdf
+from engine import heif_check
 from engine.credentials import open_pdf
 from pikepdf import Dictionary, Name
 
@@ -355,7 +356,7 @@ def _face_glyph_height_em(face_path: str) -> float:
         return _GLYPH_HEIGHT_EM
 
 
-def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int, int]:
+def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int, int, bool]:
     """The picture as ONE Image XObject in `pdf`: (object, px width, px height,
     frame count).
 
@@ -436,7 +437,7 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
     image = create_pdf_mod.image_xobject(
         pdf, first, jpeg=jpeg if first.mode == raw_mode else None, adobe=adobe, icc=icc
     )
-    return image, px_w, px_h, frames
+    return image, px_w, px_h, frames, heif_check.is_cut_off(src_path)
 
 
 def _page_content_bytes(page: pikepdf.Page) -> bytes:
@@ -916,6 +917,7 @@ def watermark(
     font_size_applied = 0.0
     tiles_per_page = 0
     image_frames = 0
+    image_incomplete = False
     pdf_page_count = 0
     with contextlib.ExitStack() as stack:
         pdf = stack.enter_context(open_pdf(file))
@@ -959,7 +961,7 @@ def watermark(
         image_obj = None
         stamp_px: tuple[float, float] = (0.0, 0.0)
         if has_image:
-            image_obj, px_w, px_h, image_frames = _embed_image(pdf, str(image).strip())
+            image_obj, px_w, px_h, image_frames, image_incomplete = _embed_image(pdf, str(image).strip())
             stamp_px = (float(px_w), float(px_h))
 
         # The lifted page embeds ONCE, on the same rule and for the same
@@ -1123,6 +1125,7 @@ def watermark(
         "layer": layer,
         "source": "pdf" if has_pdf else ("image" if has_image else "text"),
         "image_frames": image_frames,
+        "image_incomplete": image_incomplete,
         "pdf_pages": pdf_page_count,
         "pdf_page_used": page_number if has_pdf else 0,
         "scale_applied": round(scale_value, 4),

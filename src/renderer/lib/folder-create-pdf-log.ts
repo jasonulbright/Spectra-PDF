@@ -15,6 +15,8 @@
 import { formatDuration, formatTimestamp, sweepLogFileName } from './batch-log';
 import type { FolderCreatePdfReport, FolderResult } from './folder-create-pdf';
 import { folderLabel, summarize } from './folder-create-pdf';
+import { CUT_OFF_LOG_TEXT } from './cut-off';
+import { baseName } from './create-pdf';
 
 export interface FolderCreatePdfLogRun {
   startedAt: Date;
@@ -77,6 +79,9 @@ export function formatFolderCreatePdfLog(run: FolderCreatePdfLogRun): string {
       for (const r of report.results) {
         lines.push(folderLine(r));
         for (const warning of r.warnings ?? []) lines.push(`            ! ${warning}`);
+        for (const item of r.incomplete ?? []) {
+          lines.push(`            ! ${baseName(item.path)} (PDF pages: ${item.pages}): ${CUT_OFF_LOG_TEXT}`);
+        }
       }
     }
   }

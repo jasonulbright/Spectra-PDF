@@ -25,6 +25,7 @@ import {
   folderCreatePdfLogFileName,
   formatFolderCreatePdfLog,
 } from '../lib/folder-create-pdf-log';
+import { CutOffNotice } from './CutOffNotice';
 
 // Tools ▸ One PDF per Folder…: the folder scope of Create PDF.
 //
@@ -651,6 +652,9 @@ export function FolderCreatePdfDialog({
                       {w}
                     </div>
                   ))}
+                  <div className="ps-4">
+                    <CutOffNotice items={r.incomplete ?? []} testId="folder-create-pdf-cut-off" />
+                  </div>
                 </div>
               ))}
           </div>

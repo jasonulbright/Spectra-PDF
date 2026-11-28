@@ -18,6 +18,7 @@ import {
   type WatermarkWriting,
 } from '../lib/watermark-writing';
 import { RangeInput } from '../components/RangeInput';
+import { baseName } from '../lib/create-pdf';
 
 // Muted set for stamp text — full-strength annotation colors read as marker
 // ink, not a watermark.
@@ -140,6 +141,7 @@ export function WatermarkPanel(): React.ReactElement {
       const answer = result as unknown as {
         pages_watermarked?: number;
         image_frames?: number;
+        image_incomplete?: boolean;
         writing_mode?: unknown;
       } | null;
       const count = answer?.pages_watermarked ?? 0;
@@ -149,6 +151,9 @@ export function WatermarkPanel(): React.ReactElement {
         joinSentences([
           tChromeCount('panel.watermark.done', count),
           ...(frames > 1 ? [tChromeCount('panel.watermark.usedFirstFrame', frames)] : []),
+          ...(answer?.image_incomplete
+            ? [tChrome('dialog.imageImport.cutOff', { name: baseName(imagePath.trim()) })]
+            : []),
         ]),
       );
     } catch (e: unknown) {

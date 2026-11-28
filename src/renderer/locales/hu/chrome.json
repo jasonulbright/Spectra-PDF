@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "A licenc szövege",
   "dialog.iccLicense.title": "Színprofilok licence",
   "dialog.iccLicense.unreadable": "A licenc szövegét nem sikerült beolvasni a Spectra PDF e példányából, ezért nem fogadható el. A színprofilok továbbra sem érhetők el.",
+  "dialog.imageImport.cutOff": "{{name}}: a fájl csonka. A kép egyes részei hiányozhatnak vagy hibásak lehetnek.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF-oldalak: {{pages}}): a fájl csonka. A kép egyes részei hiányozhatnak vagy hibásak lehetnek.",
   "dialog.ocr.langCount_one": "{{count}} nyelv",
   "dialog.ocr.langCount_other": "{{count}} nyelv",
   "dialog.ocr.langPair": "{{a}} + {{b}}",

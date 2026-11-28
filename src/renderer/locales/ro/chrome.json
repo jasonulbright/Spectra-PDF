@@ -1620,6 +1620,8 @@
   "dialog.iccLicense.textLabel": "Textul licenței",
   "dialog.iccLicense.title": "Licența profilurilor de culoare",
   "dialog.iccLicense.unreadable": "Textul licenței nu a putut fi citit din această copie a Spectra PDF, așa că nu poate fi acceptată. Profilurile de culoare rămân indisponibile.",
+  "dialog.imageImport.cutOff": "{{name}}: fișierul este trunchiat. Unele părți ale imaginii pot lipsi sau pot fi greșite.",
+  "dialog.imageImport.cutOffPages": "{{name}} (pagini PDF: {{pages}}): fișierul este trunchiat. Unele părți ale imaginii pot lipsi sau pot fi greșite.",
   "dialog.ocr.langCount_few": "{{count}} limbi",
   "dialog.ocr.langCount_one": "{{count}} limbă",
   "dialog.ocr.langCount_other": "{{count}} de limbi",

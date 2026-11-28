@@ -1514,6 +1514,8 @@
   "dialog.iccLicense.textLabel": "라이선스 본문",
   "dialog.iccLicense.title": "색상 프로파일 라이선스",
   "dialog.iccLicense.unreadable": "이 Spectra PDF 사본에서 라이선스 본문을 읽지 못했으므로 동의할 수 없습니다. 색상 프로파일은 계속 사용할 수 없습니다.",
+  "dialog.imageImport.cutOff": "{{name}}: 파일이 잘려 있습니다. 그림의 일부가 없거나 잘못되었을 수 있습니다.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF 페이지: {{pages}}): 파일이 잘려 있습니다. 그림의 일부가 없거나 잘못되었을 수 있습니다.",
   "dialog.ocr.langCount_other": "{{count}}개 언어",
   "dialog.ocr.langPair": "{{a}} + {{b}}",
   "dialog.openWeb.cancel": "취소",

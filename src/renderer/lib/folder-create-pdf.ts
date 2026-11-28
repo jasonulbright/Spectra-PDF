@@ -17,6 +17,7 @@
 // screen, and there is none here.
 
 import { engineMessageOf, joinDest } from './folder-sweep';
+import type { IncompleteSource } from './cut-off';
 
 /** One directory that will become one PDF, as the engine listed it. */
 export interface SourceFolder {
@@ -100,6 +101,8 @@ export interface FolderResult {
   reason?: string;
   /** A member that could not be read, named. Never a silent drop. */
   warnings?: string[];
+  /** Members that were cut off and imported as far as they could be read. */
+  incomplete?: IncompleteSource[];
 }
 
 export interface FolderCreatePdfReport {
@@ -118,6 +121,7 @@ export interface FolderProgress {
 export interface BuildResult {
   pages: number;
   warnings?: string[];
+  incomplete?: IncompleteSource[];
 }
 
 export interface FolderCreatePdfIo {
@@ -162,6 +166,7 @@ export async function runFolderCreatePdf(
         files: group.count,
         pages: built.pages,
         ...(built.warnings && built.warnings.length > 0 ? { warnings: built.warnings } : {}),
+        ...(built.incomplete && built.incomplete.length > 0 ? { incomplete: built.incomplete } : {}),
       });
     } catch (err) {
       // A folder whose files cannot be converted is a RESULT. One folder's

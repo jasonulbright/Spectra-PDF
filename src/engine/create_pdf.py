@@ -27,6 +27,7 @@ from engine.credentials import open_pdf
 from pikepdf import Name
 
 from engine import distill as distill_mod
+from engine import heif_check
 from engine import gs_capability
 from engine import merge as merge_mod
 from engine import soffice as soffice_mod
@@ -289,7 +290,8 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
         dpi_default: the resolution assumed when the image stores none.
 
     Returns a report: pages, the per-page DPI actually used, and the first
-    page's size in points.
+    page's size in points. `incomplete` is present and true for a HEIF file that
+    is cut off: the pages were built from what could be read.
     """
     from PIL import Image, UnidentifiedImageError  # noqa: PLC0415
 
@@ -361,12 +363,15 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     save_pdf(merged, str(dest_path))
 
-    return {
+    report = {
         "output": str(dest_path),
         "pages": len(sizes),
         "dpi": [round(r, 2) for r in resolutions],
         "page_size": [round(sizes[0][0], 2), round(sizes[0][1], 2)],
     }
+    if heif_check.is_cut_off(src_path):
+        report["incomplete"] = True
+    return report
 
 
 # --------------------------------------------------------------------------
@@ -674,6 +679,8 @@ def _convert_one(
             page_size=report["page_size"],
             _file=str(dest),
         )
+        if report.get("incomplete"):
+            row["incomplete"] = True
     elif detected == _KIND_OFFICE:
         dest = scratch / f"{index:04d}-office.pdf"
         report = soffice_mod.to_pdf(path, dest, soffice_path)
@@ -699,6 +706,20 @@ def _convert_one(
         row["_file"] = str(ranged)
         row["page_range"] = page_range
     return row
+
+
+def _incomplete_sources(rows: list[dict]) -> list[dict]:
+    """Each source built from a cut-off file, with the output pages it became
+    (``"3"`` or ``"3-4"``). A skipped row has no pages."""
+    found = []
+    first = 1
+    for row in rows:
+        count = int(row.get("pages") or 0)
+        if row.get("incomplete") and count:
+            last = first + count - 1
+            found.append({"path": row["path"], "pages": str(first) if count == 1 else f"{first}-{last}"})
+        first += count
+    return found
 
 
 def create_pdf(
@@ -830,6 +851,9 @@ def create_pdf(
         }
         if merged.get("fields_renamed"):
             result["fields_renamed"] = merged["fields_renamed"]
+        incomplete = _incomplete_sources(rows)
+        if incomplete:
+            result["incomplete"] = incomplete
         if warnings:
             result["warnings"] = warnings
         return result

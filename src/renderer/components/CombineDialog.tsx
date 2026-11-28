@@ -42,6 +42,8 @@ import {
 import { claimOutputFile } from '../lib/output-root-claim';
 import { useRowDrag, rowDragClass } from './useRowDrag';
 import { PathText } from './PathText';
+import { CutOffNotice } from './CutOffNotice';
+import { incompleteSources } from '../lib/cut-off';
 
 // Document ▸ Combine Files.
 //
@@ -76,6 +78,7 @@ interface CombineResult {
   pages: number;
   sources: CombineSourceReport[];
   warnings?: string[];
+  incomplete?: unknown;
 }
 
 export function CombineDialog({
@@ -120,6 +123,8 @@ export function CombineDialog({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CombineResult | null>(null);
   const [appended, setAppended] = useState<{ pages: number; name: string } | null>(null);
+  // Cut-off pictures an append imported: its engine results are one per member.
+  const [appendedCutOff, setAppendedCutOff] = useState<string[]>([]);
   const listRef = useRef<HTMLUListElement | null>(null);
   const reorder = useCallback(
     (from: number, to: number) => setRows((prev) => reorderRows(prev, from, to)),
@@ -259,6 +264,7 @@ export function CombineDialog({
       const sep = dir.includes('\\') ? '\\' : '/';
       const tools = await toolPaths();
       const produced: string[] = [];
+      const cutOff: string[] = [];
       let pages = 0;
       for (const row of sourceRows) {
         const spec = (row.pages ?? '').trim();
@@ -298,6 +304,7 @@ export function CombineDialog({
           )) as unknown as CombineResult;
           produced.push(temp);
           pages += r.pages;
+          cutOff.push(...incompleteSources(r.incomplete).map((item) => item.path));
           setRows((prev) => setRowContributed(prev, row.id, r.pages));
         } catch (err) {
           // Per-member isolation, the same contract the `skip` run has: the
@@ -311,6 +318,7 @@ export function CombineDialog({
         throw new Error(tChrome('dialog.combine.nothingConverted'));
       }
       await onAppend(docId, produced);
+      setAppendedCutOff(cutOff);
       setAppended({ pages, name });
       return pages;
     },
@@ -335,6 +343,7 @@ export function CombineDialog({
       setError(null);
       setResult(null);
       setAppended(null);
+      setAppendedCutOff([]);
       setRows((prev) => clearRowResults(prev));
       try {
         if (runTarget === 'append') {
@@ -625,7 +634,12 @@ export function CombineDialog({
                 {warning}
               </p>
             ))}
+            <CutOffNotice items={incompleteSources(result.incomplete)} testId="combine-cut-off" />
           </div>
+        )}
+
+        {appended && (
+          <CutOffNotice items={appendedCutOff.map((path) => ({ path }))} testId="combine-appended-cut-off" />
         )}
 
         {appended && (

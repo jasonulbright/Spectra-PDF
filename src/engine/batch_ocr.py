@@ -38,6 +38,7 @@ from engine.compress import compress
 # ONE image wrap for the whole product. batch OCR was where it lived and
 # where its multi-frame data loss hid; it is now a first-class engine arm and
 # this module is a consumer like any other.
+from engine import heif_check
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.enhance_scan import enhance_scan
 from engine.inplace import (
@@ -744,6 +745,7 @@ def batch_ocr(
         enhance_note = ""
         enhance_applied = False
         expected_pages = 0
+        incomplete = False
         pdf = None
         try:
             source_for_open = abs_path
@@ -763,7 +765,7 @@ def batch_ocr(
                 # line is the shipped PDF path with no branch.
                 wrapped = scratch_path(out_path.parent, "image")
                 try:
-                    image_to_pdf(abs_path, wrapped)
+                    incomplete = bool(image_to_pdf(abs_path, wrapped).get("incomplete"))
                     source_for_open = wrapped
                 except Exception as exc:
                     wrapped.unlink(missing_ok=True)
@@ -999,6 +1001,8 @@ def batch_ocr(
                 out_path.unlink(missing_ok=True)
 
         if result is not None:
+            if incomplete:
+                result["incomplete"] = True
             results.append(result)
         if stopped:
             break
@@ -1324,6 +1328,8 @@ def _file_line(r: dict) -> str:
             if r.get("repairedOriginalReplaced")
             else " [repaired]"
         )
+    if r.get("incomplete"):
+        line += f" [{heif_check.LOG_TEXT}]"
     if r.get("movedTo"):
         line += f" -> original moved to {r['movedTo']}"
     if r.get("moveError"):

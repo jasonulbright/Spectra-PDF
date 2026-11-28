@@ -50,6 +50,7 @@ from engine.batch_ocr import (
     ocr_file,
 )
 from engine.compress import compress
+from engine import heif_check
 from engine.create_pdf import POSTSCRIPT_SUFFIXES
 from engine.create_pdf import accepted_suffixes as create_pdf_suffixes
 from engine.enhance_scan import enhance_scan
@@ -945,6 +946,7 @@ def run_action(
         else:
             out_path = dest_path / rel
         export_path = _export_out_path(dest_path, rel, clean_steps[-1]) if exports else None
+        incomplete: list[dict] = []
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if creates:
@@ -961,13 +963,14 @@ def run_action(
                 else:
                     build_params = dict(clean_steps[0]["params"])
                     members = [{"path": str(abs_path)}]
-                create_pdf(
+                built = create_pdf(
                     members,
                     str(out_path),
                     gs_path=gs_path,
                     soffice_path=soffice_path,
                     **build_params,
                 )
+                incomplete = built.get("incomplete", [])
                 applied = 1 + _apply_steps(str(out_path), transform_steps[1:], tool_paths)
             elif stages:
                 shutil.copy2(abs_path, out_path)
@@ -987,6 +990,8 @@ def run_action(
                     )
                 finish_staged(out_path, abs_path)
             row: dict = {"rel": rel, "status": "ok", "steps_applied": applied}
+            if incomplete:
+                row["incomplete"] = incomplete
             # The move gate reads the PROCESSED copy, so it is answered before a
             # terminal export consumes and removes it.
             processed_readable = (
@@ -1093,6 +1098,8 @@ def _write_action_log(
         if r["status"] == "ok":
             n = r["steps_applied"]
             lines.append(f"{tag}{r['rel']} — {n} step{'' if n == 1 else 's'} applied")
+            for item in r.get("incomplete", []):
+                lines.append(f"{' ' * 10}  ! {heif_check.log_line(item)}")
         else:
             lines.append(f"{tag}{r['rel']} — {r['error']}")
     lines.append("")

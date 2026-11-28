@@ -1673,6 +1673,8 @@
   "dialog.iccLicense.textLabel": "Текст ліцензії",
   "dialog.iccLicense.title": "Ліцензія на колірні профілі",
   "dialog.iccLicense.unreadable": "Не вдалося прочитати текст ліцензії з цієї копії Spectra PDF, тому прийняти її неможливо. Колірні профілі залишаються недоступними.",
+  "dialog.imageImport.cutOff": "{{name}}: файл обрізаний. Частини зображення можуть бути відсутні або неправильні.",
+  "dialog.imageImport.cutOffPages": "{{name}} (сторінки PDF: {{pages}}): файл обрізаний. Частини зображення можуть бути відсутні або неправильні.",
   "dialog.ocr.langCount_few": "{{count}} мови",
   "dialog.ocr.langCount_many": "{{count}} мов",
   "dialog.ocr.langCount_one": "{{count}} мова",

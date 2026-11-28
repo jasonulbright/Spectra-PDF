@@ -57,6 +57,8 @@ import {
   tStepHint,
   tStepPlaceholder,
 } from '../i18n';
+import { CutOffNotice } from '../components/CutOffNotice';
+import { incompleteSources } from '../lib/cut-off';
 
 // Guided actions are named sequences of existing gated engine operations,
 // authored in a compact editor and
@@ -83,7 +85,7 @@ interface FolderReport {
   total: number;
   ok: number;
   failed: number;
-  results: { rel: string; status: string; steps_applied?: number; error?: string }[];
+  results: { rel: string; status: string; steps_applied?: number; error?: string; incomplete?: unknown }[];
   log_path?: string;
 }
 
@@ -885,6 +887,10 @@ export function GuidedActionsPanel(): React.ReactElement {
                   ))}
               </div>
             )}
+            <CutOffNotice
+              items={report.results.flatMap((r) => incompleteSources(r.incomplete))}
+              testId="folderrun-cut-off"
+            />
             {report.log_path && (
               <p className="text-xs text-neutral-500" data-testid="folderrun-log">
                 {tChrome('panel.ga.log', { path: report.log_path })}

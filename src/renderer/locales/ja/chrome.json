@@ -1514,6 +1514,8 @@
   "dialog.iccLicense.textLabel": "ライセンス本文",
   "dialog.iccLicense.title": "カラープロファイルのライセンス",
   "dialog.iccLicense.unreadable": "この Spectra PDF のコピーからライセンス本文を読み取れなかったため、同意できません。カラープロファイルは利用できないままです。",
+  "dialog.imageImport.cutOff": "{{name}}: ファイルが途中で切れています。画像の一部が欠けているか、正しくない可能性があります。",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF のページ: {{pages}}): ファイルが途中で切れています。画像の一部が欠けているか、正しくない可能性があります。",
   "dialog.ocr.langCount_other": "{{count}} 言語",
   "dialog.ocr.langPair": "{{a}} + {{b}}",
   "dialog.openWeb.cancel": "キャンセル",

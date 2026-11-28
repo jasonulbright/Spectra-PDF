@@ -1620,6 +1620,8 @@
   "dialog.iccLicense.textLabel": "Texto da licença",
   "dialog.iccLicense.title": "Licença dos perfis de cor",
   "dialog.iccLicense.unreadable": "Não foi possível ler o texto da licença nesta cópia do Spectra PDF, portanto ela não pode ser aceita. Os perfis de cor continuam indisponíveis.",
+  "dialog.imageImport.cutOff": "{{name}}: o arquivo está truncado. Partes da imagem podem estar ausentes ou incorretas.",
+  "dialog.imageImport.cutOffPages": "{{name}} (páginas do PDF: {{pages}}): o arquivo está truncado. Partes da imagem podem estar ausentes ou incorretas.",
   "dialog.ocr.langCount_many": "{{count}} idiomas",
   "dialog.ocr.langCount_one": "{{count}} idioma",
   "dialog.ocr.langCount_other": "{{count}} idiomas",

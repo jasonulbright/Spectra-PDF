@@ -58,6 +58,8 @@ import {
 import { WebCaptureDialog } from './WebCaptureDialog';
 import { PathText } from './PathText';
 import { platformCapability } from '../lib/platform-capabilities';
+import { CutOffNotice } from './CutOffNotice';
+import { incompleteSources } from '../lib/cut-off';
 
 // File ▸ Create PDF: ONE door for images, Office /
 // text / web documents, PostScript and a blank page. A MENU dialog, not a
@@ -85,6 +87,8 @@ interface PerFileOutcome {
   source: string;
   output?: string;
   error?: string;
+  /** The source file is cut off. */
+  cutOff?: boolean;
 }
 
 interface PerFileResult {
@@ -98,6 +102,7 @@ interface CreatePdfResult {
   pages: number;
   sources: CreatePdfSourceReport[];
   warnings?: string[];
+  incomplete?: unknown;
 }
 
 export function CreatePdfDialog({
@@ -438,7 +443,7 @@ export function CreatePdfDialog({
           try {
             reservation = await reserveFreeOutput(target.desired, freeName, claimName);
             const out = reservation.out;
-            await track('create_pdf', { file: out }, () =>
+            const built = (await track('create_pdf', { file: out }, () =>
               callRaw('create_pdf', {
                 sources: toEngineSources([target.row]),
                 output: out,
@@ -449,8 +454,12 @@ export function CreatePdfDialog({
                 soffice_path: sofficePath,
                 distill_preset: options.preset ?? 'printer',
               }),
-            );
-            outcomes.push({ source, output: out });
+            )) as unknown as CreatePdfResult;
+            outcomes.push({
+              source,
+              output: out,
+              ...(incompleteSources(built.incomplete).length > 0 ? { cutOff: true } : {}),
+            });
           } catch (err) {
             // Every later source would fail the same way.
             if (err instanceof MissingContractError) throw err;
@@ -858,6 +867,7 @@ export function CreatePdfDialog({
                 {warning}
               </p>
             ))}
+            <CutOffNotice items={incompleteSources(result.incomplete)} testId="create-pdf-cut-off" />
           </div>
         )}
 
@@ -882,6 +892,10 @@ export function CreatePdfDialog({
                 {tChromeCount('dialog.createPdf.perFileStopped', perFile.stopped)}
               </p>
             )}
+            <CutOffNotice
+              items={perFile.outcomes.filter((o) => o.cutOff).map((o) => ({ path: o.source }))}
+              testId="create-pdf-perfile-cut-off"
+            />
             <ul className="mt-1 flex flex-col gap-0.5 max-h-32 overflow-y-auto text-xs">
               {perFile.outcomes.map((outcome) => (
                 <li

@@ -1620,6 +1620,8 @@
   "dialog.iccLicense.textLabel": "Texto de la licencia",
   "dialog.iccLicense.title": "Licencia de perfiles de color",
   "dialog.iccLicense.unreadable": "No se ha podido leer el texto de la licencia en esta copia de Spectra PDF, por lo que no se puede aceptar. Los perfiles de color siguen sin estar disponibles.",
+  "dialog.imageImport.cutOff": "{{name}}: el archivo está cortado. Pueden faltar partes de la imagen o ser incorrectas.",
+  "dialog.imageImport.cutOffPages": "{{name}} (páginas del PDF: {{pages}}): el archivo está cortado. Pueden faltar partes de la imagen o ser incorrectas.",
   "dialog.ocr.langCount_many": "{{count}} idiomas",
   "dialog.ocr.langCount_one": "{{count}} idioma",
   "dialog.ocr.langCount_other": "{{count}} idiomas",
