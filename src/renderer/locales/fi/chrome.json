@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "Käyttöoikeussopimuksen teksti",
   "dialog.iccLicense.title": "Väriprofiilien käyttöoikeus",
   "dialog.iccLicense.unreadable": "Käyttöoikeussopimuksen tekstiä ei voitu lukea tästä Spectra PDF -kopiosta, joten sitä ei voi hyväksyä. Väriprofiilit pysyvät poissa käytöstä.",
+  "dialog.imageImport.cutOff": "{{name}}: tiedosto on katkennut. Kuvasta voi puuttua osia, tai osat voivat olla virheellisiä.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF-sivut: {{pages}}): tiedosto on katkennut. Kuvasta voi puuttua osia, tai osat voivat olla virheellisiä.",
   "dialog.ocr.langCount_one": "{{count}} kieli",
   "dialog.ocr.langCount_other": "{{count}} kieltä",
   "dialog.ocr.langPair": "{{a}} + {{b}}",

@@ -1673,6 +1673,8 @@
   "dialog.iccLicense.textLabel": "Besedilo licence",
   "dialog.iccLicense.title": "Licenca barvnih profilov",
   "dialog.iccLicense.unreadable": "Besedila licence iz te kopije Spectra PDF ni bilo mogoče prebrati, zato je ni mogoče sprejeti. Barvni profili ostajajo nedosegljivi.",
+  "dialog.imageImport.cutOff": "{{name}}: datoteka je odrezana. Deli slike lahko manjkajo ali so napačni.",
+  "dialog.imageImport.cutOffPages": "{{name}} (strani PDF: {{pages}}): datoteka je odrezana. Deli slike lahko manjkajo ali so napačni.",
   "dialog.ocr.langCount_few": "{{count}} jeziki",
   "dialog.ocr.langCount_one": "{{count}} jezik",
   "dialog.ocr.langCount_other": "{{count}} jezikov",

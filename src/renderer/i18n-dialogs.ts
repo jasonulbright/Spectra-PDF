@@ -468,6 +468,8 @@ export const DIALOG_STRINGS = {
     'Step {{index}} ({{step}}) asks for values when it runs ({{params}}) — a scheduled run has nobody to ask. Store the values in the action first.',
 
   'dialog.createPdf.title': 'Create PDF',
+  'dialog.imageImport.cutOff': '{{name}}: the file is cut off. Parts of the picture can be missing or wrong.',
+  'dialog.imageImport.cutOffPages': '{{name}} (PDF pages: {{pages}}): the file is cut off. Parts of the picture can be missing or wrong.',
   'dialog.createPdf.addFiles': 'Add Files…',
   'dialog.createPdf.addBlank': 'Add Blank Page',
   'dialog.createPdf.empty':

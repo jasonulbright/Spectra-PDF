@@ -205,7 +205,7 @@ class TestRunAction:
 
         calls = []
 
-        def cancel_on_second(path, steps, tools, named=""):
+        def cancel_on_second(path, steps, tools, named="", cut_off=None):
             calls.append(path)
             if len(calls) == 2:
                 raise RequestCancelled()

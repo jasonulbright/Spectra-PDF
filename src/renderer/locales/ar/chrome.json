@@ -1779,6 +1779,8 @@
   "dialog.iccLicense.textLabel": "نص الترخيص",
   "dialog.iccLicense.title": "ترخيص ملفات تعريف الألوان",
   "dialog.iccLicense.unreadable": "تعذّرت قراءة نص الترخيص من هذه النسخة من Spectra PDF، لذا لا يمكن قبوله. وتبقى ملفات تعريف الألوان غير متاحة.",
+  "dialog.imageImport.cutOff": "{{name}}: الملف مبتور. قد تكون أجزاء من الصورة مفقودة أو خاطئة.",
+  "dialog.imageImport.cutOffPages": "{{name}} (صفحات PDF: {{pages}}): الملف مبتور. قد تكون أجزاء من الصورة مفقودة أو خاطئة.",
   "dialog.ocr.langCount_few": "{{count}} لغات",
   "dialog.ocr.langCount_many": "{{count}} لغةً",
   "dialog.ocr.langCount_one": "{{count}} لغة",

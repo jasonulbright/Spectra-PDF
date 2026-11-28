@@ -1620,6 +1620,8 @@
   "dialog.iccLicense.textLabel": "Texte de la licence",
   "dialog.iccLicense.title": "Licence des profils colorimétriques",
   "dialog.iccLicense.unreadable": "Le texte de la licence n’a pas pu être lu depuis cette copie de Spectra PDF ; elle ne peut donc pas être acceptée. Les profils colorimétriques restent indisponibles.",
+  "dialog.imageImport.cutOff": "{{name}}: le fichier est tronqué. Des parties de l’image peuvent manquer ou être erronées.",
+  "dialog.imageImport.cutOffPages": "{{name}} (pages du PDF: {{pages}}): le fichier est tronqué. Des parties de l’image peuvent manquer ou être erronées.",
   "dialog.ocr.langCount_many": "{{count}} langues",
   "dialog.ocr.langCount_one": "{{count}} langue",
   "dialog.ocr.langCount_other": "{{count}} langues",

@@ -1673,6 +1673,8 @@
   "dialog.iccLicense.textLabel": "Tekst licencji",
   "dialog.iccLicense.title": "Licencja profili kolorów",
   "dialog.iccLicense.unreadable": "Nie udało się odczytać tekstu licencji z tej kopii Spectra PDF, więc nie można jej zaakceptować. Profile kolorów pozostają niedostępne.",
+  "dialog.imageImport.cutOff": "{{name}}: plik jest obcięty. Części obrazu może brakować lub mogą być błędne.",
+  "dialog.imageImport.cutOffPages": "{{name}} (strony PDF: {{pages}}): plik jest obcięty. Części obrazu może brakować lub mogą być błędne.",
   "dialog.ocr.langCount_few": "{{count}} języki",
   "dialog.ocr.langCount_many": "{{count}} języków",
   "dialog.ocr.langCount_one": "{{count}} język",

@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "Licentietekst",
   "dialog.iccLicense.title": "Licentie voor kleurprofielen",
   "dialog.iccLicense.unreadable": "De licentietekst kon niet uit deze kopie van Spectra PDF worden gelezen, dus zij kan niet worden aanvaard. De kleurprofielen blijven onbeschikbaar.",
+  "dialog.imageImport.cutOff": "{{name}}: het bestand is afgebroken. Delen van de afbeelding kunnen ontbreken of onjuist zijn.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF-pagina’s: {{pages}}): het bestand is afgebroken. Delen van de afbeelding kunnen ontbreken of onjuist zijn.",
   "dialog.ocr.langCount_one": "{{count}} taal",
   "dialog.ocr.langCount_other": "{{count}} talen",
   "dialog.ocr.langPair": "{{a}} + {{b}}",

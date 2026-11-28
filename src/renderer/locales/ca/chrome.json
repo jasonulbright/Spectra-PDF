@@ -1620,6 +1620,8 @@
   "dialog.iccLicense.textLabel": "Text de la llicència",
   "dialog.iccLicense.title": "Llicència dels perfils de color",
   "dialog.iccLicense.unreadable": "No s’ha pogut llegir el text de la llicència en aquesta còpia del Spectra PDF, de manera que no es pot acceptar. Els perfils de color continuen sense estar disponibles.",
+  "dialog.imageImport.cutOff": "{{name}}: el fitxer està tallat. Parts de la imatge poden faltar o ser incorrectes.",
+  "dialog.imageImport.cutOffPages": "{{name}} (pàgines del PDF: {{pages}}): el fitxer està tallat. Parts de la imatge poden faltar o ser incorrectes.",
   "dialog.ocr.langCount_many": "{{count}} idiomes",
   "dialog.ocr.langCount_one": "{{count}} idioma",
   "dialog.ocr.langCount_other": "{{count}} idiomes",

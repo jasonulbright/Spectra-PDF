@@ -980,6 +980,15 @@ In **General**, the group **Batch OCR logs** has the setting **Write a log file 
 
 ## Troubleshooting
 
+### A picture is cut off
+
+A copy or a download that stops early can leave an HEIC or HEIF file without its end. Spectra PDF imports the parts that it can read. The areas that are missing can look blank, gray, green or broken. A message names the file and says that the file is cut off.
+
+1. Look at each page that the picture became.
+2. Get a complete copy of the file, for example from the camera or the phone. Import it again.
+
+Spectra PDF finds only files that are cut off. It cannot find other damage in a picture. If there is no message, the picture can still be damaged.
+
 ### A file will not open
 
 1. Read the message. The dialog **Could Not Open** gives the reason.

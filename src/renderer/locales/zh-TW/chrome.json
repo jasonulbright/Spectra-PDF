@@ -1514,6 +1514,8 @@
   "dialog.iccLicense.textLabel": "授權內文",
   "dialog.iccLicense.title": "色彩設定檔授權",
   "dialog.iccLicense.unreadable": "無法從這份 Spectra PDF 複本中讀取授權內文，因此無法接受它。色彩設定檔仍然無法使用。",
+  "dialog.imageImport.cutOff": "{{name}}: 此檔案不完整（已被截斷）。圖片的部分內容可能遺失或有誤。",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF 頁面: {{pages}}): 此檔案不完整（已被截斷）。圖片的部分內容可能遺失或有誤。",
   "dialog.ocr.langCount_other": "{{count}} 種語言",
   "dialog.ocr.langPair": "{{a}} + {{b}}",
   "dialog.openWeb.cancel": "取消",

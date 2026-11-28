@@ -25,6 +25,7 @@ from pathlib import Path
 
 from engine.inplace import is_spectra_temp_name, write_text_staged
 from engine.batch_ocr import _format_duration, _format_timestamp, _pad, dest_conflicts_with_source
+from engine import heif_check
 from engine.create_pdf import IMAGE_SUFFIXES, accepted_suffixes, create_pdf
 
 # What a folder run takes. `images` is the default because a folder of scans is
@@ -202,6 +203,8 @@ def create_pdf_folders(
             }
             if built.get("warnings"):
                 row["warnings"] = built["warnings"]
+            if built.get("incomplete"):
+                row["incomplete"] = built["incomplete"]
             results.append(row)
         except Exception as exc:  # noqa: BLE001 — per-folder isolation is the contract
             try:
@@ -269,6 +272,8 @@ def _write_log(
             )
             for warning in r.get("warnings", []):
                 lines.append(f"{' ' * 10}  ! {warning}")
+            for item in r.get("incomplete", []):
+                lines.append(f"{' ' * 10}  ! {heif_check.log_line(item)}")
         else:
             lines.append(f"{tag}{r['output']} — {r['error']}")
     lines.append("")

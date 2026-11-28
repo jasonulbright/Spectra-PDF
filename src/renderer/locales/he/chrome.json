@@ -1620,6 +1620,8 @@
   "dialog.iccLicense.textLabel": "נוסח הרישיון",
   "dialog.iccLicense.title": "רישיון פרופילי צבע",
   "dialog.iccLicense.unreadable": "לא ניתן היה לקרוא את נוסח הרישיון מעותק זה של Spectra PDF, ולכן אי אפשר לקבל אותו. פרופילי הצבע נותרים בלתי זמינים.",
+  "dialog.imageImport.cutOff": "{{name}}: הקובץ קטוע. ייתכן שחלקים מהתמונה חסרים או שגויים.",
+  "dialog.imageImport.cutOffPages": "{{name}} (עמודי PDF: {{pages}}): הקובץ קטוע. ייתכן שחלקים מהתמונה חסרים או שגויים.",
   "dialog.ocr.langCount_one": "{{count}} שפה",
   "dialog.ocr.langCount_other": "{{count}} שפות",
   "dialog.ocr.langCount_two": "{{count}} שפות",

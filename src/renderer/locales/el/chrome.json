@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "Κείμενο της άδειας",
   "dialog.iccLicense.title": "Άδεια χρήσης προφίλ χρώματος",
   "dialog.iccLicense.unreadable": "Το κείμενο της άδειας δεν μπόρεσε να διαβαστεί από αυτό το αντίγραφο του Spectra PDF, οπότε δεν μπορεί να γίνει αποδεκτή. Τα προφίλ χρώματος παραμένουν μη διαθέσιμα.",
+  "dialog.imageImport.cutOff": "{{name}}: το αρχείο είναι περικομμένο. Τμήματα της εικόνας μπορεί να λείπουν ή να είναι λανθασμένα.",
+  "dialog.imageImport.cutOffPages": "{{name}} (σελίδες PDF: {{pages}}): το αρχείο είναι περικομμένο. Τμήματα της εικόνας μπορεί να λείπουν ή να είναι λανθασμένα.",
   "dialog.ocr.langCount_one": "{{count}} γλώσσα",
   "dialog.ocr.langCount_other": "{{count}} γλώσσες",
   "dialog.ocr.langPair": "{{a}} + {{b}}",

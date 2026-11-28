@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "Lisenstekst",
   "dialog.iccLicense.title": "Lisens for fargeprofiler",
   "dialog.iccLicense.unreadable": "Lisensteksten kunne ikke leses fra denne kopien av Spectra PDF, så den kan ikke godtas. Fargeprofilene forblir utilgjengelige.",
+  "dialog.imageImport.cutOff": "{{name}}: filen er avkortet. Deler av bildet kan mangle eller være feil.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF-sider: {{pages}}): filen er avkortet. Deler av bildet kan mangle eller være feil.",
   "dialog.ocr.langCount_one": "{{count}} språk",
   "dialog.ocr.langCount_other": "{{count}} språk",
   "dialog.ocr.langPair": "{{a}} + {{b}}",

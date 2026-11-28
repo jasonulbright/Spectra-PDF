@@ -6,6 +6,7 @@
 import { batch } from './tauri-bridge';
 import { parseFolderListing } from './folder-create-pdf';
 import type { BuildResult, FolderCreatePdfIo, FolderListing } from './folder-create-pdf';
+import { incompleteSources } from './cut-off';
 
 export interface FolderCreatePdfBuildOptions {
   pageSize: string;
@@ -62,10 +63,12 @@ export function createFolderCreatePdfIo(
         on_unsupported: 'skip',
         gs_path: tools.ghostscript,
         soffice_path: tools.soffice,
-      })) as { pages?: number; warnings?: string[] };
+      })) as { pages?: number; warnings?: string[]; incomplete?: unknown };
+      const incomplete = incompleteSources(built.incomplete);
       return {
         pages: typeof built.pages === 'number' ? built.pages : 0,
         ...(Array.isArray(built.warnings) ? { warnings: built.warnings } : {}),
+        ...(incomplete.length > 0 ? { incomplete } : {}),
       };
     },
     ensureParentDirs: (path) => batch.ensureParentDirs(path),

@@ -1567,6 +1567,8 @@
   "dialog.iccLicense.textLabel": "Lizenztext",
   "dialog.iccLicense.title": "Lizenz für Farbprofile",
   "dialog.iccLicense.unreadable": "Der Lizenztext konnte aus dieser Kopie von Spectra PDF nicht gelesen werden und kann daher nicht angenommen werden. Die Farbprofile bleiben nicht verfügbar.",
+  "dialog.imageImport.cutOff": "{{name}}: Die Datei ist abgeschnitten. Teile des Bildes können fehlen oder fehlerhaft sein.",
+  "dialog.imageImport.cutOffPages": "{{name}} (PDF-Seiten: {{pages}}): Die Datei ist abgeschnitten. Teile des Bildes können fehlen oder fehlerhaft sein.",
   "dialog.ocr.langCount_one": "{{count}} Sprache",
   "dialog.ocr.langCount_other": "{{count}} Sprachen",
   "dialog.ocr.langPair": "{{a}} + {{b}}",
