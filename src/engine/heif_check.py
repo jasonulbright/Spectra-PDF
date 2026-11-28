@@ -17,8 +17,13 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 # Brands of still images and image sequences coded with HEVC, and the two
-# general HEIF brands. AVIF has its own major brands and another decoder.
-_BRANDS = frozenset({b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx", b"mif1", b"msf1"})
+# general HEIF brands. AVIF has another decoder; it uses its own major brand or
+# a general one, and then names itself among the compatible brands.
+_HEVC_BRANDS = frozenset({b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx"})
+_GENERAL_BRANDS = frozenset({b"mif1", b"msf1"})
+_AVIF_BRANDS = frozenset({b"avif", b"avis"})
+# More compatible brands than any file names; the rest are not read.
+_BRAND_LIST_LIMIT = 4096
 # Top-level boxes whose loss costs picture data. Another box that overruns the
 # file can be bytes a camera appended after the HEIF data, which is not damage.
 _DATA_BOXES = frozenset({b"ftyp", b"meta", b"mdat", b"moov"})
@@ -131,6 +136,21 @@ def _extent_ends(iloc: bytes, allowance: list[int]) -> Iterator[int]:
         return
 
 
+def _is_heif(stream: BinaryIO) -> bool:
+    """True when the `ftyp` box at the start of `stream` says HEIF, not AVIF."""
+    head = stream.read(16)
+    if len(head) < 12 or head[4:8] != b"ftyp":
+        return False
+    major = head[8:12]
+    if major in _HEVC_BRANDS:
+        return True
+    if major not in _GENERAL_BRANDS:
+        return False
+    length = int.from_bytes(head[:4], "big")
+    listed = stream.read(max(0, min(length - len(head), _BRAND_LIST_LIMIT)))
+    return not any(listed[at : at + 4] in _AVIF_BRANDS for at in range(0, len(listed), 4))
+
+
 def is_cut_off(path: str | Path) -> bool:
     """True when `path` is a HEIF file that names data after its end.
 
@@ -140,8 +160,7 @@ def is_cut_off(path: str | Path) -> bool:
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as stream:
-            head = stream.read(12)
-            if len(head) < 12 or head[4:8] != b"ftyp" or head[8:12] not in _BRANDS:
+            if not _is_heif(stream):
                 return False
             allowance = [_ENTRY_LIMIT]
             for kind, body, end in _top_level(stream, size):

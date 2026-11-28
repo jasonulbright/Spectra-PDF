@@ -230,6 +230,25 @@ def test_a_guided_watermark_step_reports_the_cut_off_picture(tmp_path: Path, sou
     assert "! cut.heic: the file is cut off" in log
 
 
+@pytest.mark.parametrize(
+    ("major", "compatible", "reported"),
+    [
+        (b"mif1", (b"mif1", b"heic"), True),
+        (b"msf1", (b"hevc",), True),
+        (b"heic", (b"mif1", b"heic"), True),
+        (b"mif1", (b"mif1", b"avif"), False),
+        (b"msf1", (b"msf1", b"avis"), False),
+        (b"avif", (b"mif1",), False),
+    ],
+)
+def test_an_avif_with_a_general_brand_is_left_to_its_decoder(
+    tmp_path: Path, major: bytes, compatible: tuple[bytes, ...], reported: bool
+) -> None:
+    ftyp = _box(b"ftyp", major + bytes(4) + b"".join(compatible))
+    path = _heif(tmp_path, ftyp + struct.pack(">I4s", 4000, b"mdat"))
+    assert is_cut_off(path) is reported
+
+
 def test_the_batch_log_line_says_it() -> None:
     line = _file_line({"status": "ocr", "rel": "x.heic", "pagesOcrd": 1, "incomplete": True})
     assert line.endswith("[the file is cut off; parts of the picture can be missing or wrong]")
