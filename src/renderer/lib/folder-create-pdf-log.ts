@@ -80,7 +80,8 @@ export function formatFolderCreatePdfLog(run: FolderCreatePdfLogRun): string {
         lines.push(folderLine(r));
         for (const warning of r.warnings ?? []) lines.push(`            ! ${warning}`);
         for (const item of r.incomplete ?? []) {
-          lines.push(`            ! ${baseName(item.path)} (PDF pages: ${item.pages}): ${CUT_OFF_LOG_TEXT}`);
+          const pages = item.pages ? ` (PDF pages: ${item.pages})` : '';
+          lines.push(`            ! ${baseName(item.path)}${pages}: ${CUT_OFF_LOG_TEXT}`);
         }
       }
     }

@@ -1,8 +1,15 @@
 import { resolve } from 'node:path';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { waitForHarness, getState, invokeAppCommand, waitForDisplayedSelector } from '../support/harness.js';
+import {
+  waitForHarness,
+  getState,
+  invokeAppCommand,
+  waitForDisplayedSelector,
+  setReactInputValue,
+  setReactSelectValue,
+} from '../support/harness.js';
 
 // A cut-off HEIC picture through the REAL dialogs and the REAL engine: it is
 // still imported, and the dialog that imported it says that it is cut off. A
@@ -64,7 +71,9 @@ describe('a cut-off HEIC picture', () => {
     whole = resolve(FIXTURES, 'rgb8.heic');
   });
 
-  after(() => {
+  after(async () => {
+    await browser.execute(() => localStorage.removeItem('guided-actions'));
+    await invokeAppCommand('tools.close');
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -112,5 +121,47 @@ describe('a cut-off HEIC picture', () => {
     await $('[data-testid="combine-appended-cut-off"]').waitForDisplayed({ timeout: 30_000 });
     expect(await texts('combine-appended-cut-off')).toEqual([`holiday-cut.heic: ${SENTENCE}`]);
     await closeDialog('combine-dialog');
+  });
+
+  it('is named by a guided watermark step, on the open document and over a folder', async function () {
+    this.timeout(180_000);
+    expect(await invokeAppCommand('tools.open.actions')).toBe(true);
+    await $('[data-testid="action-new"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="action-new"]').click();
+    await setReactInputValue('[data-testid="action-name"]', 'Stamp picture');
+    await setReactSelectValue('[data-testid="action-add-op"]', 'watermark');
+    await $('[data-testid="action-add-step"]').click();
+    await $('[data-testid="action-step-0-image"]').waitForDisplayed();
+    await setReactInputValue('[data-testid="action-step-0-image"]', cut);
+    await $('[data-testid="action-save"]').click();
+    await $('[data-testid="actions-list"]').waitForDisplayed();
+    const stored = (await browser.execute(() =>
+      JSON.parse(localStorage.getItem('guided-actions') ?? '[]'),
+    )) as { id: string; name: string }[];
+    const action = stored.find((a) => a.name === 'Stamp picture')!;
+
+    await $(`[data-testid="action-run-${action.id}"]`).click();
+    await $('[data-testid="run-done"]').waitForDisplayed({ timeout: 60_000 });
+    expect(await texts('actions-run-cut-off')).toEqual([`holiday-cut.heic: ${SENTENCE}`]);
+    await $('[data-testid="run-close"]').click();
+
+    // Two documents take the same picture; the run names it one time.
+    const source = resolve(tmp, 'in');
+    mkdirSync(source);
+    for (const name of ['a.pdf', 'b.pdf']) copyFileSync(resolve(tmp, 'whole.pdf'), resolve(source, name));
+    const error = (await browser.executeAsync(
+      function (id: string, src: string, dst: string, done: (r: string | null) => void) {
+        (window as any).__SPECTRA_TEST__
+          .guidedRunFolder(id, {}, src, dst)
+          .then(() => done(null))
+          .catch((e: unknown) => done(String(e)));
+      },
+      action.id,
+      source,
+      resolve(tmp, 'stamped'),
+    )) as string | null;
+    expect(error).toBeNull();
+    await $('[data-testid="folderrun-cut-off"]').waitForDisplayed({ timeout: 60_000 });
+    expect(await texts('folderrun-cut-off')).toEqual([`holiday-cut.heic: ${SENTENCE}`]);
   });
 });

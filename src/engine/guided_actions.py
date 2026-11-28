@@ -759,11 +759,13 @@ def plan_gs(steps, source: str = "") -> dict:
     }
 
 
-def _apply_steps(path: str, steps: list[dict], tool_paths: dict, named: str = "") -> int:
+def _apply_steps(
+    path: str, steps: list[dict], tool_paths: dict, named: str = "", cut_off: list | None = None
+) -> int:
     """Run every step in-place on `path`; returns the count applied. `named` is
     where the document lands when it is not `path` itself (an in-place run
     stages it); a step that writes beside the document names its files after
-    it."""
+    it. `cut_off` receives each watermark picture a step reports as cut off."""
     for step in steps:
         spec = _STEPS[step["op"]]
         kwargs = dict(step["params"])
@@ -779,7 +781,11 @@ def _apply_steps(path: str, steps: list[dict], tool_paths: dict, named: str = ""
                 **kwargs,
             )
             continue
-        spec.fn(file=path, output=path, **kwargs)
+        report = spec.fn(file=path, output=path, **kwargs)
+        if cut_off is not None and isinstance(report, dict) and report.get("image_incomplete"):
+            entry = {"path": str(kwargs.get("image", "")).strip()}
+            if entry not in cut_off:
+                cut_off.append(entry)
     return len(steps)
 
 
@@ -970,8 +976,10 @@ def run_action(
                     soffice_path=soffice_path,
                     **build_params,
                 )
-                incomplete = built.get("incomplete", [])
-                applied = 1 + _apply_steps(str(out_path), transform_steps[1:], tool_paths)
+                incomplete = list(built.get("incomplete", []))
+                applied = 1 + _apply_steps(
+                    str(out_path), transform_steps[1:], tool_paths, cut_off=incomplete
+                )
             elif stages:
                 shutil.copy2(abs_path, out_path)
                 applied = _apply_steps(
@@ -979,6 +987,7 @@ def run_action(
                     transform_steps,
                     tool_paths,
                     named=str(abs_path) if in_place else "",
+                    cut_off=incomplete,
                 )
             else:
                 applied = 0

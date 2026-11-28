@@ -10,12 +10,15 @@ export function CutOffNotice({
   items: readonly { path: string; pages?: string }[];
   testId: string;
 }) {
-  if (items.length === 0) return null;
+  // One line per picture: a run over many files can report one watermark
+  // picture once for each of them.
+  const lines = new Map(items.map((item) => [`${item.path}\n${item.pages ?? ''}`, item]));
+  if (lines.size === 0) return null;
   return (
     <div role="alert">
-      {items.map((item) => (
+      {[...lines].map(([key, item]) => (
         <p
-          key={`${item.path} ${item.pages ?? ''}`}
+          key={key}
           className="text-xs text-amber-400 mt-1 [overflow-wrap:anywhere]"
           data-testid={testId}
         >

@@ -11,7 +11,10 @@ const ITEM = { path: 'C:\\photos\\set\\b-cut.heic', pages: '2' };
 
 describe('reading the engine report', () => {
   it('keeps well-formed entries and drops everything else', () => {
-    expect(incompleteSources([ITEM, { path: 'x' }, null, 'y', { path: 1, pages: '1' }])).toEqual([ITEM]);
+    const picture = { path: 'C:\\art\\stamp.heic' };
+    expect(
+      incompleteSources([ITEM, picture, { path: 'x', pages: 2 }, null, 'y', { path: 1, pages: '1' }]),
+    ).toEqual([ITEM, picture]);
     for (const value of [undefined, null, true, 'x', {}]) expect(incompleteSources(value)).toEqual([]);
   });
 
@@ -47,6 +50,11 @@ describe('the folder run', () => {
     const report = await run({ pages: 2, incomplete: [ITEM] });
     expect(report.results[0].incomplete).toEqual([ITEM]);
     expect(logOf(report)).toContain(`! b-cut.heic (PDF pages: 2): ${CUT_OFF_LOG_TEXT}`);
+  });
+
+  it('writes a picture that has no pages of its own', async () => {
+    const report = await run({ pages: 2, incomplete: [{ path: 'C:\\art\\stamp.heic' } as typeof ITEM] });
+    expect(logOf(report)).toContain(`! stamp.heic: ${CUT_OFF_LOG_TEXT}`);
   });
 
   it('says nothing for whole members', async () => {

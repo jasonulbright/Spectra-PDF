@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import struct
+import time
 from pathlib import Path
 
 import pytest
 
 from engine import create_pdf as create_pdf_mod
+from engine import heif_check
 from engine.batch_ocr import _file_line
 from engine.create_pdf_folders import create_pdf_folders
 from engine.guided_actions import run_action
@@ -171,6 +173,61 @@ def test_the_watermark_report_says_the_picture_is_cut_off(tmp_path: Path) -> Non
     cut = watermark(str(page), str(tmp_path / "cut.pdf"), image=str(_cut(tmp_path)))
     whole = watermark(str(page), str(tmp_path / "whole.pdf"), image=str(CORPUS / "rgb8.heic"))
     assert cut["image_incomplete"] is True and whole["image_incomplete"] is False
+
+
+def _file_with_iloc(tmp_path: Path, *tables: bytes) -> Path:
+    meta = _box(b"meta", bytes(4) + b"".join(_box(b"iloc", table) for table in tables))
+    return _heif(tmp_path, _box(b"ftyp", b"heic" + bytes(4)) + meta)
+
+
+def test_a_table_of_zero_width_fields_does_not_hold_the_check(tmp_path: Path) -> None:
+    # Version 0, every field 0 bytes wide: 1000 items of 65535 extents each, in
+    # a file of a few kilobytes.
+    items = struct.pack(">HHH", 1, 0, 0xFFFF) * 1000
+    path = _file_with_iloc(tmp_path, bytes(6) + struct.pack(">H", 1000) + items)
+    start = time.monotonic()
+    assert not is_cut_off(path)
+    assert time.monotonic() - start < 2
+
+
+def test_the_tables_of_one_file_share_a_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def table(offset: int) -> bytes:
+        return bytes([0, 0, 0, 0, 0x44, 0x00]) + struct.pack(">HHHHII", 1, 1, 0, 1, offset, 4)
+
+    # Two reads for each table (one item, one extent); the second table is the
+    # one that points past the end.
+    path = _file_with_iloc(tmp_path, table(0), table(5000))
+    assert is_cut_off(path)
+    monkeypatch.setattr(heif_check, "_ENTRY_LIMIT", 2)
+    assert not is_cut_off(path)
+
+
+@pytest.mark.parametrize("sources", ["images", "pdf"])
+def test_a_guided_watermark_step_reports_the_cut_off_picture(tmp_path: Path, sources: str) -> None:
+    import pikepdf
+
+    picture = _cut(tmp_path)
+    stamp = {"op": "watermark", "params": {"image": str(picture)}}
+    source = tmp_path / "in" / "set"
+    source.mkdir(parents=True)
+    if sources == "images":
+        (source / "a.heic").write_bytes((CORPUS / "rgb8.heic").read_bytes())
+        steps = [{"op": "create_pdf_folders", "params": {"sources": "images", "include_subfolders": True}}, stamp]
+    else:
+        with pikepdf.new() as pdf:
+            pdf.add_blank_page()
+            pdf.save(source / "a.pdf")
+        # Two steps with one picture report it one time.
+        steps = [stamp, stamp]
+    report = run_action(
+        str(tmp_path / "in"), str(tmp_path / "out"), steps,
+        action_name="stamp", log_dir=str(tmp_path / "log"), write_log=True,
+    )
+    [row] = report["results"]
+    assert row["status"] == "ok"
+    assert row["incomplete"] == [{"path": str(picture)}]
+    log = Path(report["log_path"]).read_text(encoding="utf-8")
+    assert "! cut.heic: the file is cut off" in log
 
 
 def test_the_batch_log_line_says_it() -> None:

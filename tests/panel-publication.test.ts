@@ -76,8 +76,8 @@ async function fixture() {
   drafts.change(draft, () => [emptyArticle('Submitted')]);
   const articlesRef = { get current() { return draft.articles; },
     set current(value) { drafts.change(draft, () => value); } };
-  const result = { status: '', loaded: null as OpenFile['buffer'], dirty: true, statuses: [] as unknown[] };
-  const fault = { read: false, engine: false, allow: true, after: () => {}, reads: 0, failReadAt: Infinity };
+  const result = { status: '', loaded: null as OpenFile['buffer'], dirty: true, statuses: [] as unknown[], cutOff: [] as string[] };
+  const fault = { read: false, engine: false, allow: true, after: () => {}, reads: 0, failReadAt: Infinity, imageCutOff: false };
   drafts.subscribe(() => {
     if (activeFileRef.current.workingPath !== draft.workingPath) return;
     result.dirty = draft.dirty;
@@ -99,7 +99,8 @@ async function fixture() {
     } else doc.getPage(0).setRotation(degrees(doc.getPage(0).getRotation().angle + 90));
     disk.set(String(params.output), await doc.save()); fault.after();
     if (fault.engine) throw new Error('injected engine after write');
-    return { output: params.output, filled: Object.keys(params.edits ?? {}).length, flattened: params.flatten === true };
+    return { output: params.output, filled: Object.keys(params.edits ?? {}).length, flattened: params.flatten === true,
+      ...(method === 'watermark' ? { image_incomplete: fault.imageCutOff } : {}) };
   };
   const transaction = {
     publish: async (id: string, [entry]: { stagedPath: string; expectedWorkingSha256: string; expectedStagedSha256: string }[]) => {
@@ -154,6 +155,7 @@ async function fixture() {
     setLoadedBuffer: (value: OpenFile['buffer']) => { result.loaded = value; },
     running: false, setRunning: () => {}, setView: () => {},
     setRunStatuses: (value: unknown[] | ((s: unknown[]) => unknown[])) => { result.statuses = typeof value === 'function' ? value(result.statuses) : value; },
+    setRunCutOff: (value: string[] | ((s: string[]) => string[])) => { result.cutOff = typeof value === 'function' ? value(result.cutOff) : value; },
     stepDefFor, engineMethodFor, buildStepParams, saveFile: async () => 'export', terminalOutputName: () => 'export',
     planAction, gsBlocker, gsPathFor, gsBlocked: () => false, gsRef: { current: null },
     audiverisBlocker, audiverisReady: () => true, recognizeBeside: async () => {},
@@ -247,6 +249,13 @@ describe('actual panel publication callbacks', () => {
     expect(now.undoStack).toHaveLength(1); expect(now.buffer).toEqual(f.disk.get('work'));
     expect((await PDFDocument.load(f.disk.get('work')!)).getPage(0).getRotation().angle).toBe(90);
     expect(f.result.statuses).toEqual(['done', { error: expect.stringContaining('injected read') }]);
+  });
+  it.each([true, false])('Guided Actions names a watermark picture only when it is cut off: %s', async (cut) => {
+    const f = await fixture(); f.fault.imageCutOff = cut; f.result.cutOff = ['stale'];
+    const step = newStep('watermark'); step.params = { ...step.params, text: '', image: 'C:/art/stamp.heic' };
+    await actual('panels/GuidedActionsPanel.tsx', 'executeRun', f.panelEnv)({ name: 'stamp', steps: [step] }, {});
+    expect(f.result.statuses).toEqual(['done']);
+    expect(f.result.cutOff).toEqual(cut ? ['C:/art/stamp.heic'] : []);
   });
   it('Guided Actions terminal output remains a separate file with no document undo', async () => {
     const f = await fixture();

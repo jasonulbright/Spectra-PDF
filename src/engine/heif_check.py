@@ -25,20 +25,29 @@ _DATA_BOXES = frozenset({b"ftyp", b"meta", b"mdat", b"moov"})
 # The item tables of real files are far below this. A larger `meta` box is not
 # read.
 _META_LIMIT = 32 * 1024 * 1024
+# The file is untrusted. These bound the work of the check whatever the file
+# declares: a still image has a few top-level boxes and, in its largest grids,
+# some thousands of items and extents.
+_TOP_LEVEL_LIMIT = 4096
+_ENTRY_LIMIT = 100_000
 #: What every run log says about such a file.
 LOG_TEXT = "the file is cut off; parts of the picture can be missing or wrong"
 
 
 def log_line(item: dict) -> str:
-    """One run-log line for a `create_pdf` ``incomplete`` entry."""
-    return f"{Path(item['path']).name} (PDF pages: {item['pages']}): {LOG_TEXT}"
+    """One run-log line for an ``incomplete`` entry. A watermark picture has no
+    output pages of its own, so ``pages`` can be absent."""
+    pages = f" (PDF pages: {item['pages']})" if item.get("pages") else ""
+    return f"{Path(item['path']).name}{pages}: {LOG_TEXT}"
 
 
 def _top_level(stream: BinaryIO, size: int) -> Iterator[tuple[bytes, int, int]]:
     """(type, payload start, box end) of each top-level box; the end can lie
     after the end of the file."""
     start = 0
-    while start + 8 <= size:
+    for _ in range(_TOP_LEVEL_LIMIT):
+        if start + 8 > size:
+            return
         stream.seek(start)
         header = stream.read(16)
         length, kind = struct.unpack_from(">I4s", header)
@@ -66,10 +75,17 @@ def _children(data: bytes) -> Iterator[tuple[bytes, bytes]]:
         start += length
 
 
-def _extent_ends(iloc: bytes) -> Iterator[int]:
+def _extent_ends(iloc: bytes, allowance: list[int]) -> Iterator[int]:
     """The end offset in the file of each item extent that `iloc` places at a
-    file offset. A table that stops early yields what it could be read to."""
+    file offset. A table that stops early yields what it could be read to.
+    Each item and extent read takes one from `allowance`, which the tables of
+    one file share."""
     position = 0
+
+    def spend() -> None:
+        allowance[0] -= 1
+        if allowance[0] < 0:
+            raise EOFError
 
     def read(width: int) -> int:
         nonlocal position
@@ -86,16 +102,23 @@ def _extent_ends(iloc: bytes) -> Iterator[int]:
             return
         sizes = read(1)
         offset_size, length_size = sizes >> 4, sizes & 15
+        if length_size == 0:
+            # No extent can name an end. With every field zero bytes wide, an
+            # extent would also use none of the table, and the counts alone
+            # would drive the loop.
+            return
         sizes = read(1)
         base_size = sizes >> 4
         index_size = sizes & 15 if version else 0
         id_size = 4 if version == 2 else 2
         for _ in range(read(id_size)):
+            spend()
             read(id_size)
             method = read(2) & 15 if version else 0
             data_reference = read(2)
             base = read(base_size)
             for _ in range(read(2)):
+                spend()
                 read(index_size)
                 offset = read(offset_size)
                 length = read(length_size)
@@ -120,6 +143,7 @@ def is_cut_off(path: str | Path) -> bool:
             head = stream.read(12)
             if len(head) < 12 or head[4:8] != b"ftyp" or head[8:12] not in _BRANDS:
                 return False
+            allowance = [_ENTRY_LIMIT]
             for kind, body, end in _top_level(stream, size):
                 if end > size and kind in _DATA_BOXES:
                     return True
@@ -129,7 +153,7 @@ def is_cut_off(path: str | Path) -> bool:
                 payload = stream.read(end - body)
                 # `meta` is a full box: four bytes of version and flags first.
                 for child, data in _children(payload[4:]):
-                    if child == b"iloc" and any(stop > size for stop in _extent_ends(data)):
+                    if child == b"iloc" and any(stop > size for stop in _extent_ends(data, allowance)):
                         return True
     except OSError:
         return False

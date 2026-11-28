@@ -116,6 +116,8 @@ export function GuidedActionsPanel(): React.ReactElement {
   const [listError, setListError] = useState<string | null>(null);
   const [runStatuses, setRunStatuses] = useState<StepStatus[]>([]);
   const [running, setRunning] = useState(false);
+  // Watermark pictures the open-document run reported as cut off.
+  const [runCutOff, setRunCutOff] = useState<string[]>([]);
   const gs = useGsCapability();
   const audiverisStatus = useAudiverisStatus();
   const { track } = useOperationQueue();
@@ -203,6 +205,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       // its gate. Never reuse consent across an intervening document edit.
       setView({ kind: 'run', action });
       setRunStatuses(action.steps.map(() => 'pending'));
+      setRunCutOff([]);
       // Recorded for the whole run: a move of the document waits for it.
       let written: () => void;
       try {
@@ -262,12 +265,17 @@ export function GuidedActionsPanel(): React.ReactElement {
             } else {
               const method = engineMethodFor(step.op);
               if (!isOpMethod(method)) throw new Error(tChrome('app.operation.unverified'));
+              const params = buildStepParams(step, values[i]);
               const result = await performOperation(activeFile.path, method, {
-                ...buildStepParams(step, values[i]),
+                ...params,
                 ...extras,
               }, { expectedWorkingPath: workingPath, structuralConsent: true });
               if (result === EDIT_DECLINED) throw new Error(tChrome('panel.spelling.reasonDeclined'));
               if (result === null) throw new Error(tChrome('refusal.file.noLongerOpen'));
+              if ((result as unknown as { image_incomplete?: boolean }).image_incomplete) {
+                const path = String((params as Record<string, unknown>).image ?? '').trim();
+                setRunCutOff((seen) => [...seen, path]);
+              }
             }
             setRunStatuses((s) => s.map((v, j) => (j === i ? 'done' : v)));
           } catch (e: unknown) {
@@ -948,6 +956,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             {tChrome('panel.ga.done')}
           </p>
         )}
+        <CutOffNotice items={runCutOff.map((path) => ({ path }))} testId="actions-run-cut-off" />
         {failed && (
           <p className="text-sm text-red-400" data-testid="run-failed">
             {tChrome('panel.ga.stopped')}
